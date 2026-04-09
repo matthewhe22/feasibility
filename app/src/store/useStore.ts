@@ -28,7 +28,7 @@ import {
   defaultOtherFinancingCosts,
 } from './defaults';
 
-export type TabId = 'admin' | 'input' | 'timeDist' | 'actuals' | 'internalDash' | 'externalDash' | 'charts';
+export type TabId = 'admin' | 'input' | 'timeDist' | 'actuals' | 'internalDash' | 'externalDash' | 'cashflow' | 'summary' | 'charts';
 
 interface AppState {
   activeTab: TabId;

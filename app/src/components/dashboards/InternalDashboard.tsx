@@ -22,7 +22,7 @@ function DashValue({ label, value, unit = '$', indent = false, bold = false, hig
 }
 
 function TableHeader({ children }: { children: React.ReactNode }) {
-  return <div className="bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded-t">{children}</div>;
+  return <div className="bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-t">{children}</div>;
 }
 
 function TableBox({ children, className = '' }: { children: React.ReactNode; className?: string }) {
@@ -47,7 +47,7 @@ export function InternalDashboard() {
   return (
     <div>
       <div className="text-center mb-4">
-        <h2 className="text-lg font-bold text-gray-800">Internal Feasibility Dashboard</h2>
+        <h2 className="text-lg font-bold text-blue-800">Internal Feasibility Dashboard</h2>
         <p className="text-xs text-gray-500">Checks: OK</p>
       </div>
 
@@ -99,7 +99,7 @@ export function InternalDashboard() {
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="bg-gray-100 text-gray-600">
+                  <tr className="bg-blue-50 text-blue-800">
                     <th className="px-2 py-1 text-left">Description</th>
                     <th className="px-2 py-1 text-right">Total</th>
                     <th className="px-2 py-1 text-right">JV Partner</th>
@@ -139,7 +139,7 @@ export function InternalDashboard() {
                     <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.jvPartner.profitShareBalance)}</td>
                     <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.kokoda.profitShareBalance)}</td>
                   </tr>
-                  <tr className="bg-gray-100 font-bold">
+                  <tr className="bg-blue-100 font-bold">
                     <td className="px-2 py-1">Total Profit Share</td>
                     <td className="px-2 py-1 text-right font-mono">{formatCurrency(er.total.totalProfitShare)}</td>
                     <td className="px-2 py-1 text-right font-mono">{formatCurrency(er.jvPartner.totalProfitShare)}</td>
@@ -159,7 +159,7 @@ export function InternalDashboard() {
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="bg-gray-100 text-gray-600">
+                  <tr className="bg-blue-50 text-blue-800">
                     <th className="px-2 py-1 text-left">Capital Stack</th>
                     <th className="px-2 py-1 text-right">LTC</th>
                     <th className="px-2 py-1 text-right">LVR</th>
@@ -185,7 +185,7 @@ export function InternalDashboard() {
                     <td className="px-2 py-0.5 text-right">{formatPercent(cs.equityLVR)}</td>
                     <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(cs.equityAmount)}</td>
                   </tr>
-                  <tr className="bg-gray-100 font-bold">
+                  <tr className="bg-blue-100 font-bold">
                     <td className="px-2 py-1" colSpan={3}>Total</td>
                     <td className="px-2 py-1 text-right font-mono">{formatCurrency(cs.total)}</td>
                   </tr>
@@ -200,7 +200,7 @@ export function InternalDashboard() {
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="bg-gray-100 text-gray-600">
+                  <tr className="bg-blue-50 text-blue-800">
                     <th className="px-2 py-1 text-left"></th>
                     <th className="px-2 py-1 text-right">Principal</th>
                     <th className="px-2 py-1 text-right">Interest</th>
@@ -220,7 +220,7 @@ export function InternalDashboard() {
                     <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.mezzInterest)}</td>
                     <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.mezzTotal)}</td>
                   </tr>
-                  <tr className="bg-gray-100 font-bold">
+                  <tr className="bg-blue-100 font-bold">
                     <td className="px-2 py-1">Total</td>
                     <td className="px-2 py-1 text-right font-mono">{formatCurrency(ds.totalPrincipal)}</td>
                     <td className="px-2 py-1 text-right font-mono">{formatCurrency(ds.totalInterest)}</td>
@@ -237,7 +237,7 @@ export function InternalDashboard() {
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="bg-gray-100 text-gray-600">
+                  <tr className="bg-blue-50 text-blue-800">
                     <th className="px-2 py-1 text-left"></th>
                     <th className="px-2 py-1 text-right">Senior</th>
                     <th className="px-2 py-1 text-right">Mezzanine</th>
@@ -249,7 +249,7 @@ export function InternalDashboard() {
                   <tr className="border-b"><td className="px-2 py-0.5">Line Fee</td><td className="px-2 py-0.5 text-right">{formatPercent(dr.seniorLineFee)}</td><td className="px-2 py-0.5 text-right">{formatPercent(dr.mezzLineFee)}</td><td className="px-2 py-0.5 text-right">{formatPercent(dr.landLineFee)}</td></tr>
                   <tr className="border-b"><td className="px-2 py-0.5">Margin</td><td className="px-2 py-0.5 text-right">{formatPercent(dr.seniorMargin)}</td><td className="px-2 py-0.5 text-right">{formatPercent(dr.mezzMargin)}</td><td className="px-2 py-0.5 text-right">{formatPercent(dr.landMargin)}</td></tr>
                   <tr className="border-b"><td className="px-2 py-0.5">BBSY</td><td className="px-2 py-0.5 text-right">{formatPercent(dr.seniorBBSY)}</td><td className="px-2 py-0.5 text-right">{formatPercent(dr.mezzBBSY)}</td><td className="px-2 py-0.5 text-right">{formatPercent(dr.landBBSY)}</td></tr>
-                  <tr className="bg-gray-100 font-bold"><td className="px-2 py-1">Total all in rate</td><td className="px-2 py-1 text-right">{formatPercent(dr.seniorAllIn)}</td><td className="px-2 py-1 text-right">{formatPercent(dr.mezzAllIn)}</td><td className="px-2 py-1 text-right">{formatPercent(dr.landAllIn)}</td></tr>
+                  <tr className="bg-blue-100 font-bold"><td className="px-2 py-1">Total all in rate</td><td className="px-2 py-1 text-right">{formatPercent(dr.seniorAllIn)}</td><td className="px-2 py-1 text-right">{formatPercent(dr.mezzAllIn)}</td><td className="px-2 py-1 text-right">{formatPercent(dr.landAllIn)}</td></tr>
                 </tbody>
               </table>
             </div>
