@@ -145,7 +145,13 @@ function GRVTable({ items, onChange }: {
           {items.map((item, idx) => (
             <tr key={item.code} className={`border-b border-gray-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
               <td className="px-2 py-0.5 text-gray-500">{item.code}</td>
-              <td className="px-2 py-0.5">{item.description}</td>
+              <td className="px-2 py-0.5">
+                  <input
+                    type="text" value={item.description}
+                    onChange={e => updateItem(idx, 'description', e.target.value)}
+                    className="w-full bg-transparent text-xs border-0 p-0 focus:ring-0"
+                  />
+                </td>
               <td className="px-2 py-0.5 text-[10px] text-gray-500">{item.revenueType}</td>
               <td className="px-1 py-0.5">
                 <input
@@ -347,7 +353,17 @@ export function MainInputTab() {
                 <tbody>
                   {inputs.sellingCosts.map((sc, idx) => (
                     <tr key={sc.code} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className="px-2 py-0.5">{sc.description}</td>
+                      <td className="px-2 py-0.5">
+                        <input
+                          type="text" value={sc.description}
+                          onChange={e => {
+                            const updated = [...inputs.sellingCosts];
+                            updated[idx] = { ...updated[idx], description: e.target.value };
+                            setInputs({ sellingCosts: updated });
+                          }}
+                          className="w-full bg-transparent text-xs border-0 p-0 focus:ring-0"
+                        />
+                      </td>
                       <td className="px-1 py-0.5">
                         <input type="text" value={(sc.salesCommission * 100).toFixed(4)}
                           onChange={e => {
