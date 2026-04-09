@@ -224,9 +224,14 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
 
   // Capital stack
   const seniorAmount = funding.seniorFacilitySize + funding.totalLandLoanInterest + funding.totalLandLoanFees;
-  const totalCapital = seniorAmount + funding.totalEquityInjected;
-  const ltc = totalCapital > 0 ? seniorAmount / totalCapital : 0;
-  const lvr = nrvValue > 0 ? seniorAmount / nrvValue : 0;
+  const mezzAmount = funding.mezzFacilitySize;
+  const totalCapital = seniorAmount + mezzAmount + funding.totalEquityInjected;
+  const seniorLTC = totalCost > 0 ? seniorAmount / totalCost : 0;
+  const seniorLVR = nrvValue > 0 ? seniorAmount / nrvValue : 0;
+  const mezzLTC = totalCost > 0 ? mezzAmount / totalCost : 0;
+  const mezzLVR = nrvValue > 0 ? mezzAmount / nrvValue : 0;
+  const equityLTC = totalCost > 0 ? funding.totalEquityInjected / totalCost : 0;
+  const equityLVR = nrvValue > 0 ? funding.totalEquityInjected / nrvValue : 0;
 
   // KPIs
   const equityContrib = funding.totalEquityInjected;
@@ -294,26 +299,26 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     },
     capitalStack: {
       seniorAmount,
-      seniorLTC: ltc,
-      seniorLVR: lvr,
-      mezzAmount: 0,
-      mezzLTC: ltc,
-      mezzLVR: lvr,
+      seniorLTC,
+      seniorLVR,
+      mezzAmount,
+      mezzLTC,
+      mezzLVR,
       equityAmount: equityContrib,
-      equityLTC: 1 - ltc,
-      equityLVR: 1 - lvr,
+      equityLTC,
+      equityLVR,
       total: totalCapital,
     },
     debtSummary: {
       seniorPrincipal: funding.seniorFacilitySize,
       seniorInterest: funding.totalSeniorInterest + funding.totalSeniorFees,
       seniorTotal: funding.seniorFacilitySize + funding.totalSeniorInterest + funding.totalSeniorFees,
-      mezzPrincipal: 0,
-      mezzInterest: 0,
-      mezzTotal: 0,
-      totalPrincipal: funding.seniorFacilitySize,
-      totalInterest: funding.totalSeniorInterest + funding.totalSeniorFees,
-      totalDebt: funding.seniorFacilitySize + funding.totalSeniorInterest + funding.totalSeniorFees,
+      mezzPrincipal: funding.mezzFacilitySize,
+      mezzInterest: funding.totalMezzInterest + funding.totalMezzFees,
+      mezzTotal: funding.mezzFacilitySize + funding.totalMezzInterest + funding.totalMezzFees,
+      totalPrincipal: funding.seniorFacilitySize + funding.mezzFacilitySize,
+      totalInterest: funding.totalSeniorInterest + funding.totalSeniorFees + funding.totalMezzInterest + funding.totalMezzFees,
+      totalDebt: funding.seniorFacilitySize + funding.totalSeniorInterest + funding.totalSeniorFees + funding.mezzFacilitySize + funding.totalMezzInterest + funding.totalMezzFees,
     },
     debtRates: {
       seniorEstablishment: inputs.seniorFacility.establishmentFeePercent,
