@@ -1,4 +1,6 @@
 import { useEffect } from 'react';
+
+declare const __BUILD_TIME__: string;
 import { useStore } from './store/useStore';
 import { runCalculations } from './engine';
 import { MainInputTab } from './components/inputs/MainInputTab';
@@ -89,7 +91,10 @@ function App() {
 
       {/* Footer */}
       <footer className="bg-gray-800 text-gray-500 text-xs text-center py-2">
-        Project Development Feasibility Model &mdash; Web Application
+        <div>Project Development Feasibility Model &mdash; Web Application</div>
+        <div className="text-gray-600 text-[10px] mt-0.5">
+          Last updated: {new Date(__BUILD_TIME__).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}
+        </div>
       </footer>
     </div>
   );
