@@ -17,14 +17,14 @@ export function ExternalDashboard() {
   const er = data.equityReturns;
 
   const Row = ({ label, value, bold = false, highlight = false }: { label: string; value: string; bold?: boolean; highlight?: boolean }) => (
-    <div className={`flex justify-between px-3 py-1 ${bold ? 'font-bold' : ''} ${highlight ? 'bg-blue-50' : ''}`}>
+    <div className={`flex justify-between px-3 py-1 ${bold ? 'font-bold' : ''} ${highlight ? 'bg-green-50' : ''}`}>
       <span className={`text-xs ${bold ? 'text-gray-800' : 'text-gray-600'}`}>{label}</span>
       <span className={`text-xs font-mono ${bold ? 'text-gray-800' : 'text-gray-700'}`}>{value}</span>
     </div>
   );
 
   const Header = ({ children }: { children: React.ReactNode }) => (
-    <div className="bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded-t">{children}</div>
+    <div className="bg-green-700 text-white text-xs font-bold px-3 py-1.5 rounded-t">{children}</div>
   );
 
   const Box = ({ children }: { children: React.ReactNode }) => (
@@ -34,7 +34,7 @@ export function ExternalDashboard() {
   return (
     <div>
       <div className="text-center mb-4">
-        <h2 className="text-lg font-bold text-gray-800">External Feasibility Dashboard</h2>
+        <h2 className="text-lg font-bold text-green-800">External Feasibility Dashboard</h2>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -79,7 +79,7 @@ export function ExternalDashboard() {
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="bg-gray-100">
+                  <tr className="bg-green-50">
                     <th className="px-2 py-1 text-left">Description</th>
                     <th className="px-2 py-1 text-right">Total</th>
                     <th className="px-2 py-1 text-right">JV Partner</th>
@@ -87,13 +87,13 @@ export function ExternalDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr className="bg-blue-50 font-semibold"><td colSpan={4} className="px-2 py-0.5">EQUITY IN</td></tr>
+                  <tr className="bg-green-50 font-semibold"><td colSpan={4} className="px-2 py-0.5">EQUITY IN</td></tr>
                   <tr className="border-b"><td className="px-2 py-0.5">Funding Contribution %</td><td className="px-2 py-0.5 text-right">{formatPercent(1)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.jvPartner.fundingContribPercent)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.kokoda.fundingContribPercent)}</td></tr>
                   <tr className="border-b"><td className="px-2 py-0.5">Equity Contributed</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.total.totalEquityContributed)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.jvPartner.totalEquityContributed)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.kokoda.totalEquityContributed)}</td></tr>
                   <tr className="border-b"><td className="px-2 py-0.5">IRR</td><td className="px-2 py-0.5 text-right">{formatPercent(er.total.irr)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.jvPartner.irr)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.kokoda.irr)}</td></tr>
-                  <tr className="bg-blue-50 font-semibold"><td colSpan={4} className="px-2 py-0.5">EQUITY OUT</td></tr>
+                  <tr className="bg-green-50 font-semibold"><td colSpan={4} className="px-2 py-0.5">EQUITY OUT</td></tr>
                   <tr className="border-b"><td className="px-2 py-0.5">Total Equity Repatriation</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.total.totalEquityRepatriation)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.jvPartner.totalEquityRepatriation)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.kokoda.totalEquityRepatriation)}</td></tr>
-                  <tr className="bg-gray-100 font-bold"><td className="px-2 py-1">Total Profit Share</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.total.totalProfitShare)}</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.jvPartner.totalProfitShare)}</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.kokoda.totalProfitShare)}</td></tr>
+                  <tr className="bg-green-100 font-bold"><td className="px-2 py-1">Total Profit Share</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.total.totalProfitShare)}</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.jvPartner.totalProfitShare)}</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.kokoda.totalProfitShare)}</td></tr>
                 </tbody>
               </table>
             </div>
@@ -105,12 +105,12 @@ export function ExternalDashboard() {
           <Box>
             <Header>Table 4 - Capital Stack</Header>
             <table className="w-full text-xs">
-              <thead><tr className="bg-gray-100"><th className="px-2 py-1 text-left"></th><th className="px-2 py-1 text-right">LTC</th><th className="px-2 py-1 text-right">LVR</th><th className="px-2 py-1 text-right">Total</th></tr></thead>
+              <thead><tr className="bg-green-50"><th className="px-2 py-1 text-left"></th><th className="px-2 py-1 text-right">LTC</th><th className="px-2 py-1 text-right">LVR</th><th className="px-2 py-1 text-right">Total</th></tr></thead>
               <tbody>
                 <tr className="border-b"><td className="px-2 py-0.5">Senior (Facility)</td><td className="px-2 py-0.5 text-right">{formatPercent(cs.seniorLTC)}</td><td className="px-2 py-0.5 text-right">{formatPercent(cs.seniorLVR)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(cs.seniorAmount)}</td></tr>
                 <tr className="border-b"><td className="px-2 py-0.5">Mezzanine</td><td className="px-2 py-0.5 text-right">{formatPercent(cs.mezzLTC)}</td><td className="px-2 py-0.5 text-right">{formatPercent(cs.mezzLVR)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(cs.mezzAmount)}</td></tr>
                 <tr className="border-b"><td className="px-2 py-0.5">Equity</td><td className="px-2 py-0.5 text-right">{formatPercent(cs.equityLTC)}</td><td className="px-2 py-0.5 text-right">{formatPercent(cs.equityLVR)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(cs.equityAmount)}</td></tr>
-                <tr className="bg-gray-100 font-bold"><td className="px-2 py-1" colSpan={3}>Total</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(cs.total)}</td></tr>
+                <tr className="bg-green-100 font-bold"><td className="px-2 py-1" colSpan={3}>Total</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(cs.total)}</td></tr>
               </tbody>
             </table>
           </Box>
@@ -119,11 +119,11 @@ export function ExternalDashboard() {
           <Box>
             <Header>Table 5 - Debt Summary</Header>
             <table className="w-full text-xs">
-              <thead><tr className="bg-gray-100"><th className="px-2 py-1 text-left"></th><th className="px-2 py-1 text-right">Principal</th><th className="px-2 py-1 text-right">Interest</th><th className="px-2 py-1 text-right">Total</th></tr></thead>
+              <thead><tr className="bg-green-50"><th className="px-2 py-1 text-left"></th><th className="px-2 py-1 text-right">Principal</th><th className="px-2 py-1 text-right">Interest</th><th className="px-2 py-1 text-right">Total</th></tr></thead>
               <tbody>
                 <tr className="border-b"><td className="px-2 py-0.5">Senior</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.seniorPrincipal)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.seniorInterest)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.seniorTotal)}</td></tr>
                 <tr className="border-b"><td className="px-2 py-0.5">Mezzanine</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.mezzPrincipal)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.mezzInterest)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.mezzTotal)}</td></tr>
-                <tr className="bg-gray-100 font-bold"><td className="px-2 py-1">Total</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(ds.totalPrincipal)}</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(ds.totalInterest)}</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(ds.totalDebt)}</td></tr>
+                <tr className="bg-green-100 font-bold"><td className="px-2 py-1">Total</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(ds.totalPrincipal)}</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(ds.totalInterest)}</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(ds.totalDebt)}</td></tr>
               </tbody>
             </table>
           </Box>

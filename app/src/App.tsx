@@ -4,14 +4,18 @@ import { runCalculations } from './engine';
 import { MainInputTab } from './components/inputs/MainInputTab';
 import { InternalDashboard } from './components/dashboards/InternalDashboard';
 import { ExternalDashboard } from './components/dashboards/ExternalDashboard';
+import { ProjectCashflow } from './components/dashboards/ProjectCashflow';
+import { ProjectSummary } from './components/dashboards/ProjectSummary';
 import { ChartsTab } from './components/charts/Charts';
 
-type TabId = 'input' | 'internalDash' | 'externalDash' | 'charts';
+type TabId = 'input' | 'internalDash' | 'externalDash' | 'cashflow' | 'summary' | 'charts';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'input', label: 'Inputs' },
   { id: 'internalDash', label: 'Internal Dashboard' },
   { id: 'externalDash', label: 'External Dashboard' },
+  { id: 'cashflow', label: 'Project Cashflow' },
+  { id: 'summary', label: 'Project Summary' },
   { id: 'charts', label: 'Charts & Visualisations' },
 ];
 
@@ -42,7 +46,7 @@ function App() {
       {/* Header */}
       <header className="bg-gray-800 text-white px-4 py-3 flex items-center justify-between shadow">
         <div>
-          <h1 className="text-lg font-bold tracking-wide">KK Feasibility Model</h1>
+          <h1 className="text-lg font-bold tracking-wide">Project Development Feasibility Model</h1>
           <p className="text-xs text-gray-400">Property Development Feasibility Analysis</p>
         </div>
         <button
@@ -78,12 +82,14 @@ function App() {
         {activeTab === 'input' && <MainInputTab />}
         {activeTab === 'internalDash' && <InternalDashboard />}
         {activeTab === 'externalDash' && <ExternalDashboard />}
+        {activeTab === 'cashflow' && <ProjectCashflow />}
+        {activeTab === 'summary' && <ProjectSummary />}
         {activeTab === 'charts' && <ChartsTab />}
       </main>
 
       {/* Footer */}
       <footer className="bg-gray-800 text-gray-500 text-xs text-center py-2">
-        KK Feasibility Model v43 &mdash; Web Application
+        Project Development Feasibility Model &mdash; Web Application
       </footer>
     </div>
   );
