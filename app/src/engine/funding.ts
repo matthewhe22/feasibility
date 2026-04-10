@@ -110,15 +110,14 @@ function runFundingWaterfall(
   const gstOnResidential = inputs.grvItems
     .filter(g => g.gstIncluded)
     .reduce((s, g) => s + g.currentSalePrice * inputs.landPurchase.gstRate / (1 + inputs.landPurchase.gstRate), 0);
-  const backEndSelling = inputs.grvItems.reduce((s, g, i) => {
-    const sc = inputs.sellingCosts[i];
+  const backEndSelling = inputs.grvItems.reduce((s, g, idx) => {
+    const sc = inputs.sellingCosts[idx];
     if (!sc) return s;
     return s + g.currentSalePrice * sc.salesCommission * (1 - sc.preCommissionPercent);
   }, 0);
   const nrv = totalGRV - gstOnResidential - backEndSelling;
 
   // ===== Facility limits from LTC/LVR =====
-  // LTC is on TDC INCLUDING finance costs (circular - resolved by iteration)
   const seniorLtcLimit = senior.ltcTarget > 0 ? tdc * senior.ltcTarget : Infinity;
   const seniorLvrLimit = senior.lvrTarget > 0 ? nrv * senior.lvrTarget : Infinity;
   const seniorLimit = Math.min(senior.facilityLimit, seniorLtcLimit, seniorLvrLimit);
@@ -138,11 +137,11 @@ function runFundingWaterfall(
     : equityFromPct;
 
   // ===== Timeline flags =====
-  // Senior starts when its startMonth is reached
   const snrStartIdx = senior.startMonth > 0 ? senior.startMonth - 1 : -1;
   const mezzStartIdx = mezz.startMonth > 0 ? mezz.startMonth - 1 : -1;
   const hasMezz = mezz.facilityLimit > 0 && mezzStartIdx >= 0;
   const hasSenior = senior.facilityLimit > 0 && snrStartIdx >= 0;
+  const llStartIdx = landLoan.startMonth > 0 ? landLoan.startMonth - 1 : -1;
 
   // ===== Initialize arrays =====
   const llBalance = new Array(n).fill(0);
@@ -177,7 +176,7 @@ function runFundingWaterfall(
   let cumulativeMezz = 0;
   let cumulativeSenior = 0;
   let cumulativeLandLoan = 0;
-  let cumulativeFinanceCosts = 0; // interest + fees accumulated
+  let cumulativeFinanceCosts = 0;
 
   let totalSeniorInterest = 0;
   let totalSeniorFees = 0;
@@ -190,64 +189,63 @@ function runFundingWaterfall(
   let totalSnrDrawn = 0;
   let totalMezzDrawn = 0;
 
-  // ===== PHASE 1: Forward pass - Drawdowns =====
+  const snrAllInRate = senior.margin + senior.bbsy;
+  const mezzAllInRate = mezz.margin + mezz.bbsy;
+
+  // ===== SINGLE PASS: Drawdowns + Repayments + Interest =====
   for (let i = 0; i < n; i++) {
     const days = periods[i].daysInPeriod;
-
-    // Accumulate costs
-    cumulativeCosts += monthlyCostsExcFinance[i];
+    const seniorActive = hasSenior && i >= snrStartIdx;
+    const mezzActive = hasMezz && i >= mezzStartIdx;
 
     // === LAND LOAN ===
-    const llStartIdx = landLoan.startMonth > 0 ? landLoan.startMonth - 1 : -1;
     if (i === llStartIdx && landLoan.facilityLimit > 0) {
       llDrawdowns[i] = landLoan.facilityLimit;
       cumulativeLandLoan += landLoan.facilityLimit;
+      llRunningBalance += landLoan.facilityLimit;
       const estFee = landLoan.facilityLimit * landLoan.establishmentFeePercent;
       llFees[i] = estFee;
       totalLandFees += estFee;
       cumulativeFinanceCosts += estFee;
     }
 
-    // Land loan interest
-    if (llRunningBalance > 0 || llDrawdowns[i] > 0) {
-      llRunningBalance += llDrawdowns[i];
+    // Land loan interest (on balance including drawdown in same period)
+    if (llRunningBalance > 0) {
       const interest = periodInterest(llRunningBalance, landLoan.interestRate, days, daysPerYear);
       llInterest[i] = interest;
       totalLandInterest += interest;
       cumulativeFinanceCosts += interest;
+    }
 
-      // Land loan repaid when senior starts (refinanced into senior)
-      if (hasSenior && i >= snrStartIdx && llRunningBalance > 0) {
-        llRepayments[i] = llRunningBalance;
-        llRunningBalance = 0;
-      }
+    // Land loan repaid when senior starts (refinanced into senior)
+    if (hasSenior && i === snrStartIdx && llRunningBalance > 0) {
+      llRepayments[i] = llRunningBalance;
+      llRunningBalance = 0;
     }
     llBalance[i] = llRunningBalance;
 
-    // === TOTAL FUNDING NEED ===
-    // What needs to be funded = cumulative costs + finance costs - cumulative funding sources
+    // === ACCUMULATE COSTS ===
+    cumulativeCosts += monthlyCostsExcFinance[i];
+
+    // === FUNDING GAP ===
     const totalNeed = cumulativeCosts + cumulativeFinanceCosts;
     const totalFunded = cumulativeEquity + cumulativeMezz + cumulativeSenior + cumulativeLandLoan;
     const gap = totalNeed - totalFunded;
 
-    // === EQUITY ===
-    // Equity funds everything before mezzanine/senior starts.
-    // Even beyond the equity cap if needed (excess gets repatriated later).
-    const mezzActive = hasMezz && i >= mezzStartIdx;
-    const seniorActive = hasSenior && i >= snrStartIdx;
+    // === EQUITY (before any debt starts) ===
+    const mezzActiveNow = mezzActive;
+    const seniorActiveNow = seniorActive;
 
-    if (gap > 0 && !seniorActive && !mezzActive) {
-      // Before any debt facility starts, equity funds everything
+    if (gap > 0 && !seniorActiveNow && !mezzActiveNow) {
       eqInjections[i] = gap;
       cumulativeEquity += gap;
-    } else if (gap > 0 && !seniorActive && mezzActive) {
-      // Mezz is active but senior isn't - equity funds up to cap, mezz funds rest
+    } else if (gap > 0 && !seniorActiveNow && mezzActiveNow) {
+      // Equity up to cap, mezz for rest
       if (cumulativeEquity < equityCap) {
         const eqNeeded = Math.min(gap, equityCap - cumulativeEquity);
         eqInjections[i] += eqNeeded;
         cumulativeEquity += eqNeeded;
       }
-      // Remaining gap goes to mezzanine
       const remainGap = totalNeed - (cumulativeEquity + cumulativeMezz + cumulativeSenior + cumulativeLandLoan);
       if (remainGap > 0 && totalMezzDrawn < mezzLimit) {
         const mezzDraw = Math.min(remainGap, mezzLimit - totalMezzDrawn);
@@ -258,61 +256,27 @@ function runFundingWaterfall(
       }
     }
 
-    // === MEZZANINE INTEREST (before senior, if active) ===
-    if (mzRunningBalance > 0) {
-      const mezzRate = mezz.margin + mezz.bbsy;
-      const mzInt = periodInterest(mzRunningBalance, mezzRate, days, daysPerYear);
-      mzInterest[i] = mzInt;
-      totalMezzInterest += mzInt;
-      cumulativeFinanceCosts += mzInt;
-      if (mezz.isCapitalised) {
-        mzRunningBalance += mzInt; // Capitalised
-      }
-
-      // Line fee
-      const mzLineFee = periodInterest(mezzLimit, mezz.lineFeePercent, days, daysPerYear);
-      if (mzLineFee > 0) {
-        mzFees[i] += mzLineFee;
-        totalMezzFees += mzLineFee;
-        cumulativeFinanceCosts += mzLineFee;
-        if (mezz.isCapitalised) mzRunningBalance += mzLineFee;
-      }
-
-      // Establishment fee (first period only)
-      if (i === mezzStartIdx) {
-        const mzEstFee = mezzLimit * mezz.establishmentFeePercent;
-        mzFees[i] += mzEstFee;
-        totalMezzFees += mzEstFee;
-        cumulativeFinanceCosts += mzEstFee;
-        if (mezz.isCapitalised) mzRunningBalance += mzEstFee;
-      }
-    }
-    mzBalance[i] = Math.max(0, mzRunningBalance);
-
     // === SENIOR FACILITY ===
-    if (seniorActive) {
-      // First period: refinance land loan into senior
+    if (seniorActiveNow) {
+      // Refinance land loan into senior
       if (i === snrStartIdx && llRepayments[i] > 0) {
         snrDrawdowns[i] += llRepayments[i];
       }
 
-      // Repatriation of excess equity: when senior kicks in, equity above cap is returned
-      // and senior takes over that funding
+      // Repatriation of excess equity
       if (i === snrStartIdx && cumulativeEquity > equityCap) {
         const excessEquity = cumulativeEquity - equityCap;
-        // Senior refinances the excess equity
         snrDrawdowns[i] += excessEquity;
-        // Repatriate excess equity to investors
         eqRepatriations[i] += excessEquity;
         cumulativeEquity -= excessEquity;
       }
 
-      // Recalculate gap after equity repatriation and land loan refinance
+      // Recalculate gap after refinancing/repatriation
       const curTotalNeed = cumulativeCosts + cumulativeFinanceCosts;
       const curTotalFunded = cumulativeEquity + cumulativeMezz + cumulativeSenior + cumulativeLandLoan;
       const seniorGap = curTotalNeed - curTotalFunded;
 
-      // Draw from senior for remaining costs
+      // Draw from senior for remaining gap
       if (seniorGap > 0) {
         const available = seniorLimit - totalSnrDrawn;
         const draw = Math.min(seniorGap, Math.max(0, available));
@@ -325,101 +289,123 @@ function runFundingWaterfall(
       cumulativeSenior += snrDrawdowns[i];
       snrRunningBalance += snrDrawdowns[i];
 
-      // Senior interest (capitalised)
-      const snrAllInRate = senior.margin + senior.bbsy;
+      // === MEZZANINE alongside senior (for remaining gap after senior maxed) ===
+      if (mezzActiveNow) {
+        const postSnrNeed = cumulativeCosts + cumulativeFinanceCosts;
+        const postSnrFunded = cumulativeEquity + cumulativeSenior + cumulativeMezz + cumulativeLandLoan;
+        const postSnrGap = postSnrNeed - postSnrFunded;
+        if (postSnrGap > 0 && totalMezzDrawn < mezzLimit) {
+          const draw = Math.min(postSnrGap, mezzLimit - totalMezzDrawn);
+          mzDrawdowns[i] += draw;
+          totalMezzDrawn += draw;
+          cumulativeMezz += draw;
+          mzRunningBalance += draw;
+        }
+      }
+
+      // Additional equity if all debt facilities maxed
+      const finalNeed = cumulativeCosts + cumulativeFinanceCosts;
+      const finalFunded = cumulativeEquity + cumulativeSenior + cumulativeMezz + cumulativeLandLoan;
+      const finalGap = finalNeed - finalFunded;
+      if (finalGap > 0) {
+        eqInjections[i] += finalGap;
+        cumulativeEquity += finalGap;
+      }
+    }
+
+    // === REVENUE REPAYMENTS (integrated - reduces balance for interest calc) ===
+    let revAvailable = monthlyRevenue[i];
+    // Repay senior first
+    if (revAvailable > 0 && snrRunningBalance > 0) {
+      const repay = Math.min(revAvailable, snrRunningBalance);
+      snrRepayments[i] = repay;
+      snrRunningBalance -= repay;
+      revAvailable -= repay;
+    }
+    // Then repay mezzanine
+    if (revAvailable > 0 && mzRunningBalance > 0) {
+      const repay = Math.min(revAvailable, mzRunningBalance);
+      mzRepayments[i] = repay;
+      mzRunningBalance -= repay;
+      revAvailable -= repay;
+    }
+
+    // === INTEREST AND FEES (on balance AFTER drawdowns and repayments) ===
+    // Senior interest - only accrues when there is an outstanding balance
+    if (snrRunningBalance > 0) {
       const snrInt = periodInterest(snrRunningBalance, snrAllInRate, days, daysPerYear);
       snrInterest[i] = snrInt;
       totalSeniorInterest += snrInt;
       cumulativeFinanceCosts += snrInt;
-      snrRunningBalance += snrInt; // Capitalised
+      if (senior.isCapitalised) snrRunningBalance += snrInt;
+    }
 
-      // Senior line fee (on facility limit, capitalised)
-      const lineFee = periodInterest(seniorLimit, senior.lineFeePercent, days, daysPerYear);
-      const estFee = (i === snrStartIdx) ? seniorLimit * senior.establishmentFeePercent : 0;
-      snrFees[i] = lineFee + estFee;
-      totalSeniorFees += snrFees[i];
-      cumulativeFinanceCosts += snrFees[i];
-      snrRunningBalance += snrFees[i]; // Capitalised
-
-      // Additional equity if senior is maxed out and there's still a gap
-      const postSnrNeed = cumulativeCosts + cumulativeFinanceCosts;
-      const postSnrFunded = cumulativeEquity + cumulativeMezz + cumulativeSenior + cumulativeLandLoan;
-      const postSnrGap = postSnrNeed - postSnrFunded;
-      if (postSnrGap > 0) {
-        eqInjections[i] += postSnrGap;
-        cumulativeEquity += postSnrGap;
+    // Senior fees
+    if (seniorActiveNow) {
+      let periodFees = 0;
+      // Line fee (only while facility has outstanding balance)
+      if (snrRunningBalance > 0) {
+        periodFees += periodInterest(seniorLimit, senior.lineFeePercent, days, daysPerYear);
+      }
+      // Establishment fee (one-time at start)
+      if (i === snrStartIdx) {
+        periodFees += seniorLimit * senior.establishmentFeePercent;
+      }
+      if (periodFees > 0) {
+        snrFees[i] = periodFees;
+        totalSeniorFees += periodFees;
+        cumulativeFinanceCosts += periodFees;
+        if (senior.isCapitalised) snrRunningBalance += periodFees;
       }
     }
 
+    // Mezzanine interest - only accrues when there is an outstanding balance
+    if (mzRunningBalance > 0) {
+      const mzInt = periodInterest(mzRunningBalance, mezzAllInRate, days, daysPerYear);
+      mzInterest[i] = mzInt;
+      totalMezzInterest += mzInt;
+      cumulativeFinanceCosts += mzInt;
+      if (mezz.isCapitalised) mzRunningBalance += mzInt;
+
+      // Line fee
+      const mzLineFee = periodInterest(mezzLimit, mezz.lineFeePercent, days, daysPerYear);
+      if (mzLineFee > 0) {
+        mzFees[i] += mzLineFee;
+        totalMezzFees += mzLineFee;
+        cumulativeFinanceCosts += mzLineFee;
+        if (mezz.isCapitalised) mzRunningBalance += mzLineFee;
+      }
+    }
+
+    // Mezzanine establishment fee (at start, regardless of balance)
+    if (hasMezz && i === mezzStartIdx) {
+      const mzEstFee = mezzLimit * mezz.establishmentFeePercent;
+      if (mzEstFee > 0) {
+        mzFees[i] += mzEstFee;
+        totalMezzFees += mzEstFee;
+        cumulativeFinanceCosts += mzEstFee;
+        if (mezz.isCapitalised) mzRunningBalance += mzEstFee;
+      }
+    }
+
+    // === RECORD BALANCES ===
     snrBalance[i] = Math.max(0, snrRunningBalance);
+    mzBalance[i] = Math.max(0, mzRunningBalance);
     peakDebt = Math.max(peakDebt, snrRunningBalance + llRunningBalance + mzRunningBalance);
   }
 
-  // ===== PHASE 2: Exit waterfall (revenue repays debt then equity) =====
-  // Revenue settlements repay in order: Senior → Mezz → then accumulate for equity/profit
-  let availableFunds = 0;
-  for (let i = 0; i < n; i++) {
-    availableFunds += monthlyRevenue[i];
-
-    // Senior repayment
-    if (snrBalance[i] > 0 && availableFunds > 0) {
-      const repay = Math.min(availableFunds, snrRunningBalance);
-      if (repay > 0 && monthlyRevenue[i] > 0) {
-        // Only repay in periods with revenue
-        const actualRepay = Math.min(monthlyRevenue[i], snrBalance[i]);
-        if (actualRepay > 0) {
-          snrRepayments[i] = actualRepay;
-          snrRunningBalance -= actualRepay;
-          snrBalance[i] = Math.max(0, snrRunningBalance);
-          // Recalculate subsequent balances
-          for (let j = i + 1; j < n; j++) {
-            snrBalance[j] = snrBalance[j]; // Already set in forward pass
-          }
-        }
-      }
-    }
-  }
-
-  // Simpler exit: recalculate balances after repayments
-  // Reset and replay repayments
-  snrRunningBalance = 0;
-  mzRunningBalance = 0;
-  for (let i = 0; i < n; i++) {
-    snrRunningBalance += snrDrawdowns[i] + snrInterest[i] + snrFees[i];
-    mzRunningBalance += mzDrawdowns[i] + mzInterest[i] + mzFees[i];
-
-    // Repay senior from revenue
-    if (monthlyRevenue[i] > 0 && snrRunningBalance > 0) {
-      const repay = Math.min(monthlyRevenue[i], snrRunningBalance);
-      snrRepayments[i] = repay;
-      snrRunningBalance -= repay;
-    }
-
-    // Repay mezz from remaining revenue
-    const remainingRev = monthlyRevenue[i] - snrRepayments[i];
-    if (remainingRev > 0 && mzRunningBalance > 0) {
-      const repay = Math.min(remainingRev, mzRunningBalance);
-      mzRepayments[i] = repay;
-      mzRunningBalance -= repay;
-    }
-
-    snrBalance[i] = Math.max(0, snrRunningBalance);
-    mzBalance[i] = Math.max(0, mzRunningBalance);
-  }
-
-  // Equity repatriation and profit distribution at project end
+  // ===== EQUITY REPATRIATION & PROFIT at project end =====
   const totalRevenueReceived = sum(monthlyRevenue);
   const totalDebtRepaid = sum(snrRepayments) + sum(mzRepayments);
   const fundsForEquity = totalRevenueReceived - totalDebtRepaid;
 
-  const lastRevenueIdx = monthlyRevenue.reduce((last, v, i) => v > 0 ? i : last, 0);
+  const lastRevenueIdx = monthlyRevenue.reduce((last, v, idx) => v > 0 ? idx : last, 0);
   const exitIdx = Math.min(lastRevenueIdx + 1, n - 1);
 
   if (exitIdx < n) {
-    // Return equity (only the net equity still in the project, not already repatriated)
-    const alreadyRepatriated = sum(eqRepatriations);
-    const netEquityToReturn = cumulativeEquity - alreadyRepatriated;
-    if (netEquityToReturn > 0) {
+    // Return equity - cumulativeEquity is already net of any mid-project repatriations
+    const netEquityToReturn = cumulativeEquity;
+    if (netEquityToReturn > 0 && fundsForEquity > 0) {
       eqRepatriations[exitIdx] += Math.min(netEquityToReturn, fundsForEquity);
     }
     const remainForProfit = fundsForEquity - netEquityToReturn;
