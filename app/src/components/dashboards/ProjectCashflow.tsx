@@ -60,6 +60,17 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
     ],
   },
   {
+    header: 'MEZZANINE FACILITY',
+    headerBg: 'bg-teal-700 text-white',
+    rows: [
+      { label: 'Mezz Drawdown', getValue: c => c.mezzDrawdown },
+      { label: 'Mezz Repayment', getValue: c => c.mezzRepayment },
+      { label: 'Mezz Interest', getValue: c => c.mezzInterest },
+      { label: 'Mezz Fees', getValue: c => c.mezzFees },
+      { label: 'Mezz Balance', getValue: c => c.mezzBalance, bold: true, bg: 'bg-teal-50' },
+    ],
+  },
+  {
     header: 'LAND LOAN',
     headerBg: 'bg-orange-700 text-white',
     rows: [
