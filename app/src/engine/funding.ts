@@ -526,7 +526,7 @@ function runFundingWaterfall(
     totalLandLoanFees: totalLandFees,
     totalEquityInjected: cumulativeEquity,
     peakDebt,
-    seniorFacilitySize: seniorLimit,
+    seniorFacilitySize: totalSnrDrawn,
     mezzFacilitySize: hasMezz ? mezzLimit : 0,
   };
 }
