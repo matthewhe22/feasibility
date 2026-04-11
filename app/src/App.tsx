@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 
 declare const __BUILD_TIME__: string;
 import { useStore } from './store/useStore';
@@ -96,6 +97,7 @@ function App() {
           Last updated: {new Date(__BUILD_TIME__).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}
         </div>
       </footer>
+      <Analytics />
     </div>
   );
 }
