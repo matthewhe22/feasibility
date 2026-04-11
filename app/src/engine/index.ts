@@ -184,17 +184,28 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     cumulativeCashflow: 0,
   }));
 
-  // Calculate net cashflow
+  // Calculate net cashflow — includes all financing flows so that it represents
+  // the true change in cash balance each period (should net to ~0 each period
+  // when all drawdowns, repayments, equity and costs are accounted for).
   let cumCF = 0;
   for (const cf of cashflows) {
-    cf.netCashflow = cf.grvSettlements + cf.rentalIncome + cf.otherIncome
+    cf.netCashflow =
+      // Operating inflows
+      cf.grvSettlements + cf.rentalIncome + cf.otherIncome
+      // Financing inflows (drawdowns + equity injections)
+      + cf.landLoanDrawdown + cf.seniorDrawdown + cf.mezzDrawdown + cf.equityInjection
+      // Operating costs
       - cf.landCosts - cf.acquisitionCosts - cf.developmentCosts
       - cf.constructionCosts - cf.contingency - cf.marketingCosts
       - cf.otherStandardCosts - cf.pmFees - cf.sellingCostsFrontEnd
       - cf.sellingCostsBackEnd - cf.otherFinancingCosts - cf.gstOnCosts
       - cf.gstOnRevenue
+      // Financing costs
       - cf.landLoanInterest - cf.seniorInterest - cf.seniorFees
-      - cf.mezzInterest - cf.mezzFees;
+      - cf.mezzInterest - cf.mezzFees
+      // Financing outflows (repayments + equity returns)
+      - cf.landLoanRepayment - cf.seniorRepayment - cf.mezzRepayment
+      - cf.equityRepatriation - cf.profitDistribution;
     cumCF += cf.netCashflow;
     cf.cumulativeCashflow = cumCF;
   }
