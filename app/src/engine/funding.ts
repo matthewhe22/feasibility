@@ -364,9 +364,12 @@ function runFundingWaterfall(
     }
 
     // === REVENUE REPAYMENTS (integrated - reduces balance for interest calc) ===
-    // Effective revenue = settlements net of GST remittable to ATO (positive GST net)
-    // or settlements augmented by ATO refund in construction (negative GST net)
-    let revAvailable = Math.max(0, monthlyRevenue[i] - monthlyGSTNet[i]);
+    // Only repay debt when there is excess cash in the period — i.e. net revenue
+    // (settlements net of GST) exceeds operational costs for that period.
+    // During construction, costs typically exceed revenue so no repayment is made;
+    // once revenue settlements outpace costs the surplus is swept to repay debt.
+    const periodNetCash = (monthlyRevenue[i] - monthlyGSTNet[i]) - monthlyCostsExcFinance[i];
+    let revAvailable = Math.max(0, periodNetCash);
     // Repay senior first
     if (revAvailable > 0 && snrRunningBalance > 0) {
       const repay = Math.min(revAvailable, snrRunningBalance);
