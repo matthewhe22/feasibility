@@ -10,7 +10,7 @@ import type { CostLineItem, RevenueLineItem } from '../../types';
 // Values are raw weights (any positive number); they are normalised to 1.0 by
 // the cost-spreading engine so only the relative shape matters.
 function SCurveEditor({
-  curveIndex,
+  curveIndex: _curveIndex,
   label,
   values,
   totalPeriods,

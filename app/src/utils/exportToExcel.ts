@@ -452,7 +452,7 @@ function buildSummarySheet(ws: ExcelJS.Worksheet, data: DashboardData, projectNa
  */
 export async function exportToExcel(
   data: DashboardData,
-  admin: AdminConfig,
+  _admin: AdminConfig,
   projectName = 'Feasibility',
 ): Promise<void> {
   const wb = new ExcelJS.Workbook();

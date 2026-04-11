@@ -91,7 +91,7 @@ export function solveFunding(
   periods: Period[],
   monthlyCostsExcFinance: number[],
   monthlyRevenue: number[],
-  monthlyGSTNet: number[],
+  _monthlyGSTNet: number[],
   gstOnRevenue: number[],
   inputs: MainInputs,
   daysPerYear: number,
@@ -112,7 +112,7 @@ export function solveFunding(
     const tdc = sum(monthlyCostsExcFinance) + prevSeniorFinCosts + prevMezzFinCosts;
 
     result = runFundingWaterfall(
-      periods, monthlyCostsExcFinance, monthlyRevenue, monthlyGSTNet, gstOnRevenue,
+      periods, monthlyCostsExcFinance, monthlyRevenue, _monthlyGSTNet, gstOnRevenue,
       inputs, tdc, daysPerYear,
     );
 
@@ -138,7 +138,7 @@ function runFundingWaterfall(
   periods: Period[],
   monthlyCostsExcFinance: number[],
   monthlyRevenue: number[],
-  monthlyGSTNet: number[],
+  _monthlyGSTNet: number[],
   gstOnRevenue: number[],
   inputs: MainInputs,
   tdc: number, // Total Development Costs including finance (for LTC)
