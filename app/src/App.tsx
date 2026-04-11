@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Analytics } from '@vercel/analytics/react';
 
 declare const __BUILD_TIME__: string;
@@ -10,6 +10,7 @@ import { ExternalDashboard } from './components/dashboards/ExternalDashboard';
 import { ProjectCashflow } from './components/dashboards/ProjectCashflow';
 import { ProjectSummary } from './components/dashboards/ProjectSummary';
 import { ChartsTab } from './components/charts/Charts';
+import { ProjectManager } from './components/ProjectManager';
 
 type TabId = 'input' | 'internalDash' | 'externalDash' | 'cashflow' | 'summary' | 'charts';
 
@@ -24,6 +25,7 @@ const TABS: { id: TabId; label: string }[] = [
 
 function App() {
   const { activeTab, setActiveTab, admin, inputs, setDashboardData, isCalculating, setIsCalculating } = useStore();
+  const [showProjectManager, setShowProjectManager] = useState(false);
 
   const calculate = () => {
     setIsCalculating(true);
@@ -52,13 +54,21 @@ function App() {
           <h1 className="text-lg font-bold tracking-wide">Project Development Feasibility Model</h1>
           <p className="text-xs text-gray-400">Property Development Feasibility Analysis</p>
         </div>
-        <button
-          onClick={calculate}
-          disabled={isCalculating}
-          className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-semibold px-5 py-2 rounded shadow transition-colors"
-        >
-          {isCalculating ? 'Calculating...' : 'Run Calculations'}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowProjectManager(true)}
+            className="bg-gray-600 hover:bg-gray-500 text-white text-sm font-semibold px-4 py-2 rounded shadow transition-colors"
+          >
+            Projects
+          </button>
+          <button
+            onClick={calculate}
+            disabled={isCalculating}
+            className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-semibold px-5 py-2 rounded shadow transition-colors"
+          >
+            {isCalculating ? 'Calculating...' : 'Run Calculations'}
+          </button>
+        </div>
       </header>
 
       {/* Tab Navigation */}
@@ -98,6 +108,7 @@ function App() {
         </div>
       </footer>
       <Analytics />
+      {showProjectManager && <ProjectManager onClose={() => setShowProjectManager(false)} />}
     </div>
   );
 }
