@@ -92,6 +92,7 @@ export function solveFunding(
   monthlyCostsExcFinance: number[],
   monthlyRevenue: number[],
   monthlyGSTNet: number[],
+  gstOnRevenue: number[],
   inputs: MainInputs,
   daysPerYear: number,
   tolerance: number,
@@ -105,11 +106,13 @@ export function solveFunding(
   let result: FundingResult = createEmptyResult(n);
 
   for (let iter = 0; iter < maxIterations; iter++) {
-    // TDC = costs exc finance + current estimate of finance costs
+    // TDC = costs exc finance + current estimate of all finance costs (including
+    // capitalised interest, since TDC is used for LTC/LVR facility sizing only —
+    // capitalised interest does not flow through the cash-gap drawdown mechanism).
     const tdc = sum(monthlyCostsExcFinance) + prevSeniorFinCosts + prevMezzFinCosts;
 
     result = runFundingWaterfall(
-      periods, monthlyCostsExcFinance, monthlyRevenue, monthlyGSTNet,
+      periods, monthlyCostsExcFinance, monthlyRevenue, monthlyGSTNet, gstOnRevenue,
       inputs, tdc, daysPerYear,
     );
 
@@ -136,6 +139,7 @@ function runFundingWaterfall(
   monthlyCostsExcFinance: number[],
   monthlyRevenue: number[],
   monthlyGSTNet: number[],
+  gstOnRevenue: number[],
   inputs: MainInputs,
   tdc: number, // Total Development Costs including finance (for LTC)
   daysPerYear: number,
@@ -364,11 +368,15 @@ function runFundingWaterfall(
     }
 
     // === REVENUE REPAYMENTS (integrated - reduces balance for interest calc) ===
-    // Only repay debt when there is excess cash in the period — i.e. net revenue
-    // (settlements net of GST) exceeds operational costs for that period.
-    // During construction, costs typically exceed revenue so no repayment is made;
-    // once revenue settlements outpace costs the surplus is swept to repay debt.
-    const periodNetCash = (monthlyRevenue[i] - monthlyGSTNet[i]) - monthlyCostsExcFinance[i];
+    // Only repay debt when there is excess cash in the period.
+    // Excess = gross revenue minus GST paid to ATO on revenue, minus all operational
+    // costs (which already include GST paid to vendors).
+    // Non-capitalised cash interest (land loan) is already in the gap drawdown above,
+    // so it is implicitly funded and does not need to be deducted again here.
+    // We use gstOnRevenue[i] (not gstNet) so that cost-side GST refunds do not
+    // artificially inflate available-for-repayment cash — the net cashflow formula
+    // treats gstOnCosts as a real outflow, so the repayment formula must match.
+    const periodNetCash = (monthlyRevenue[i] - gstOnRevenue[i]) - monthlyCostsExcFinance[i];
     let revAvailable = Math.max(0, periodNetCash);
     // Repay senior first
     if (revAvailable > 0 && snrRunningBalance > 0) {
@@ -386,49 +394,70 @@ function runFundingWaterfall(
     }
 
     // === INTEREST AND FEES (on balance AFTER drawdowns and repayments) ===
-    // Senior interest - only accrues when there is an outstanding balance
+    //
+    // Key rule for net-cashflow = 0:
+    //   • Non-capitalised (cash) interest/fees → add to cumulativeFinanceCosts so the
+    //     gap-fill drawdown in the SAME period covers them, AND subtract from net cashflow.
+    //   • Capitalised interest/fees → accrete to running balance ONLY; do NOT add to
+    //     cumulativeFinanceCosts (so no extra drawdown is triggered) and do NOT treat
+    //     them as a cash outflow in the net cashflow formula.  The larger balance will be
+    //     swept out via repayments when revenue arrives.
+    //
+    // Land-loan interest is always non-capitalised (computed before the gap fill above).
+
+    // Senior interest
     if (snrRunningBalance > 0) {
       const snrInt = periodInterest(snrRunningBalance, snrAllInRate, days, daysPerYear);
       snrInterest[i] = snrInt;
       totalSeniorInterest += snrInt;
-      cumulativeFinanceCosts += snrInt;
-      if (senior.isCapitalised) snrRunningBalance += snrInt;
+      if (senior.isCapitalised) {
+        snrRunningBalance += snrInt;  // accretes to balance; not a cash flow
+      } else {
+        cumulativeFinanceCosts += snrInt;  // cash payment; gap will draw for it
+      }
     }
 
     // Senior fees
     if (seniorActive) {
       let periodFees = 0;
-      // Line fee (only while facility has outstanding balance)
       if (snrRunningBalance > 0) {
         periodFees += periodInterest(seniorLimit, senior.lineFeePercent, days, daysPerYear);
       }
-      // Establishment fee (one-time at start)
       if (i === snrStartIdx) {
         periodFees += seniorLimit * senior.establishmentFeePercent;
       }
       if (periodFees > 0) {
         snrFees[i] = periodFees;
         totalSeniorFees += periodFees;
-        cumulativeFinanceCosts += periodFees;
-        if (senior.isCapitalised) snrRunningBalance += periodFees;
+        if (senior.isCapitalised) {
+          snrRunningBalance += periodFees;  // accretes; not a cash flow
+        } else {
+          cumulativeFinanceCosts += periodFees;
+        }
       }
     }
 
-    // Mezzanine interest - only accrues when there is an outstanding balance
+    // Mezzanine interest
     if (mzRunningBalance > 0) {
       const mzInt = periodInterest(mzRunningBalance, mezzAllInRate, days, daysPerYear);
       mzInterest[i] = mzInt;
       totalMezzInterest += mzInt;
-      cumulativeFinanceCosts += mzInt;
-      if (mezz.isCapitalised) mzRunningBalance += mzInt;
+      if (mezz.isCapitalised) {
+        mzRunningBalance += mzInt;
+      } else {
+        cumulativeFinanceCosts += mzInt;
+      }
 
       // Line fee
       const mzLineFee = periodInterest(mezzLimit, mezz.lineFeePercent, days, daysPerYear);
       if (mzLineFee > 0) {
         mzFees[i] += mzLineFee;
         totalMezzFees += mzLineFee;
-        cumulativeFinanceCosts += mzLineFee;
-        if (mezz.isCapitalised) mzRunningBalance += mzLineFee;
+        if (mezz.isCapitalised) {
+          mzRunningBalance += mzLineFee;
+        } else {
+          cumulativeFinanceCosts += mzLineFee;
+        }
       }
     }
 
@@ -438,8 +467,11 @@ function runFundingWaterfall(
       if (mzEstFee > 0) {
         mzFees[i] += mzEstFee;
         totalMezzFees += mzEstFee;
-        cumulativeFinanceCosts += mzEstFee;
-        if (mezz.isCapitalised) mzRunningBalance += mzEstFee;
+        if (mezz.isCapitalised) {
+          mzRunningBalance += mzEstFee;
+        } else {
+          cumulativeFinanceCosts += mzEstFee;
+        }
       }
     }
 

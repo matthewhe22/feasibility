@@ -136,6 +136,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     monthlyCostsExcFinance,
     settlements,
     monthlyGSTNet,
+    gstOnRevenue,
     inputs,
     admin.daysPerYear,
     admin.tolerance,
@@ -184,9 +185,17 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     cumulativeCashflow: 0,
   }));
 
-  // Calculate net cashflow — includes all financing flows so that it represents
-  // the true change in cash balance each period (should net to ~0 each period
-  // when all drawdowns, repayments, equity and costs are accounted for).
+  // Capitalisation flags — capitalised interest/fees accrete to the loan balance
+  // and are NOT cash outflows in the period they accrue.  They inflate the balance
+  // which is then swept out through repayments when revenue arrives, so they must
+  // be excluded from the net cashflow formula to preserve net = 0 each period.
+  const seniorCapitalised = inputs.seniorFacility.isCapitalised;
+  const mezzCapitalised   = inputs.mezzanine.isCapitalised;
+
+  // Calculate net cashflow — includes all cash financing flows so that it represents
+  // the true change in the project bank account each period.
+  // Net should be ≈ 0 every period: drawdowns fund costs, revenue repays debt.
+  // Capitalised interest is excluded because it is a balance adjustment, not cash.
   let cumCF = 0;
   for (const cf of cashflows) {
     cf.netCashflow =
@@ -194,16 +203,18 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       cf.grvSettlements + cf.rentalIncome + cf.otherIncome
       // Financing inflows (drawdowns + equity injections)
       + cf.landLoanDrawdown + cf.seniorDrawdown + cf.mezzDrawdown + cf.equityInjection
-      // Operating costs
+      // Operating costs (base costs + GST paid to vendors + GST remitted to ATO)
       - cf.landCosts - cf.acquisitionCosts - cf.developmentCosts
       - cf.constructionCosts - cf.contingency - cf.marketingCosts
       - cf.otherStandardCosts - cf.pmFees - cf.sellingCostsFrontEnd
       - cf.sellingCostsBackEnd - cf.otherFinancingCosts - cf.gstOnCosts
       - cf.gstOnRevenue
-      // Financing costs
-      - cf.landLoanInterest - cf.seniorInterest - cf.seniorFees
-      - cf.mezzInterest - cf.mezzFees
-      // Financing outflows (repayments + equity returns)
+      // Cash financing costs (land loan is never capitalised)
+      - cf.landLoanInterest
+      // Senior/mezz interest & fees only if they are cash (non-capitalised)
+      - (seniorCapitalised ? 0 : cf.seniorInterest + cf.seniorFees)
+      - (mezzCapitalised   ? 0 : cf.mezzInterest   + cf.mezzFees)
+      // Financing outflows (principal repayments + equity returns)
       - cf.landLoanRepayment - cf.seniorRepayment - cf.mezzRepayment
       - cf.equityRepatriation - cf.profitDistribution;
     cumCF += cf.netCashflow;
