@@ -5,6 +5,102 @@ import { FinancingInputs } from './FinancingInputs';
 import { formatCurrency } from '../../utils';
 import type { CostLineItem, RevenueLineItem } from '../../types';
 
+// ── Manual S-Curve Editor ─────────────────────────────────────────────────────
+// Renders a period-by-period weight input for one manual S-curve.
+// Values are raw weights (any positive number); they are normalised to 1.0 by
+// the cost-spreading engine so only the relative shape matters.
+function SCurveEditor({
+  curveIndex,
+  label,
+  values,
+  totalPeriods,
+  onChange,
+}: {
+  curveIndex: number;
+  label: string;
+  values: number[];
+  totalPeriods: number;
+  onChange: (updated: number[]) => void;
+}) {
+  const padded = Array.from({ length: totalPeriods }, (_, i) => values[i] ?? 0);
+  const total = padded.reduce((s, v) => s + v, 0);
+
+  const update = (idx: number, raw: string) => {
+    const v = parseFloat(raw);
+    const next = [...padded];
+    next[idx] = isNaN(v) ? 0 : Math.max(0, v);
+    onChange(next);
+  };
+
+  const clear = () => onChange(Array(totalPeriods).fill(0));
+
+  // Rows of 12 months each
+  const rows: number[][] = [];
+  for (let r = 0; r < totalPeriods; r += 12) {
+    rows.push(padded.slice(r, Math.min(r + 12, totalPeriods)));
+  }
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-center gap-3 mb-2">
+        <span className="text-sm font-semibold text-gray-700">{label}</span>
+        <span className={`text-xs px-2 py-0.5 rounded ${Math.abs(total - 100) < 0.05 ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+          Sum: {total.toFixed(2)}%
+        </span>
+        <button
+          onClick={clear}
+          className="text-xs px-2 py-0.5 rounded bg-gray-100 hover:bg-gray-200 text-gray-600"
+        >
+          Clear
+        </button>
+        <span className="text-xs text-gray-400">(values are relative weights — normalised automatically)</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="text-xs border-collapse">
+          <thead>
+            {rows.map((row, rowIdx) => (
+              <tr key={`h${rowIdx}`} className="bg-gray-600 text-white">
+                <th className="px-2 py-1 text-left w-16 whitespace-nowrap">Year {rowIdx + 1}</th>
+                {row.map((_, colIdx) => {
+                  const period = rowIdx * 12 + colIdx + 1;
+                  return (
+                    <th key={colIdx} className="px-1 py-1 text-center w-14">M{period}</th>
+                  );
+                })}
+              </tr>
+            ))}
+          </thead>
+          <tbody>
+            {rows.map((row, rowIdx) => (
+              <tr key={`r${rowIdx}`} className={rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                <td className="px-2 py-0.5 text-gray-500 font-medium">
+                  {`${rowIdx * 12 + 1}–${Math.min(rowIdx * 12 + row.length, totalPeriods)}`}
+                </td>
+                {row.map((val, colIdx) => {
+                  const period = rowIdx * 12 + colIdx;
+                  return (
+                    <td key={colIdx} className="px-0.5 py-0.5">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={val === 0 ? '' : val}
+                        placeholder="0"
+                        onChange={e => update(period, e.target.value)}
+                        className="w-14 text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
+                      />
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function CostLineTable({ items, onChange }: {
   items: CostLineItem[];
   onChange: (items: CostLineItem[]) => void;
@@ -71,6 +167,8 @@ function CostLineTable({ items, onChange }: {
                   >
                     <option value="Evenly Split">Evenly Split</option>
                     <option value="Manual S-curve 1">Manual S-curve 1</option>
+                    <option value="Manual S-curve 2">Manual S-curve 2</option>
+                    <option value="Manual S-curve 3">Manual S-curve 3</option>
                     {Array.from({ length: 49 }, (_, i) => (
                       <option key={i} value={`${i + 12} Month Build`}>{i + 12} Month Build</option>
                     ))}
@@ -206,7 +304,7 @@ function GRVTable({ items, onChange }: {
 }
 
 export function MainInputTab() {
-  const { inputs, setInputs } = useStore();
+  const { inputs, setInputs, admin, setAdmin } = useStore();
   const [section, setSection] = useState<string>('preliminary');
 
   const sections = [
@@ -221,7 +319,16 @@ export function MainInputTab() {
     { id: 'grv', label: '3.1 GRV' },
     { id: 'financing', label: '4. Financing' },
     { id: 'otherFin', label: '4.3 Other Fin' },
+    { id: 'sCurves', label: 'S-Curves' },
   ];
+
+  const totalPeriods = inputs.preliminary.projectSpanMonths || 74;
+
+  const updateSCurve = (curveIdx: number, updated: number[]) => {
+    const next = [...(admin.manualSCurves ?? [[], [], []])];
+    next[curveIdx] = updated;
+    setAdmin({ manualSCurves: next });
+  };
 
   return (
     <div>
@@ -424,6 +531,32 @@ export function MainInputTab() {
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
             <CostLineTable items={inputs.otherFinancingCosts}
               onChange={items => setInputs({ otherFinancingCosts: items })} />
+          </div>
+        </div>
+      )}
+
+      {/* Manual S-Curves */}
+      {section === 'sCurves' && (
+        <div>
+          <SectionHeader number="5" title="Manual S-Curve Distributions" />
+          <div className="bg-white border border-t-0 border-gray-200 rounded-b p-4">
+            <p className="text-xs text-gray-500 mb-4">
+              Enter a weight value for each project period (month) for each manual S-curve.
+              Values are automatically normalised so only their relative shape matters —
+              entering percentages that sum to 100 makes the distribution easy to read.
+              Cost line items with <strong>Manual S-curve 1/2/3</strong> selected will use
+              these distributions starting from their configured Start Month.
+            </p>
+            {[0, 1, 2].map(idx => (
+              <SCurveEditor
+                key={idx}
+                curveIndex={idx}
+                label={`Manual S-curve ${idx + 1}`}
+                values={admin.manualSCurves?.[idx] ?? []}
+                totalPeriods={totalPeriods}
+                onChange={updated => updateSCurve(idx, updated)}
+              />
+            ))}
           </div>
         </div>
       )}

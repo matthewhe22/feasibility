@@ -226,6 +226,9 @@ function runFundingWaterfall(
   let cumulativeLandLoan = 0;
   let cumulativeFinanceCosts = 0;
 
+  // Track equity returned so far (incremental as revenue arrives)
+  let totalEqRepatriated = 0;
+
   let totalSeniorInterest = 0;
   let totalSeniorFees = 0;
   let totalMezzInterest = 0;
@@ -392,6 +395,21 @@ function runFundingWaterfall(
       mzRunningBalance -= repay;
       revAvailable -= repay;
     }
+    // Any remaining excess after all debt is clear → return equity then distribute profit.
+    // Doing this inline each period (rather than a lump sum at project end) ensures
+    // net cashflow = 0 every period: all cash in equals all cash out.
+    if (revAvailable > 0) {
+      const equityLeft = cumulativeEquity - totalEqRepatriated;
+      if (equityLeft > 0) {
+        const eqReturn = Math.min(revAvailable, equityLeft);
+        eqRepatriations[i] += eqReturn;
+        totalEqRepatriated += eqReturn;
+        revAvailable -= eqReturn;
+      }
+      if (revAvailable > 0) {
+        profitDist[i] += revAvailable;
+      }
+    }
 
     // === INTEREST AND FEES (on balance AFTER drawdowns and repayments) ===
     //
@@ -479,26 +497,6 @@ function runFundingWaterfall(
     snrBalance[i] = Math.max(0, snrRunningBalance);
     mzBalance[i] = Math.max(0, mzRunningBalance);
     peakDebt = Math.max(peakDebt, snrRunningBalance + llRunningBalance + mzRunningBalance);
-  }
-
-  // ===== EQUITY REPATRIATION & PROFIT at project end =====
-  const totalRevenueReceived = sum(monthlyRevenue.map((r, i) => Math.max(0, r - monthlyGSTNet[i])));
-  const totalDebtRepaid = sum(snrRepayments) + sum(mzRepayments);
-  const fundsForEquity = totalRevenueReceived - totalDebtRepaid;
-
-  const lastRevenueIdx = monthlyRevenue.reduce((last, v, idx) => v > 0 ? idx : last, 0);
-  const exitIdx = Math.min(lastRevenueIdx + 1, n - 1);
-
-  if (exitIdx < n) {
-    // Return equity - cumulativeEquity is already net of any mid-project repatriations
-    const netEquityToReturn = cumulativeEquity;
-    if (netEquityToReturn > 0 && fundsForEquity > 0) {
-      eqRepatriations[exitIdx] += Math.min(netEquityToReturn, fundsForEquity);
-    }
-    const remainForProfit = fundsForEquity - netEquityToReturn;
-    if (remainForProfit > 0) {
-      profitDist[exitIdx] = remainForProfit;
-    }
   }
 
   return {
