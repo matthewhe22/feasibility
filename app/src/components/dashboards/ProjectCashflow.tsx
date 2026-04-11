@@ -23,13 +23,14 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
       { label: 'Marketing', getValue: c => c.marketingCosts },
       { label: 'Other Standard Costs', getValue: c => c.otherStandardCosts },
       { label: 'PM Fees', getValue: c => c.pmFees },
-      { label: 'Selling Costs', getValue: c => c.sellingCostsFrontEnd },
+      { label: 'Selling Costs (Front End)', getValue: c => c.sellingCostsFrontEnd },
+      { label: 'Selling Costs (Back End)', getValue: c => c.sellingCostsBackEnd },
       { label: 'Other Financing Costs', getValue: c => c.otherFinancingCosts },
       {
         label: 'Total Costs',
         getValue: c => c.landCosts + c.acquisitionCosts + c.developmentCosts + c.constructionCosts +
           c.contingency + c.marketingCosts + c.otherStandardCosts + c.pmFees +
-          c.sellingCostsFrontEnd + c.otherFinancingCosts,
+          c.sellingCostsFrontEnd + c.sellingCostsBackEnd + c.otherFinancingCosts,
         bold: true, bg: 'bg-red-50',
       },
     ],
@@ -109,14 +110,14 @@ export function ProjectCashflow() {
   const cf = data.cashflows.filter(c => c.period.periodNumber >= 1 && c.period.periodNumber <= 84);
 
   const fmtVal = (v: number, textColor?: string) => {
-    if (!v) return '';
+    if (v == null || isNaN(v) || v === 0) return '';
     const color = v < 0 ? 'text-red-600' : (textColor || 'text-gray-800');
     return <span className={color}>{formatCurrency(v)}</span>;
   };
 
   const fmtTotal = (getValue: (c: MonthlyCashflow) => number, textColor?: string) => {
     const total = cf.reduce((s, c) => s + getValue(c), 0);
-    if (!total) return '';
+    if (total == null || isNaN(total) || total === 0) return '';
     const color = total < 0 ? 'text-red-600' : (textColor || 'text-gray-800');
     return <span className={`font-bold ${color}`}>{formatCurrency(total)}</span>;
   };

@@ -257,7 +257,7 @@ export function InternalDashboard() {
 
           {/* Key Dates */}
           <TableBox>
-            <TableHeader>Table 8 - Key Dates</TableHeader>
+            <TableHeader>Table 9 - Key Dates</TableHeader>
             <div className="divide-y divide-gray-100">
               {[
                 ['Contract Start Date (Land)', kd.contractStartDate],
@@ -288,8 +288,16 @@ export function InternalDashboard() {
 
           {/* Other Indicators */}
           <TableBox>
-            <TableHeader>Table 9 - Other Indicators</TableHeader>
+            <TableHeader>Table 10 - Other Indicators</TableHeader>
             <DashValue label="Peak Interest Holding Cost per Month" value={data.otherIndicators.peakInterestHoldingCostPerMonth} />
+          </TableBox>
+
+          {/* GRV Summary */}
+          <TableBox>
+            <TableHeader>Table 11 - GRV Summary</TableHeader>
+            <DashValue label="Total Apartment GRV" value={data.grvSummary.totalApartmentGRV} bold />
+            <DashValue label="GRV Sold / Exchanged" value={data.grvSummary.grvSoldExchanged} indent />
+            <DashValue label="Unsold GRV" value={data.grvSummary.unsoldGRV} indent />
           </TableBox>
         </div>
       </div>

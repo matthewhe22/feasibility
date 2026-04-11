@@ -26,9 +26,11 @@ function fmt(d: Date) {
 
 interface Props {
   onClose: () => void;
+  /** Called after a project is loaded so the parent can recalculate. */
+  onLoad?: () => void;
 }
 
-export function ProjectManager({ onClose }: Props) {
+export function ProjectManager({ onClose, onLoad }: Props) {
   const { admin, inputs, dashboardData, setAdmin, setInputs, setDashboardData } = useStore();
 
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
@@ -79,7 +81,8 @@ export function ProjectManager({ onClose }: Props) {
       setCurrentId(id);
       setSaveName(rec.name);
       setSaveDesc(rec.description);
-      setMsg(`Loaded "${rec.name}".`);
+      setMsg(`Loaded "${rec.name}". Recalculating…`);
+      onLoad?.();
     } catch (e) {
       setMsg(String(e));
     } finally {

@@ -54,14 +54,16 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // Spread front-end commissions across presale period
   const frontEndCommByPeriod = new Array(n).fill(0);
   if (commissions.frontEnd > 0) {
-    // Spread evenly across presale period
-    const firstPresale = Math.min(...inputs.grvItems.filter(g => g.preSaleExchangeMonth > 0).map(g => g.preSaleExchangeMonth));
-    const lastPresale = Math.max(...inputs.grvItems.filter(g => g.preSaleExchangeMonth > 0).map(g => g.preSaleExchangeMonth + g.preSaleSpan));
-    const span = lastPresale - firstPresale;
-    if (span > 0) {
-      const perMonth = commissions.frontEnd / span;
-      for (let i = firstPresale - 1; i < lastPresale - 1 && i < n; i++) {
-        frontEndCommByPeriod[i] = perMonth;
+    const presaleItems = inputs.grvItems.filter(g => g.preSaleExchangeMonth > 0);
+    if (presaleItems.length > 0) {
+      const firstPresale = Math.min(...presaleItems.map(g => g.preSaleExchangeMonth));
+      const lastPresale = Math.max(...presaleItems.map(g => g.preSaleExchangeMonth + g.preSaleSpan));
+      const span = lastPresale - firstPresale;
+      if (span > 0) {
+        const perMonth = commissions.frontEnd / span;
+        for (let i = firstPresale - 1; i < lastPresale - 1 && i < n; i++) {
+          frontEndCommByPeriod[i] = perMonth;
+        }
       }
     }
   }
@@ -85,6 +87,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     ...inputs.constructionCosts,
     ...inputs.marketingCosts,
     ...inputs.pmFees,
+    ...inputs.otherStandardCosts,
+    ...inputs.otherFinancingCosts,
   ];
   for (const item of allCostItems) {
     if (item.addGST) {
@@ -279,8 +283,10 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // Key dates
   const constructionStart = inputs.constructionCosts[0]?.monthStart || 33;
   const constructionSpan = inputs.constructionCosts[0]?.monthSpan || 41;
-  const lastSettlement = Math.max(...inputs.grvItems.map(g => g.settlementMonth));
-  const salesStart = Math.min(...inputs.grvItems.filter(g => g.preSaleExchangeMonth > 0).map(g => g.preSaleExchangeMonth));
+  const settlementMonths = inputs.grvItems.map(g => g.settlementMonth).filter(m => m > 0);
+  const lastSettlement = settlementMonths.length > 0 ? Math.max(...settlementMonths) : 0;
+  const presaleMonths = inputs.grvItems.filter(g => g.preSaleExchangeMonth > 0).map(g => g.preSaleExchangeMonth);
+  const salesStart = presaleMonths.length > 0 ? Math.min(...presaleMonths) : 0;
 
   function monthLabel(monthNum: number): string {
     if (monthNum <= 0 || monthNum > periods.length) return 'N/A';
