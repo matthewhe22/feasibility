@@ -91,7 +91,7 @@ export function solveFunding(
   periods: Period[],
   monthlyCostsExcFinance: number[],
   monthlyRevenue: number[],
-  _monthlyGSTNet: number[],
+  monthlyGSTNet: number[],
   inputs: MainInputs,
   daysPerYear: number,
   tolerance: number,
@@ -109,7 +109,7 @@ export function solveFunding(
     const tdc = sum(monthlyCostsExcFinance) + prevSeniorFinCosts + prevMezzFinCosts;
 
     result = runFundingWaterfall(
-      periods, monthlyCostsExcFinance, monthlyRevenue,
+      periods, monthlyCostsExcFinance, monthlyRevenue, monthlyGSTNet,
       inputs, tdc, daysPerYear,
     );
 
@@ -135,6 +135,7 @@ function runFundingWaterfall(
   periods: Period[],
   monthlyCostsExcFinance: number[],
   monthlyRevenue: number[],
+  monthlyGSTNet: number[],
   inputs: MainInputs,
   tdc: number, // Total Development Costs including finance (for LTC)
   daysPerYear: number,
@@ -212,6 +213,7 @@ function runFundingWaterfall(
   let llRunningBalance = 0;
   let snrRunningBalance = 0;
   let mzRunningBalance = 0;
+  let llAccruedInterest = 0; // track quarterly land loan interest
 
   let cumulativeCosts = 0;
   let cumulativeEquity = 0;
@@ -251,16 +253,32 @@ function runFundingWaterfall(
       cumulativeFinanceCosts += estFee;
     }
 
-    // Land loan interest (on balance including drawdown in same period)
+    // Land loan interest — accrue monthly, charge at quarter-end boundaries
     if (llRunningBalance > 0) {
-      const interest = periodInterest(llRunningBalance, landLoan.interestRate, days, daysPerYear);
-      llInterest[i] = interest;
-      totalLandInterest += interest;
-      cumulativeFinanceCosts += interest;
+      const accrued = periodInterest(llRunningBalance, landLoan.interestRate, days, daysPerYear);
+      llAccruedInterest += accrued;
+
+      const monthsSinceLLStart = i - llStartIdx;
+      const freq = landLoan.interestPaymentFrequency > 0 ? landLoan.interestPaymentFrequency : 1;
+      const isQuarterEnd = (monthsSinceLLStart + 1) % freq === 0;
+
+      if (isQuarterEnd) {
+        llInterest[i] = llAccruedInterest;
+        totalLandInterest += llAccruedInterest;
+        cumulativeFinanceCosts += llAccruedInterest;
+        llAccruedInterest = 0;
+      }
     }
 
     // Land loan repaid when senior starts (refinanced into senior)
+    // Flush any remaining accrued interest before recording repayment
     if (hasSenior && i === snrStartIdx && llRunningBalance > 0) {
+      if (llAccruedInterest > 0) {
+        llInterest[i] += llAccruedInterest;
+        totalLandInterest += llAccruedInterest;
+        cumulativeFinanceCosts += llAccruedInterest;
+        llAccruedInterest = 0;
+      }
       llRepayments[i] = llRunningBalance;
       llRunningBalance = 0;
     }
@@ -347,7 +365,9 @@ function runFundingWaterfall(
     }
 
     // === REVENUE REPAYMENTS (integrated - reduces balance for interest calc) ===
-    let revAvailable = monthlyRevenue[i];
+    // Effective revenue = settlements net of GST remittable to ATO (positive GST net)
+    // or settlements augmented by ATO refund in construction (negative GST net)
+    let revAvailable = Math.max(0, monthlyRevenue[i] - monthlyGSTNet[i]);
     // Repay senior first
     if (revAvailable > 0 && snrRunningBalance > 0) {
       const repay = Math.min(revAvailable, snrRunningBalance);
@@ -428,7 +448,7 @@ function runFundingWaterfall(
   }
 
   // ===== EQUITY REPATRIATION & PROFIT at project end =====
-  const totalRevenueReceived = sum(monthlyRevenue);
+  const totalRevenueReceived = sum(monthlyRevenue.map((r, i) => Math.max(0, r - monthlyGSTNet[i])));
   const totalDebtRepaid = sum(snrRepayments) + sum(mzRepayments);
   const fundsForEquity = totalRevenueReceived - totalDebtRepaid;
 

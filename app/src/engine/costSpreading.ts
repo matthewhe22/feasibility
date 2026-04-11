@@ -23,7 +23,7 @@ function evenSplitWeights(span: number): number[] {
 }
 
 // Get weights for a given S-curve type
-export function getSCurveWeights(sCurve: string, span: number): number[] {
+export function getSCurveWeights(sCurve: string, span: number, manualSCurves?: number[][]): number[] {
   if (sCurve === 'Evenly Split') {
     return evenSplitWeights(span);
   }
@@ -32,21 +32,26 @@ export function getSCurveWeights(sCurve: string, span: number): number[] {
     const buildMonths = parseInt(buildMatch[1]);
     return buildSCurveWeights(buildMonths);
   }
-  // Manual S-curves - fall back to evenly split for now
-  if (sCurve.startsWith('Manual S-curve')) {
-    return evenSplitWeights(span);
+  // Manual S-curves — use configured weights if available, else fall back to even split
+  if (sCurve.startsWith('Manual S-curve') && manualSCurves) {
+    const num = parseInt(sCurve.replace('Manual S-curve ', '')) - 1; // 0-indexed
+    const curveWeights = manualSCurves[num];
+    if (curveWeights && curveWeights.length > 0) {
+      const total = curveWeights.reduce((a, b) => a + b, 0);
+      if (total > 0) return curveWeights.map(w => w / total);
+    }
   }
   return evenSplitWeights(span);
 }
 
 // Spread a cost item across periods
-export function spreadCost(item: CostLineItem, periods: Period[]): number[] {
+export function spreadCost(item: CostLineItem, periods: Period[], manualSCurves?: number[][]): number[] {
   const result = new Array(periods.length).fill(0);
   if (item.totalCosts === 0 || item.monthSpan <= 0) return result;
 
   const startIdx = item.monthStart - 1; // Convert 1-based to 0-based
   const span = item.monthSpan;
-  const weights = getSCurveWeights(item.sCurve, span);
+  const weights = getSCurveWeights(item.sCurve, span, manualSCurves);
 
   for (let i = 0; i < weights.length; i++) {
     const periodIdx = startIdx + i;
@@ -58,10 +63,10 @@ export function spreadCost(item: CostLineItem, periods: Period[]): number[] {
 }
 
 // Spread multiple cost items and sum
-export function spreadCosts(items: CostLineItem[], periods: Period[]): number[] {
+export function spreadCosts(items: CostLineItem[], periods: Period[], manualSCurves?: number[][]): number[] {
   const result = new Array(periods.length).fill(0);
   for (const item of items) {
-    const spread = spreadCost(item, periods);
+    const spread = spreadCost(item, periods, manualSCurves);
     for (let i = 0; i < result.length; i++) {
       result[i] += spread[i];
     }

@@ -61,6 +61,35 @@ export function calculateSellingCommissions(
   return { frontEnd, backEnd, total: frontEnd + backEnd };
 }
 
+// Spread back-end commissions at settlement months
+export function spreadBackEndCommissions(
+  grvItems: RevenueLineItem[],
+  sellingCosts: SellingCostConfig[],
+  periods: Period[],
+): number[] {
+  const result = new Array(periods.length).fill(0);
+  for (let i = 0; i < grvItems.length && i < sellingCosts.length; i++) {
+    const grv = grvItems[i];
+    const sc = sellingCosts[i];
+    if (!sc || grv.currentSalePrice === 0 || grv.settlementMonth <= 0) continue;
+
+    const totalCommission = grv.currentSalePrice * sc.salesCommission;
+    const backEnd = totalCommission * (1 - sc.preCommissionPercent);
+    if (backEnd <= 0) continue;
+
+    const startIdx = grv.settlementMonth - 1;
+    const span = grv.settlementSpan || 1;
+    const perMonth = backEnd / span;
+    for (let j = 0; j < span; j++) {
+      const idx = startIdx + j;
+      if (idx >= 0 && idx < periods.length) {
+        result[idx] += perMonth;
+      }
+    }
+  }
+  return result;
+}
+
 // Spread rental/other income
 export function spreadIncome(items: RentalIncomeItem[], periods: Period[]): number[] {
   const result = new Array(periods.length).fill(0);

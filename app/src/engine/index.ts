@@ -1,7 +1,7 @@
 import type { AdminConfig, MainInputs, DashboardData, MonthlyCashflow } from '../types';
 import { generateTimeline } from './timeline';
 import { spreadCosts, spreadLandPayments } from './costSpreading';
-import { spreadSettlements, spreadDeposits, spreadIncome, calculateSellingCommissions, totalGRV, totalNRV } from './revenue';
+import { spreadSettlements, spreadDeposits, spreadIncome, spreadBackEndCommissions, calculateSellingCommissions, totalGRV, totalNRV } from './revenue';
 import { solveFunding } from './funding';
 import { sum, calculateIRR } from '../utils';
 
@@ -36,18 +36,18 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     periods,
   );
 
-  const devCosts = spreadCosts(inputs.developmentCosts, periods);
-  const constCosts = spreadCosts(inputs.constructionCosts, periods);
+  const devCosts = spreadCosts(inputs.developmentCosts, periods, admin.manualSCurves);
+  const constCosts = spreadCosts(inputs.constructionCosts, periods, admin.manualSCurves);
 
   // Contingency
   const totalConstruction = sum(inputs.constructionCosts.map(c => c.totalCosts));
   const contingencyTotal = totalConstruction * inputs.constructionContingencyPercent;
   const contingency = constCosts.map(c => totalConstruction > 0 ? c / totalConstruction * contingencyTotal : 0);
 
-  const marketingCosts = spreadCosts(inputs.marketingCosts, periods);
-  const otherStdCosts = spreadCosts(inputs.otherStandardCosts, periods);
-  const pmFees = spreadCosts(inputs.pmFees, periods);
-  const otherFinCosts = spreadCosts(inputs.otherFinancingCosts, periods);
+  const marketingCosts = spreadCosts(inputs.marketingCosts, periods, admin.manualSCurves);
+  const otherStdCosts = spreadCosts(inputs.otherStandardCosts, periods, admin.manualSCurves);
+  const pmFees = spreadCosts(inputs.pmFees, periods, admin.manualSCurves);
+  const otherFinCosts = spreadCosts(inputs.otherFinancingCosts, periods, admin.manualSCurves);
 
   // Selling costs
   const commissions = calculateSellingCommissions(inputs.grvItems, inputs.sellingCosts);
@@ -65,6 +65,9 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       }
     }
   }
+
+  // Back-end commissions spread at settlement months
+  const backEndCommByPeriod = spreadBackEndCommissions(inputs.grvItems, inputs.sellingCosts, periods);
 
   // ===== 2. SPREAD REVENUE =====
   const settlements = spreadSettlements(inputs.grvItems, periods);
@@ -95,6 +98,11 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   for (let i = 0; i < n; i++) {
     gstOnCosts[i] += contingency[i] * gstRate;
   }
+  // GST on selling commissions (front-end at presale, back-end at settlement)
+  for (let i = 0; i < n; i++) {
+    gstOnCosts[i] += frontEndCommByPeriod[i] * gstRate;
+    gstOnCosts[i] += backEndCommByPeriod[i] * gstRate;
+  }
 
   // GST on revenue (residential only)
   for (const item of inputs.grvItems) {
@@ -118,7 +126,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       landPayments[i] + prsvPayments[i] + acquisitionCosts[i] +
       devCosts[i] + constCosts[i] + contingency[i] +
       marketingCosts[i] + otherStdCosts[i] + pmFees[i] +
-      otherFinCosts[i] + frontEndCommByPeriod[i] +
+      otherFinCosts[i] + frontEndCommByPeriod[i] + backEndCommByPeriod[i] +
       gstOnCosts[i];
   }
 
@@ -145,7 +153,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     otherStandardCosts: otherStdCosts[i],
     pmFees: pmFees[i],
     sellingCostsFrontEnd: frontEndCommByPeriod[i],
-    sellingCostsBackEnd: 0,
+    sellingCostsBackEnd: backEndCommByPeriod[i],
     lettingFees: 0,
     otherFinancingCosts: otherFinCosts[i],
     gstOnCosts: gstOnCosts[i],
@@ -183,7 +191,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       - cf.landCosts - cf.acquisitionCosts - cf.developmentCosts
       - cf.constructionCosts - cf.contingency - cf.marketingCosts
       - cf.otherStandardCosts - cf.pmFees - cf.sellingCostsFrontEnd
-      - cf.otherFinancingCosts - cf.gstOnCosts
+      - cf.sellingCostsBackEnd - cf.otherFinancingCosts - cf.gstOnCosts
+      - cf.gstOnRevenue
       - cf.landLoanInterest - cf.seniorInterest - cf.seniorFees
       - cf.mezzInterest - cf.mezzFees;
     cumCF += cf.netCashflow;
@@ -193,8 +202,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // ===== 7. AGGREGATE TOTALS =====
   const grv = totalGRV(inputs.grvItems);
   const totalLand = inputs.landPurchase.landPurchasePrice + inputs.landPurchase.prsvUplift;
-  const totalStampDuty = inputs.landPurchase.stampDutyAmount +
-    inputs.landPurchase.acquisitionCosts.reduce((s, a) => s + a.amount, 0);
+  // acquisitionCosts already contains stamp duty — do not double-count stampDutyAmount
+  const totalStampDuty = inputs.landPurchase.acquisitionCosts.reduce((s, a) => s + a.amount, 0);
   const totalBuildCosts = sum(inputs.constructionCosts.map(c => c.totalCosts));
   const totalContingency = contingencyTotal;
   const totalDevCosts = sum(inputs.developmentCosts.map(c => c.totalCosts));
@@ -269,6 +278,12 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // GRV Summary
   const totalAptGRV = inputs.grvItems
     .filter(g => g.revenueType === 'Residential')
+    .reduce((s, g) => s + g.currentSalePrice, 0);
+
+  // GRV sold/exchanged: items whose presale exchange month falls within the actuals window
+  const lastActualPeriodNum = periods.reduce((last, p) => p.isActual ? Math.max(last, p.periodNumber) : last, 0);
+  const grvSoldExchanged = inputs.grvItems
+    .filter(g => g.preSaleExchangeMonth > 0 && g.preSaleExchangeMonth <= lastActualPeriodNum)
     .reduce((s, g) => s + g.currentSalePrice, 0);
 
   return {
@@ -402,8 +417,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     },
     grvSummary: {
       totalApartmentGRV: totalAptGRV,
-      grvSoldExchanged: 134062299,
-      unsoldGRV: totalAptGRV - 134062299,
+      grvSoldExchanged: grvSoldExchanged,
+      unsoldGRV: totalAptGRV - grvSoldExchanged,
     },
     cashflows,
   };
