@@ -207,6 +207,7 @@ export const defaultEquityKokoda: EquityConfig = {
   repayEquityBeforeDebt: 0,
   equityContribution: 1.0,
   profitShare: 1.0,
+  drawdownPriority: 3, // equity drawn last (after senior and mezz)
 };
 
 export const defaultEquityJV: EquityConfig = {
@@ -218,6 +219,7 @@ export const defaultEquityJV: EquityConfig = {
   repayEquityBeforeDebt: 0,
   equityContribution: 0,
   profitShare: 0,
+  drawdownPriority: 3,
 };
 
 export const defaultEquityPreferred: EquityConfig = {
@@ -229,6 +231,7 @@ export const defaultEquityPreferred: EquityConfig = {
   repayEquityBeforeDebt: 0,
   equityContribution: 0,
   profitShare: 0,
+  drawdownPriority: 3,
 };
 
 export const defaultEquityAdditional: EquityConfig = {
@@ -240,6 +243,7 @@ export const defaultEquityAdditional: EquityConfig = {
   repayEquityBeforeDebt: 0,
   equityContribution: 0,
   profitShare: 0,
+  drawdownPriority: 3,
 };
 
 // ===== DEBT FACILITIES =====
@@ -257,6 +261,7 @@ export const defaultLandLoan: DebtFacility = {
   isCapitalised: false,
   ltcTarget: 0,
   lvrTarget: 0,
+  drawdownPriority: 0, // land loan is a lump-sum at fixed date, not part of gap-fill sequence
 };
 
 export const defaultMezzanine: DebtFacility = {
@@ -273,6 +278,7 @@ export const defaultMezzanine: DebtFacility = {
   isCapitalised: true,
   ltcTarget: 0.1,
   lvrTarget: 0,
+  drawdownPriority: 2, // mezz drawn second (after senior)
 };
 
 export const defaultSeniorFacility: DebtFacility = {
@@ -289,6 +295,7 @@ export const defaultSeniorFacility: DebtFacility = {
   isCapitalised: true,
   ltcTarget: 0.89,
   lvrTarget: 0.72,
+  drawdownPriority: 1, // senior drawn first
 };
 
 export const defaultResidualStock: DebtFacility = {
@@ -305,6 +312,7 @@ export const defaultResidualStock: DebtFacility = {
   isCapitalised: true,
   ltcTarget: 0.84,
   lvrTarget: 0.754,
+  drawdownPriority: 4,
 };
 
 export const defaultAdditionalLoan: DebtFacility = {
@@ -321,6 +329,7 @@ export const defaultAdditionalLoan: DebtFacility = {
   isCapitalised: true,
   ltcTarget: 0,
   lvrTarget: 0,
+  drawdownPriority: 5,
 };
 
 // ===== OTHER FINANCING COSTS =====

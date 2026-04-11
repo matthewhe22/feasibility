@@ -1,6 +1,39 @@
 import { useStore } from '../../store/useStore';
 import { CurrencyInput, PercentInput, NumberInput, SectionHeader } from '../common/FormFields';
+import { computeDrawdownSequence } from '../../engine/funding';
 import type { EquityConfig, DebtFacility } from '../../types';
+
+// ===== DRAWDOWN SEQUENCE BANNER =====
+
+function DrawdownSequenceBanner({ inputs }: { inputs: ReturnType<typeof useStore>['inputs'] }) {
+  const sequence = computeDrawdownSequence(inputs);
+  return (
+    <div className="mb-4 border border-indigo-200 rounded bg-indigo-50 p-3">
+      <p className="text-xs font-bold text-indigo-800 mb-2">Drawdown Sequence (gap-fill order)</p>
+      <div className="flex items-center gap-2 flex-wrap">
+        {sequence.map((entry, idx) => (
+          <div key={entry.type} className="flex items-center gap-1">
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] font-bold">
+              {idx + 1}
+            </span>
+            <span className="text-xs text-indigo-900 font-medium">{entry.name}</span>
+            <span className="text-[10px] text-indigo-500">({entry.type})</span>
+            {idx < sequence.length - 1 && (
+              <span className="text-indigo-400 font-bold mx-1">→</span>
+            )}
+          </div>
+        ))}
+        <span className="text-[10px] text-indigo-400 ml-2">→ equity backstop (uncapped)</span>
+      </div>
+      <p className="text-[10px] text-indigo-500 mt-1.5">
+        Set <strong>Drawdown Priority</strong> on each facility below (1&nbsp;=&nbsp;first drawn, higher&nbsp;=&nbsp;later).
+        The land loan is excluded — it is always drawn as a lump sum at its fixed start month.
+      </p>
+    </div>
+  );
+}
+
+// ===== EQUITY SECTION =====
 
 function EquitySection({ title, config, onChange }: {
   title: string;
@@ -24,14 +57,25 @@ function EquitySection({ title, config, onChange }: {
         <PercentInput label="Repay Equity Before Debt %" value={config.repayEquityBeforeDebt} onChange={v => update('repayEquityBeforeDebt', v)} />
         <PercentInput label="Equity Contribution %" value={config.equityContribution} onChange={v => update('equityContribution', v)} />
         <PercentInput label="Profit Share %" value={config.profitShare} onChange={v => update('profitShare', v)} />
+        <div className="border-t border-gray-100 pt-1.5 mt-1.5">
+          <p className="text-[10px] font-semibold text-indigo-600 mb-1">Drawdown Sequence</p>
+          <NumberInput
+            label="Drawdown Priority (1 = first drawn)"
+            value={config.drawdownPriority}
+            onChange={v => update('drawdownPriority', v)}
+          />
+        </div>
       </div>
     </div>
   );
 }
 
-function DebtSection({ title, facility, onChange }: {
+// ===== DEBT SECTION =====
+
+function DebtSection({ title, facility, isLandLoan = false, onChange }: {
   title: string;
   facility: DebtFacility;
+  isLandLoan?: boolean;
   onChange: (f: DebtFacility) => void;
 }) {
   const update = (field: keyof DebtFacility, value: any) => {
@@ -68,10 +112,27 @@ function DebtSection({ title, facility, onChange }: {
           <PercentInput label="Target LTC" value={facility.ltcTarget} onChange={v => update('ltcTarget', v)} />
           <PercentInput label="Target LVR" value={facility.lvrTarget} onChange={v => update('lvrTarget', v)} />
         </div>
+        <div className="border-t border-gray-100 pt-1.5 mt-1.5">
+          <p className="text-[10px] font-semibold text-indigo-600 mb-1">Drawdown Sequence</p>
+          {isLandLoan ? (
+            <p className="text-[10px] text-gray-400 italic">
+              Land loan is drawn as a lump sum at its fixed start month and is not part of
+              the configurable gap-fill sequence.
+            </p>
+          ) : (
+            <NumberInput
+              label="Drawdown Priority (1 = first drawn)"
+              value={facility.drawdownPriority}
+              onChange={v => update('drawdownPriority', v)}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
 }
+
+// ===== MAIN COMPONENT =====
 
 export function FinancingInputs() {
   const { inputs, setInputs } = useStore();
@@ -80,6 +141,9 @@ export function FinancingInputs() {
     <div>
       <SectionHeader number="4" title="FINANCING" />
       <div className="bg-white border border-t-0 border-gray-200 rounded-b p-4">
+
+        <DrawdownSequenceBanner inputs={inputs} />
+
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {/* Left column: Equity */}
           <div>
@@ -112,6 +176,7 @@ export function FinancingInputs() {
             <DebtSection
               title="Land Loan Facility"
               facility={inputs.landLoan}
+              isLandLoan={true}
               onChange={(f) => setInputs({ landLoan: f })}
             />
             <DebtSection

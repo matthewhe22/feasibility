@@ -1,6 +1,45 @@
 import type { Period, MainInputs } from '../types';
 import { sum } from '../utils';
 
+// ===== DRAWDOWN SEQUENCE =====
+
+export type DrawdownFacilityType = 'equity' | 'senior' | 'mezz';
+
+export interface DrawdownSequenceEntry {
+  type: DrawdownFacilityType;
+  name: string;
+  priority: number;
+}
+
+/**
+ * Returns the drawdown sequence for the three main funding sources — senior debt,
+ * mezzanine debt, and equity — sorted by their user-configured drawdownPriority
+ * (1 = drawn first, higher = drawn later).
+ *
+ * The land loan is excluded because it is drawn as a fixed lump sum at a specific
+ * date and is not part of the flexible gap-filling waterfall.
+ */
+export function computeDrawdownSequence(inputs: MainInputs): DrawdownSequenceEntry[] {
+  const entries: DrawdownSequenceEntry[] = [
+    {
+      type: 'senior',
+      name: inputs.seniorFacility.name,
+      priority: inputs.seniorFacility.drawdownPriority ?? 1,
+    },
+    {
+      type: 'mezz',
+      name: inputs.mezzanine.name,
+      priority: inputs.mezzanine.drawdownPriority ?? 2,
+    },
+    {
+      type: 'equity',
+      name: inputs.equityKokoda.name,
+      priority: inputs.equityKokoda.drawdownPriority ?? 3,
+    },
+  ];
+  return entries.sort((a, b) => a.priority - b.priority);
+}
+
 export interface FundingResult {
   // Monthly arrays
   landLoanBalance: number[];
@@ -104,6 +143,9 @@ function runFundingWaterfall(
   const landLoan = inputs.landLoan;
   const senior = inputs.seniorFacility;
   const mezz = inputs.mezzanine;
+
+  // Pre-compute drawdown sequence (sorted by priority, ascending = drawn first)
+  const drawdownSequence = computeDrawdownSequence(inputs);
 
   // ===== Compute NRV for LVR =====
   const totalGRV = inputs.grvItems.reduce((s, g) => s + g.currentSalePrice, 0);
@@ -227,90 +269,81 @@ function runFundingWaterfall(
     // === ACCUMULATE COSTS ===
     cumulativeCosts += monthlyCostsExcFinance[i];
 
-    // === FUNDING GAP ===
-    const totalNeed = cumulativeCosts + cumulativeFinanceCosts;
-    const totalFunded = cumulativeEquity + cumulativeMezz + cumulativeSenior + cumulativeLandLoan;
-    const gap = totalNeed - totalFunded;
-
-    // === EQUITY (before any debt starts) ===
-    const mezzActiveNow = mezzActive;
-    const seniorActiveNow = seniorActive;
-
-    if (gap > 0 && !seniorActiveNow && !mezzActiveNow) {
-      eqInjections[i] = gap;
-      cumulativeEquity += gap;
-    } else if (gap > 0 && !seniorActiveNow && mezzActiveNow) {
-      // Equity up to cap, mezz for rest
-      if (cumulativeEquity < equityCap) {
-        const eqNeeded = Math.min(gap, equityCap - cumulativeEquity);
-        eqInjections[i] += eqNeeded;
-        cumulativeEquity += eqNeeded;
-      }
-      const remainGap = totalNeed - (cumulativeEquity + cumulativeMezz + cumulativeSenior + cumulativeLandLoan);
-      if (remainGap > 0 && totalMezzDrawn < mezzLimit) {
-        const mezzDraw = Math.min(remainGap, mezzLimit - totalMezzDrawn);
-        mzDrawdowns[i] = mezzDraw;
-        totalMezzDrawn += mezzDraw;
-        cumulativeMezz += mezzDraw;
-        mzRunningBalance += mezzDraw;
-      }
-    }
-
-    // === SENIOR FACILITY ===
-    if (seniorActiveNow) {
+    // === SENIOR INITIALIZATION (at snrStartIdx only — land loan refi + excess equity repatriation) ===
+    // These special draws are accumulated in snrDrawdowns[i] but cumulativeSenior is
+    // updated below (after the gap fill) to preserve the original gap-calc behaviour.
+    if (hasSenior && i === snrStartIdx) {
       // Refinance land loan into senior
-      if (i === snrStartIdx && llRepayments[i] > 0) {
+      if (llRepayments[i] > 0) {
         snrDrawdowns[i] += llRepayments[i];
       }
-
-      // Repatriation of excess equity
-      if (i === snrStartIdx && cumulativeEquity > equityCap) {
+      // Repatriate any equity that was injected above the cap back into senior
+      if (cumulativeEquity > equityCap) {
         const excessEquity = cumulativeEquity - equityCap;
         snrDrawdowns[i] += excessEquity;
         eqRepatriations[i] += excessEquity;
         cumulativeEquity -= excessEquity;
       }
+    }
 
-      // Recalculate gap after refinancing/repatriation
-      const curTotalNeed = cumulativeCosts + cumulativeFinanceCosts;
-      const curTotalFunded = cumulativeEquity + cumulativeMezz + cumulativeSenior + cumulativeLandLoan;
-      const seniorGap = curTotalNeed - curTotalFunded;
+    // === GAP FILLING via user-configured drawdown sequence ===
+    // `snrDrawdowns[i]` may already contain the refinancing amount from above, but
+    // `cumulativeSenior` has NOT been updated yet — this matches the original pattern
+    // where the senior cumulative is flushed once after all draws for the period.
+    {
+      const totalNeed = cumulativeCosts + cumulativeFinanceCosts;
+      const totalFunded = cumulativeEquity + cumulativeMezz + cumulativeSenior + cumulativeLandLoan;
+      let remainGap = Math.max(0, totalNeed - totalFunded);
 
-      // Draw from senior for remaining gap
-      if (seniorGap > 0) {
-        const available = seniorLimit - totalSnrDrawn;
-        const draw = Math.min(seniorGap, Math.max(0, available));
-        if (draw > 0) {
-          snrDrawdowns[i] += draw;
+      if (remainGap > 0) {
+        // Track senior draws added in the init block above so capacity is computed correctly
+        const snrInitDrawnThisPeriod = snrDrawdowns[i];
+
+        for (const entry of drawdownSequence) {
+          if (remainGap <= 0) break;
+
+          if (entry.type === 'senior' && hasSenior && i >= snrStartIdx) {
+            // Remaining capacity accounts for refinancing already in snrDrawdowns[i]
+            const available = Math.max(0, seniorLimit - totalSnrDrawn - snrInitDrawnThisPeriod);
+            if (available > 0) {
+              const draw = Math.min(remainGap, available);
+              snrDrawdowns[i] += draw;
+              remainGap -= draw;
+            }
+          } else if (entry.type === 'mezz' && hasMezz && i >= mezzStartIdx) {
+            const available = Math.max(0, mezzLimit - totalMezzDrawn);
+            if (available > 0) {
+              const draw = Math.min(remainGap, available);
+              mzDrawdowns[i] += draw;
+              totalMezzDrawn += draw;
+              cumulativeMezz += draw;
+              mzRunningBalance += draw;
+              remainGap -= draw;
+            }
+          } else if (entry.type === 'equity') {
+            const available = Math.max(0, equityCap - cumulativeEquity);
+            if (available > 0) {
+              const draw = Math.min(remainGap, available);
+              eqInjections[i] += draw;
+              cumulativeEquity += draw;
+              remainGap -= draw;
+            }
+          }
+        }
+
+        // Equity backstop: if all configured facilities are exhausted, inject uncapped equity
+        if (remainGap > 0) {
+          eqInjections[i] += remainGap;
+          cumulativeEquity += remainGap;
         }
       }
+    }
 
+    // Flush senior cumulative tracking for this period (init draws + gap-fill draws)
+    if (hasSenior && i >= snrStartIdx) {
       totalSnrDrawn += snrDrawdowns[i];
       cumulativeSenior += snrDrawdowns[i];
       snrRunningBalance += snrDrawdowns[i];
-
-      // === MEZZANINE alongside senior (for remaining gap after senior maxed) ===
-      if (mezzActiveNow) {
-        const postSnrNeed = cumulativeCosts + cumulativeFinanceCosts;
-        const postSnrFunded = cumulativeEquity + cumulativeSenior + cumulativeMezz + cumulativeLandLoan;
-        const postSnrGap = postSnrNeed - postSnrFunded;
-        if (postSnrGap > 0 && totalMezzDrawn < mezzLimit) {
-          const draw = Math.min(postSnrGap, mezzLimit - totalMezzDrawn);
-          mzDrawdowns[i] += draw;
-          totalMezzDrawn += draw;
-          cumulativeMezz += draw;
-          mzRunningBalance += draw;
-        }
-      }
-
-      // Additional equity if all debt facilities maxed
-      const finalNeed = cumulativeCosts + cumulativeFinanceCosts;
-      const finalFunded = cumulativeEquity + cumulativeSenior + cumulativeMezz + cumulativeLandLoan;
-      const finalGap = finalNeed - finalFunded;
-      if (finalGap > 0) {
-        eqInjections[i] += finalGap;
-        cumulativeEquity += finalGap;
-      }
     }
 
     // === REVENUE REPAYMENTS (integrated - reduces balance for interest calc) ===
@@ -341,7 +374,7 @@ function runFundingWaterfall(
     }
 
     // Senior fees
-    if (seniorActiveNow) {
+    if (seniorActive) {
       let periodFees = 0;
       // Line fee (only while facility has outstanding balance)
       if (snrRunningBalance > 0) {

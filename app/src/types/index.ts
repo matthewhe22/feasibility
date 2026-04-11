@@ -134,6 +134,7 @@ export interface EquityConfig {
   repayEquityBeforeDebt: number;
   equityContribution: number;
   profitShare: number;
+  drawdownPriority: number; // 1 = drawn first, higher = drawn later; equity default 3
 }
 
 export interface DebtFacility {
@@ -150,6 +151,7 @@ export interface DebtFacility {
   isCapitalised: boolean;
   ltcTarget: number;
   lvrTarget: number;
+  drawdownPriority: number; // 1 = drawn first, higher = drawn later; senior default 1, mezz default 2
 }
 
 // ===== ADMIN =====
