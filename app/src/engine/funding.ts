@@ -240,7 +240,6 @@ function runFundingWaterfall(
   for (let i = 0; i < n; i++) {
     const days = periods[i].daysInPeriod;
     const seniorActive = hasSenior && i >= snrStartIdx;
-    const mezzActive = hasMezz && i >= mezzStartIdx;
 
     // === LAND LOAN ===
     if (i === llStartIdx && landLoan.facilityLimit > 0) {

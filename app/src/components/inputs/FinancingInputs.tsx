@@ -1,11 +1,11 @@
 import { useStore } from '../../store/useStore';
 import { CurrencyInput, PercentInput, NumberInput, SectionHeader } from '../common/FormFields';
 import { computeDrawdownSequence } from '../../engine/funding';
-import type { EquityConfig, DebtFacility } from '../../types';
+import type { EquityConfig, DebtFacility, MainInputs } from '../../types';
 
 // ===== DRAWDOWN SEQUENCE BANNER =====
 
-function DrawdownSequenceBanner({ inputs }: { inputs: ReturnType<typeof useStore>['inputs'] }) {
+function DrawdownSequenceBanner({ inputs }: { inputs: MainInputs }) {
   const sequence = computeDrawdownSequence(inputs);
   return (
     <div className="mb-4 border border-indigo-200 rounded bg-indigo-50 p-3">
