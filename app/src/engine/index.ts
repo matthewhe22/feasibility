@@ -156,10 +156,14 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   }
 
   // ===== 5. FUNDING & DEBT SOLVING =====
+  // Include rental and other income in the waterfall so these cash flows are
+  // swept to debt repayment / profit distribution rather than left as a
+  // positive residual in the cumulative cashflow.
+  const totalMonthlyRevenue = settlements.map((s, i) => s + rentalInc[i] + otherInc[i]);
   const funding = solveFunding(
     periods,
     monthlyCostsExcFinance,
-    settlements,
+    totalMonthlyRevenue,
     monthlyGSTNet,
     gstOnRevenue,
     inputs,

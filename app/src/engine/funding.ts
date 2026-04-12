@@ -314,6 +314,12 @@ function runFundingWaterfall(
         llAccruedInterest = 0;
       }
       llRepayments[i] = llRunningBalance;
+      // Remove land loan from cumulative funding — it is being replaced by the
+      // senior refi draw added in step 7.  Without this, both cumulativeLandLoan
+      // and cumulativeSenior (refi draw) would count the same principal, inflating
+      // totalFunded by the full land-loan amount and blocking gap-fill draws for
+      // several periods (the "dead zone").
+      cumulativeLandLoan -= llRunningBalance;
       llRunningBalance = 0;
     }
     llBalance[i] = llRunningBalance;
@@ -403,6 +409,11 @@ function runFundingWaterfall(
     if (hasSenior && i === snrStartIdx) {
       if (llRepayments[i] > 0) {
         snrDrawdowns[i] += llRepayments[i];
+        // Credit the refi draw into cumulativeSenior immediately so the gap-fill
+        // in step 8 sees the correct totalFunded (land-loan slot transferred to
+        // senior slot, net change = 0).  The flush in step 10 must not double-add
+        // this amount — it subtracts llRepayments[i] again there.
+        cumulativeSenior += llRepayments[i];
       }
       if (cumulativeEquity > equityCap) {
         const excessEquity = cumulativeEquity - equityCap;
@@ -460,10 +471,13 @@ function runFundingWaterfall(
       }
     }
 
-    // Flush senior cumulative tracking for this period (init + gap-fill draws)
+    // Flush senior cumulative tracking for this period (init + gap-fill draws).
+    // At snrStartIdx the refi draw was already credited to cumulativeSenior in
+    // step 7, so subtract it here to avoid double-counting.
     if (hasSenior && i >= snrStartIdx) {
+      const refiAlreadyCounted = (i === snrStartIdx) ? llRepayments[i] : 0;
       totalSnrDrawn += snrDrawdowns[i];
-      cumulativeSenior += snrDrawdowns[i];
+      cumulativeSenior += snrDrawdowns[i] - refiAlreadyCounted;
       snrRunningBalance += snrDrawdowns[i];
     }
 
