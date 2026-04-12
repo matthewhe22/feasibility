@@ -70,6 +70,7 @@ export interface CostLineItem {
   addGST: boolean;
   ctd: number;
   ctc: number;
+  actuals?: number[]; // per-period actual spend (0-based period index); overrides forecast for actual periods
 }
 
 export interface ConstructionCostItem extends CostLineItem {
@@ -166,6 +167,7 @@ export interface AdminConfig {
   currency: string;
   sCurveOptions: string[];
   manualSCurves: number[][]; // 3 manual s-curves, each array of monthly %
+  buildSCurves: Record<number, number[]>; // keyed by build duration (12–60), monthly weights
 }
 
 // ===== MAIN INPUTS =====
@@ -386,7 +388,7 @@ export interface DashboardData {
   equityReturns: {
     total: EquityReturnSummary;
     jvPartner: EquityReturnSummary;
-    kokoda: EquityReturnSummary;
+    developer: EquityReturnSummary;
   };
   otherIndicators: {
     peakInterestHoldingCostPerMonth: number;
@@ -397,4 +399,5 @@ export interface DashboardData {
     unsoldGRV: number;
   };
   cashflows: MonthlyCashflow[];
+  warnings: string[]; // S-curve and other calculation warnings
 }

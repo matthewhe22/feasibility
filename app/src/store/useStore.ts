@@ -69,6 +69,7 @@ export const useStore = create<AppState>((set) => ({
       'Manual S-curve 3',
     ],
     manualSCurves: [[], [], []],
+    buildSCurves: {},
   },
   setAdmin: (admin) => set((s) => ({ admin: { ...s.admin, ...admin } })),
 

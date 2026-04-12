@@ -83,17 +83,17 @@ export function ExternalDashboard() {
                     <th className="px-2 py-1 text-left">Description</th>
                     <th className="px-2 py-1 text-right">Total</th>
                     <th className="px-2 py-1 text-right">JV Partner</th>
-                    <th className="px-2 py-1 text-right">Kokoda</th>
+                    <th className="px-2 py-1 text-right">Developer</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr className="bg-green-50 font-semibold"><td colSpan={4} className="px-2 py-0.5">EQUITY IN</td></tr>
-                  <tr className="border-b"><td className="px-2 py-0.5">Funding Contribution %</td><td className="px-2 py-0.5 text-right">{formatPercent(1)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.jvPartner.fundingContribPercent)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.kokoda.fundingContribPercent)}</td></tr>
-                  <tr className="border-b"><td className="px-2 py-0.5">Equity Contributed</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.total.totalEquityContributed)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.jvPartner.totalEquityContributed)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.kokoda.totalEquityContributed)}</td></tr>
-                  <tr className="border-b"><td className="px-2 py-0.5">IRR</td><td className="px-2 py-0.5 text-right">{formatPercent(er.total.irr)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.jvPartner.irr)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.kokoda.irr)}</td></tr>
+                  <tr className="border-b"><td className="px-2 py-0.5">Funding Contribution %</td><td className="px-2 py-0.5 text-right">{formatPercent(1)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.jvPartner.fundingContribPercent)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.developer.fundingContribPercent)}</td></tr>
+                  <tr className="border-b"><td className="px-2 py-0.5">Equity Contributed</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.total.totalEquityContributed)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.jvPartner.totalEquityContributed)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.developer.totalEquityContributed)}</td></tr>
+                  <tr className="border-b"><td className="px-2 py-0.5">IRR</td><td className="px-2 py-0.5 text-right">{formatPercent(er.total.irr)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.jvPartner.irr)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.developer.irr)}</td></tr>
                   <tr className="bg-green-50 font-semibold"><td colSpan={4} className="px-2 py-0.5">EQUITY OUT</td></tr>
-                  <tr className="border-b"><td className="px-2 py-0.5">Total Equity Repatriation</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.total.totalEquityRepatriation)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.jvPartner.totalEquityRepatriation)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.kokoda.totalEquityRepatriation)}</td></tr>
-                  <tr className="bg-green-100 font-bold"><td className="px-2 py-1">Total Profit Share</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.total.totalProfitShare)}</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.jvPartner.totalProfitShare)}</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.kokoda.totalProfitShare)}</td></tr>
+                  <tr className="border-b"><td className="px-2 py-0.5">Total Equity Repatriation</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.total.totalEquityRepatriation)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.jvPartner.totalEquityRepatriation)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.developer.totalEquityRepatriation)}</td></tr>
+                  <tr className="bg-green-100 font-bold"><td className="px-2 py-1">Total Profit Share</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.total.totalProfitShare)}</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.jvPartner.totalProfitShare)}</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.developer.totalProfitShare)}</td></tr>
                 </tbody>
               </table>
             </div>

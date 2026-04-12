@@ -55,13 +55,15 @@ const TABS: { id: TabId; label: string }[] = [
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
-  const { activeTab, setActiveTab, admin, inputs, setDashboardData, isCalculating, setIsCalculating } = useStore();
+  const { activeTab, setActiveTab, admin, inputs, setDashboardData, dashboardData, isCalculating, setIsCalculating } = useStore();
   const [showProjectManager, setShowProjectManager] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
+  const [dismissedWarnings, setDismissedWarnings] = useState(false);
 
   const calculate = () => {
     setIsCalculating(true);
     setCalcError(null);
+    setDismissedWarnings(false);
     setTimeout(() => {
       try {
         const result = runCalculations(admin, inputs);
@@ -110,6 +112,19 @@ function App() {
         <div className="bg-red-100 border-b border-red-300 px-4 py-2 flex items-center justify-between">
           <span className="text-red-700 text-xs font-mono">Calculation error: {calcError}</span>
           <button onClick={() => setCalcError(null)} className="text-red-500 text-xs underline ml-4">Dismiss</button>
+        </div>
+      )}
+
+      {/* S-curve warnings banner */}
+      {!dismissedWarnings && dashboardData?.warnings && dashboardData.warnings.length > 0 && (
+        <div className="bg-yellow-50 border-b border-yellow-300 px-4 py-2 flex items-start justify-between">
+          <div>
+            <span className="text-yellow-800 text-xs font-semibold">S-Curve Warning: </span>
+            {dashboardData.warnings.map((w, i) => (
+              <span key={i} className="text-yellow-700 text-xs font-mono block">{w}</span>
+            ))}
+          </div>
+          <button onClick={() => setDismissedWarnings(true)} className="text-yellow-600 text-xs underline ml-4 shrink-0">Dismiss</button>
         </div>
       )}
 

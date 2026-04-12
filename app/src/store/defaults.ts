@@ -199,7 +199,7 @@ export const defaultOtherIncome: RentalIncomeItem[] = [
 
 // ===== EQUITY =====
 export const defaultEquityKokoda: EquityConfig = {
-  name: 'Kokoda Property Group',
+  name: 'Developer',
   fixedAmount: 130419982,
   percentage: 0.1,
   interestRate: 0,
@@ -207,7 +207,7 @@ export const defaultEquityKokoda: EquityConfig = {
   repayEquityBeforeDebt: 0,
   equityContribution: 1.0,
   profitShare: 1.0,
-  drawdownPriority: 3, // equity drawn last (after senior and mezz)
+  drawdownPriority: 1, // equity drawn first (before debt)
 };
 
 export const defaultEquityJV: EquityConfig = {
@@ -219,7 +219,7 @@ export const defaultEquityJV: EquityConfig = {
   repayEquityBeforeDebt: 0,
   equityContribution: 0,
   profitShare: 0,
-  drawdownPriority: 3,
+  drawdownPriority: 1,
 };
 
 export const defaultEquityPreferred: EquityConfig = {
@@ -231,7 +231,7 @@ export const defaultEquityPreferred: EquityConfig = {
   repayEquityBeforeDebt: 0,
   equityContribution: 0,
   profitShare: 0,
-  drawdownPriority: 3,
+  drawdownPriority: 1,
 };
 
 export const defaultEquityAdditional: EquityConfig = {
@@ -243,7 +243,7 @@ export const defaultEquityAdditional: EquityConfig = {
   repayEquityBeforeDebt: 0,
   equityContribution: 0,
   profitShare: 0,
-  drawdownPriority: 3,
+  drawdownPriority: 1,
 };
 
 // ===== DEBT FACILITIES =====
@@ -278,7 +278,7 @@ export const defaultMezzanine: DebtFacility = {
   isCapitalised: true,
   ltcTarget: 0.1,
   lvrTarget: 0,
-  drawdownPriority: 2, // mezz drawn second (after senior)
+  drawdownPriority: 3, // mezz drawn third (after equity, before senior)
 };
 
 export const defaultSeniorFacility: DebtFacility = {
@@ -295,7 +295,7 @@ export const defaultSeniorFacility: DebtFacility = {
   isCapitalised: true,
   ltcTarget: 0.89,
   lvrTarget: 0.72,
-  drawdownPriority: 1, // senior drawn first
+  drawdownPriority: 4, // senior drawn last (after equity, land loan, mezz)
 };
 
 export const defaultResidualStock: DebtFacility = {

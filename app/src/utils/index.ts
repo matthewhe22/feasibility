@@ -81,6 +81,14 @@ export function sum(arr: number[]): number {
 export function calculateIRR(cashflows: number[], guess = 0.1, maxIter = 1000, tolerance = 1e-7): number {
   if (cashflows.length === 0) return 0;
 
+  // All-zero cashflows → no return
+  if (cashflows.every(cf => cf === 0)) return 0;
+
+  // All same sign → no IRR exists (need at least one sign change)
+  const hasPositive = cashflows.some(cf => cf > 0);
+  const hasNegative = cashflows.some(cf => cf < 0);
+  if (!hasPositive || !hasNegative) return 0;
+
   let rate = guess;
   for (let i = 0; i < maxIter; i++) {
     let npv = 0;
@@ -90,10 +98,29 @@ export function calculateIRR(cashflows: number[], guess = 0.1, maxIter = 1000, t
       npv += cashflows[t] / factor;
       dnpv -= (t * cashflows[t]) / (factor * (1 + rate));
     }
+
     if (Math.abs(npv) < tolerance) break;
-    if (dnpv === 0) break;
-    rate = rate - npv / dnpv;
+
+    // Guard: derivative is zero or not finite
+    if (dnpv === 0 || !isFinite(dnpv)) return 0;
+
+    const newRate = rate - npv / dnpv;
+
+    // Guard: result is not finite or rate collapsed below -100%
+    if (!isFinite(newRate) || newRate <= -1) {
+      // Bisect toward 0 to recover
+      rate = rate > 0 ? rate / 2 : -rate / 2;
+      continue;
+    }
+
+    if (Math.abs(newRate - rate) < tolerance) {
+      rate = newRate;
+      break;
+    }
+    rate = newRate;
   }
+
+  if (!isFinite(rate) || rate <= -1) return 0;
 
   // Convert monthly to annual
   return Math.pow(1 + rate, 12) - 1;

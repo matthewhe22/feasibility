@@ -243,12 +243,37 @@ function runFundingWaterfall(
   const snrAllInRate = senior.margin + senior.bbsy;
   const mezzAllInRate = mezz.margin + mezz.bbsy;
 
-  // ===== SINGLE PASS: Drawdowns + Repayments + Interest =====
+  // ===== SINGLE PASS: Drawdowns + Interest (on opening balance) + Repayments =====
+  //
+  // Key ordering principle for "interest on opening balance":
+  //   Interest for period i is charged on the balance at the START of period i —
+  //   i.e., before any draws or repayments occur in period i.  New drawdowns in
+  //   period i do not incur interest until period i+1.
+  //
+  // Loop order:
+  //   1. Save opening balances
+  //   2. Land loan lump-sum draw (at llStartIdx)
+  //   3. Land loan interest on opening balance (not on post-draw balance)
+  //   4. Land loan repayment at snrStartIdx (flush accrued + repay principal)
+  //   5. Accumulate period operating costs
+  //   6. Senior & mezz interest/fees on opening balances BEFORE gap fill
+  //      – non-capitalised → added to cumulativeFinanceCosts so gap fill covers them
+  //      – capitalised → accrete to running balance (repaid later via revenue)
+  //   7. Senior initialisation (land loan refi + excess equity repatriation)
+  //   8. Gap fill (drawdowns to cover costs + non-capitalised finance charges)
+  //   9. Revenue repayments (sweep excess cash to debt → equity → profit)
+  //  10. Record closing balances
+
   for (let i = 0; i < n; i++) {
     const days = periods[i].daysInPeriod;
     const seniorActive = hasSenior && i >= snrStartIdx;
 
-    // === LAND LOAN ===
+    // ── 1. Save opening balances (before any period activity) ──────────────────
+    const llOpenBalance  = llRunningBalance;
+    const snrOpenBalance = snrRunningBalance;
+    const mzOpenBalance  = mzRunningBalance;
+
+    // ── 2. Land loan lump-sum draw ─────────────────────────────────────────────
     if (i === llStartIdx && landLoan.facilityLimit > 0) {
       llDrawdowns[i] = landLoan.facilityLimit;
       cumulativeLandLoan += landLoan.facilityLimit;
@@ -259,9 +284,12 @@ function runFundingWaterfall(
       cumulativeFinanceCosts += estFee;
     }
 
-    // Land loan interest — accrue monthly, charge at quarter-end boundaries
-    if (llRunningBalance > 0) {
-      const accrued = periodInterest(llRunningBalance, landLoan.interestRate, days, daysPerYear);
+    // ── 3. Land loan interest on opening balance ───────────────────────────────
+    // Interest accrues monthly on the opening balance; charged at quarter-end.
+    // In the period the land loan is first drawn, opening balance = 0 so no
+    // interest is due in that period (correct: first interest quarter starts next period).
+    if (llOpenBalance > 0) {
+      const accrued = periodInterest(llOpenBalance, landLoan.interestRate, days, daysPerYear);
       llAccruedInterest += accrued;
 
       const monthsSinceLLStart = i - llStartIdx;
@@ -276,9 +304,9 @@ function runFundingWaterfall(
       }
     }
 
-    // Land loan repaid when senior starts (refinanced into senior)
-    // Flush any remaining accrued interest before recording repayment
+    // ── 4. Land loan repayment at senior start (refinanced into senior) ────────
     if (hasSenior && i === snrStartIdx && llRunningBalance > 0) {
+      // Flush any remaining accrued interest
       if (llAccruedInterest > 0) {
         llInterest[i] += llAccruedInterest;
         totalLandInterest += llAccruedInterest;
@@ -290,18 +318,92 @@ function runFundingWaterfall(
     }
     llBalance[i] = llRunningBalance;
 
-    // === ACCUMULATE COSTS ===
+    // ── 5. Accumulate period operating costs ───────────────────────────────────
     cumulativeCosts += monthlyCostsExcFinance[i];
 
-    // === SENIOR INITIALIZATION (at snrStartIdx only — land loan refi + excess equity repatriation) ===
-    // These special draws are accumulated in snrDrawdowns[i] but cumulativeSenior is
-    // updated below (after the gap fill) to preserve the original gap-calc behaviour.
+    // ── 6. Senior & mezz interest/fees on opening balances (BEFORE gap fill) ───
+    //
+    // Charging interest on the opening balance (before this period's draws) is the
+    // correct financial convention.  Non-capitalised charges are added to
+    // cumulativeFinanceCosts so the gap fill in step 8 will draw enough to cover them.
+    // Capitalised charges accrete to the running balance; they are not cash flows and
+    // do not trigger additional gap-fill drawdowns.
+
+    // Senior interest (on opening balance, before gap fill draws)
+    if (snrOpenBalance > 0) {
+      const snrInt = periodInterest(snrOpenBalance, snrAllInRate, days, daysPerYear);
+      snrInterest[i] = snrInt;
+      totalSeniorInterest += snrInt;
+      if (senior.isCapitalised) {
+        snrRunningBalance += snrInt;
+      } else {
+        cumulativeFinanceCosts += snrInt;
+      }
+    }
+
+    // Senior fees: line fee on opening balance; establishment fee at start
+    if (seniorActive) {
+      let periodFees = 0;
+      if (snrOpenBalance > 0) {
+        periodFees += periodInterest(seniorLimit, senior.lineFeePercent, days, daysPerYear);
+      }
+      if (i === snrStartIdx) {
+        periodFees += seniorLimit * senior.establishmentFeePercent;
+      }
+      if (periodFees > 0) {
+        snrFees[i] = periodFees;
+        totalSeniorFees += periodFees;
+        if (senior.isCapitalised) {
+          snrRunningBalance += periodFees;
+        } else {
+          cumulativeFinanceCosts += periodFees;
+        }
+      }
+    }
+
+    // Mezzanine interest (on opening balance)
+    if (mzOpenBalance > 0) {
+      const mzInt = periodInterest(mzOpenBalance, mezzAllInRate, days, daysPerYear);
+      mzInterest[i] = mzInt;
+      totalMezzInterest += mzInt;
+      if (mezz.isCapitalised) {
+        mzRunningBalance += mzInt;
+      } else {
+        cumulativeFinanceCosts += mzInt;
+      }
+
+      // Line fee on opening balance
+      const mzLineFee = periodInterest(mezzLimit, mezz.lineFeePercent, days, daysPerYear);
+      if (mzLineFee > 0) {
+        mzFees[i] += mzLineFee;
+        totalMezzFees += mzLineFee;
+        if (mezz.isCapitalised) {
+          mzRunningBalance += mzLineFee;
+        } else {
+          cumulativeFinanceCosts += mzLineFee;
+        }
+      }
+    }
+
+    // Mezzanine establishment fee (at start of facility)
+    if (hasMezz && i === mezzStartIdx) {
+      const mzEstFee = mezzLimit * mezz.establishmentFeePercent;
+      if (mzEstFee > 0) {
+        mzFees[i] += mzEstFee;
+        totalMezzFees += mzEstFee;
+        if (mezz.isCapitalised) {
+          mzRunningBalance += mzEstFee;
+        } else {
+          cumulativeFinanceCosts += mzEstFee;
+        }
+      }
+    }
+
+    // ── 7. Senior initialization (land loan refi + excess equity repatriation) ─
     if (hasSenior && i === snrStartIdx) {
-      // Refinance land loan into senior
       if (llRepayments[i] > 0) {
         snrDrawdowns[i] += llRepayments[i];
       }
-      // Repatriate any equity that was injected above the cap back into senior
       if (cumulativeEquity > equityCap) {
         const excessEquity = cumulativeEquity - equityCap;
         snrDrawdowns[i] += excessEquity;
@@ -310,24 +412,19 @@ function runFundingWaterfall(
       }
     }
 
-    // === GAP FILLING via user-configured drawdown sequence ===
-    // `snrDrawdowns[i]` may already contain the refinancing amount from above, but
-    // `cumulativeSenior` has NOT been updated yet — this matches the original pattern
-    // where the senior cumulative is flushed once after all draws for the period.
+    // ── 8. Gap filling via user-configured drawdown sequence ──────────────────
     {
       const totalNeed = cumulativeCosts + cumulativeFinanceCosts;
       const totalFunded = cumulativeEquity + cumulativeMezz + cumulativeSenior + cumulativeLandLoan;
       let remainGap = Math.max(0, totalNeed - totalFunded);
 
       if (remainGap > 0) {
-        // Track senior draws added in the init block above so capacity is computed correctly
         const snrInitDrawnThisPeriod = snrDrawdowns[i];
 
         for (const entry of drawdownSequence) {
           if (remainGap <= 0) break;
 
           if (entry.type === 'senior' && hasSenior && i >= snrStartIdx) {
-            // Remaining capacity accounts for refinancing already in snrDrawdowns[i]
             const available = Math.max(0, seniorLimit - totalSnrDrawn - snrInitDrawnThisPeriod);
             if (available > 0) {
               const draw = Math.min(remainGap, available);
@@ -355,7 +452,7 @@ function runFundingWaterfall(
           }
         }
 
-        // Equity backstop: if all configured facilities are exhausted, inject uncapped equity
+        // Equity backstop: inject uncapped equity if all configured facilities exhausted
         if (remainGap > 0) {
           eqInjections[i] += remainGap;
           cumulativeEquity += remainGap;
@@ -363,41 +460,32 @@ function runFundingWaterfall(
       }
     }
 
-    // Flush senior cumulative tracking for this period (init draws + gap-fill draws)
+    // Flush senior cumulative tracking for this period (init + gap-fill draws)
     if (hasSenior && i >= snrStartIdx) {
       totalSnrDrawn += snrDrawdowns[i];
       cumulativeSenior += snrDrawdowns[i];
       snrRunningBalance += snrDrawdowns[i];
     }
 
-    // === REVENUE REPAYMENTS (integrated - reduces balance for interest calc) ===
-    // Only repay debt when there is excess cash in the period.
-    // Excess = gross revenue minus GST paid to ATO on revenue, minus all operational
-    // costs (which already include GST paid to vendors).
-    // Non-capitalised cash interest (land loan) is already in the gap drawdown above,
-    // so it is implicitly funded and does not need to be deducted again here.
-    // We use gstOnRevenue[i] (not gstNet) so that cost-side GST refunds do not
-    // artificially inflate available-for-repayment cash — the net cashflow formula
-    // treats gstOnCosts as a real outflow, so the repayment formula must match.
+    // ── 9. Revenue repayments (sweep excess cash → debt → equity → profit) ─────
+    // Excess = revenue net of GST remitted to ATO, minus operating costs.
+    // All non-capitalised finance charges were already funded via gap fill, so they
+    // are implicitly covered and do not need to be re-deducted here.
     const periodNetCash = (monthlyRevenue[i] - gstOnRevenue[i]) - monthlyCostsExcFinance[i];
     let revAvailable = Math.max(0, periodNetCash);
-    // Repay senior first
+
     if (revAvailable > 0 && snrRunningBalance > 0) {
       const repay = Math.min(revAvailable, snrRunningBalance);
       snrRepayments[i] = repay;
       snrRunningBalance -= repay;
       revAvailable -= repay;
     }
-    // Then repay mezzanine
     if (revAvailable > 0 && mzRunningBalance > 0) {
       const repay = Math.min(revAvailable, mzRunningBalance);
       mzRepayments[i] = repay;
       mzRunningBalance -= repay;
       revAvailable -= repay;
     }
-    // Any remaining excess after all debt is clear → return equity then distribute profit.
-    // Doing this inline each period (rather than a lump sum at project end) ensures
-    // net cashflow = 0 every period: all cash in equals all cash out.
     if (revAvailable > 0) {
       const equityLeft = cumulativeEquity - totalEqRepatriated;
       if (equityLeft > 0) {
@@ -411,89 +499,7 @@ function runFundingWaterfall(
       }
     }
 
-    // === INTEREST AND FEES (on balance AFTER drawdowns and repayments) ===
-    //
-    // Key rule for net-cashflow = 0:
-    //   • Non-capitalised (cash) interest/fees → add to cumulativeFinanceCosts so the
-    //     gap-fill drawdown in the SAME period covers them, AND subtract from net cashflow.
-    //   • Capitalised interest/fees → accrete to running balance ONLY; do NOT add to
-    //     cumulativeFinanceCosts (so no extra drawdown is triggered) and do NOT treat
-    //     them as a cash outflow in the net cashflow formula.  The larger balance will be
-    //     swept out via repayments when revenue arrives.
-    //
-    // Land-loan interest is always non-capitalised (computed before the gap fill above).
-
-    // Senior interest
-    if (snrRunningBalance > 0) {
-      const snrInt = periodInterest(snrRunningBalance, snrAllInRate, days, daysPerYear);
-      snrInterest[i] = snrInt;
-      totalSeniorInterest += snrInt;
-      if (senior.isCapitalised) {
-        snrRunningBalance += snrInt;  // accretes to balance; not a cash flow
-      } else {
-        cumulativeFinanceCosts += snrInt;  // cash payment; gap will draw for it
-      }
-    }
-
-    // Senior fees
-    if (seniorActive) {
-      let periodFees = 0;
-      if (snrRunningBalance > 0) {
-        periodFees += periodInterest(seniorLimit, senior.lineFeePercent, days, daysPerYear);
-      }
-      if (i === snrStartIdx) {
-        periodFees += seniorLimit * senior.establishmentFeePercent;
-      }
-      if (periodFees > 0) {
-        snrFees[i] = periodFees;
-        totalSeniorFees += periodFees;
-        if (senior.isCapitalised) {
-          snrRunningBalance += periodFees;  // accretes; not a cash flow
-        } else {
-          cumulativeFinanceCosts += periodFees;
-        }
-      }
-    }
-
-    // Mezzanine interest
-    if (mzRunningBalance > 0) {
-      const mzInt = periodInterest(mzRunningBalance, mezzAllInRate, days, daysPerYear);
-      mzInterest[i] = mzInt;
-      totalMezzInterest += mzInt;
-      if (mezz.isCapitalised) {
-        mzRunningBalance += mzInt;
-      } else {
-        cumulativeFinanceCosts += mzInt;
-      }
-
-      // Line fee
-      const mzLineFee = periodInterest(mezzLimit, mezz.lineFeePercent, days, daysPerYear);
-      if (mzLineFee > 0) {
-        mzFees[i] += mzLineFee;
-        totalMezzFees += mzLineFee;
-        if (mezz.isCapitalised) {
-          mzRunningBalance += mzLineFee;
-        } else {
-          cumulativeFinanceCosts += mzLineFee;
-        }
-      }
-    }
-
-    // Mezzanine establishment fee (at start, regardless of balance)
-    if (hasMezz && i === mezzStartIdx) {
-      const mzEstFee = mezzLimit * mezz.establishmentFeePercent;
-      if (mzEstFee > 0) {
-        mzFees[i] += mzEstFee;
-        totalMezzFees += mzEstFee;
-        if (mezz.isCapitalised) {
-          mzRunningBalance += mzEstFee;
-        } else {
-          cumulativeFinanceCosts += mzEstFee;
-        }
-      }
-    }
-
-    // === RECORD BALANCES ===
+    // ── 10. Record closing balances ────────────────────────────────────────────
     snrBalance[i] = Math.max(0, snrRunningBalance);
     mzBalance[i] = Math.max(0, mzRunningBalance);
     peakDebt = Math.max(peakDebt, snrRunningBalance + llRunningBalance + mzRunningBalance);

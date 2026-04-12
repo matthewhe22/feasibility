@@ -1,14 +1,18 @@
 import type { AdminConfig, MainInputs, DashboardData, MonthlyCashflow } from '../types';
 import { generateTimeline } from './timeline';
-import { spreadCosts, spreadLandPayments } from './costSpreading';
+import { spreadCosts, spreadLandPayments, clearSCurveWarnings, getSCurveWarnings } from './costSpreading';
 import { spreadSettlements, spreadDeposits, spreadIncome, spreadBackEndCommissions, calculateSellingCommissions, totalGRV, totalNRV } from './revenue';
 import { solveFunding } from './funding';
 import { sum, calculateIRR } from '../utils';
 
 export function runCalculations(admin: AdminConfig, inputs: MainInputs): DashboardData {
+  // Reset S-curve warnings for this run
+  clearSCurveWarnings();
+
   const periods = generateTimeline(admin, inputs);
   const n = periods.length;
   const gstRate = inputs.landPurchase.gstRate;
+  const buildSCurves = admin.buildSCurves ?? {};
 
   // ===== 1. SPREAD COSTS =====
   const landPayments = spreadLandPayments(
@@ -36,20 +40,19 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     periods,
   );
 
-  const devCosts = spreadCosts(inputs.developmentCosts, periods, admin.manualSCurves);
-  const constCosts = spreadCosts(inputs.constructionCosts, periods, admin.manualSCurves);
+  const devCosts = spreadCosts(inputs.developmentCosts, periods, admin.manualSCurves, buildSCurves);
+  const constCosts = spreadCosts(inputs.constructionCosts, periods, admin.manualSCurves, buildSCurves);
 
   // Contingency
   const totalConstruction = sum(inputs.constructionCosts.map(c => c.totalCosts));
   const contingencyTotal = totalConstruction * inputs.constructionContingencyPercent;
   const contingency = constCosts.map(c => totalConstruction > 0 ? c / totalConstruction * contingencyTotal : 0);
 
-  const marketingCosts = spreadCosts(inputs.marketingCosts, periods, admin.manualSCurves);
-  const otherStdCosts = spreadCosts(inputs.otherStandardCosts, periods, admin.manualSCurves);
-  const pmFees = spreadCosts(inputs.pmFees, periods, admin.manualSCurves);
-  const otherFinCosts = spreadCosts(inputs.otherFinancingCosts, periods, admin.manualSCurves);
+  const marketingCosts = spreadCosts(inputs.marketingCosts, periods, admin.manualSCurves, buildSCurves);
+  const otherStdCosts = spreadCosts(inputs.otherStandardCosts, periods, admin.manualSCurves, buildSCurves);
+  const otherFinCosts = spreadCosts(inputs.otherFinancingCosts, periods, admin.manualSCurves, buildSCurves);
 
-  // Selling costs
+  // Selling costs — computed early so PM fee dynamic calculation can use commission totals
   const commissions = calculateSellingCommissions(inputs.grvItems, inputs.sellingCosts);
   // Spread front-end commissions across presale period
   const frontEndCommByPeriod = new Array(n).fill(0);
@@ -70,6 +73,24 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
 
   // Back-end commissions spread at settlement months
   const backEndCommByPeriod = spreadBackEndCommissions(inputs.grvItems, inputs.sellingCosts, periods);
+
+  // ===== PM FEES (dynamic: rate × all other costs) =====
+  // PM fee = rate × (all costs excluding PM fee itself)
+  // We calculate all costs first, then compute PM fee total dynamically.
+  const totalCostsExcPM =
+    sum(landPayments) + sum(prsvPayments) + sum(acquisitionCosts) +
+    sum(devCosts) + sum(constCosts) + sum(contingency) +
+    sum(marketingCosts) + sum(otherStdCosts) + sum(otherFinCosts) +
+    sum(frontEndCommByPeriod) + sum(backEndCommByPeriod);
+  // PM fee rate comes from the item's `units` field (e.g. 0.02 = 2%)
+  const pmFeeRate = (inputs.pmFees.length > 0 && inputs.pmFees[0].units > 0)
+    ? inputs.pmFees[0].units
+    : 0.02;
+  const dynamicPMFeeTotal = pmFeeRate * totalCostsExcPM;
+  const pmFeesWithTotal = inputs.pmFees.map((f, idx) =>
+    idx === 0 ? { ...f, totalCosts: dynamicPMFeeTotal } : f
+  );
+  const pmFees = spreadCosts(pmFeesWithTotal, periods, admin.manualSCurves, buildSCurves);
 
   // ===== 2. SPREAD REVENUE =====
   const settlements = spreadSettlements(inputs.grvItems, periods);
@@ -92,7 +113,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   ];
   for (const item of allCostItems) {
     if (item.addGST) {
-      const spread = spreadCosts([item], periods);
+      const spread = spreadCosts([item], periods, admin.manualSCurves, buildSCurves);
       for (let i = 0; i < n; i++) {
         gstOnCosts[i] += spread[i] * gstRate;
       }
@@ -235,30 +256,43 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const totalDevCosts = sum(inputs.developmentCosts.map(c => c.totalCosts));
   const totalMarketing = sum(inputs.marketingCosts.map(c => c.totalCosts));
   const totalOtherStd = sum(inputs.otherStandardCosts.map(c => c.totalCosts));
-  const totalPMFees = sum(inputs.pmFees.map(c => c.totalCosts));
+  // PM fee total is now dynamic (computed above)
+  const totalPMFees = dynamicPMFeeTotal;
   const totalOtherFin = sum(inputs.otherFinancingCosts.map(c => c.totalCosts));
 
   // GST totals
   const totalGSTOnCosts = sum(gstOnCosts);
 
-  const totalSeniorFinCosts = funding.totalSeniorInterest + funding.totalSeniorFees + funding.totalLandLoanInterest + funding.totalLandLoanFees;
+  // Senior finance costs = senior interest + senior fees only (land loan is a separate facility)
+  const totalSeniorFinCosts = funding.totalSeniorInterest + funding.totalSeniorFees;
+  const totalLandLoanFinCosts = funding.totalLandLoanInterest + funding.totalLandLoanFees;
   const totalMezzFinCosts = funding.totalMezzInterest + funding.totalMezzFees;
 
   // Standard costs = dev costs + other std
   const standardCosts = totalDevCosts + totalOtherStd;
 
   const totalCost = totalLand + totalStampDuty + totalBuildCosts + totalContingency +
-    totalSeniorFinCosts + totalMezzFinCosts + totalOtherFin +
+    totalSeniorFinCosts + totalLandLoanFinCosts + totalMezzFinCosts + totalOtherFin +
     standardCosts + totalGSTOnCosts + totalMarketing + commissions.total + totalPMFees;
 
   const totalProfit = grv - totalCost;
+
+  // Preferred equity coupon (accrued over project duration at simple interest)
+  const prefEquityBalance = inputs.equityPreferred.fixedAmount;
+  const prefEquityRate = inputs.equityPreferred.interestRate;
+  const projectDuration = inputs.preliminary.projectSpanMonths;
+  const years = projectDuration / 12;
+  const loanCouponInterest = prefEquityBalance > 0 && prefEquityRate > 0
+    ? prefEquityBalance * prefEquityRate * years
+    : 0;
+  const totalProfitAfterCoupon = totalProfit - loanCouponInterest;
 
   // NRV
   const backEndSelling = commissions.backEnd;
   const nrvValue = totalNRV(inputs.grvItems, gstRate, backEndSelling);
 
-  // Capital stack
-  const seniorAmount = funding.seniorFacilitySize + funding.totalLandLoanInterest + funding.totalLandLoanFees;
+  // Capital stack — senior amount is principal drawn only (land loan already refinanced into senior)
+  const seniorAmount = funding.seniorFacilitySize;
   const mezzAmount = funding.mezzFacilitySize;
   const totalCapital = seniorAmount + mezzAmount + funding.totalEquityInjected;
   const seniorLTC = totalCost > 0 ? seniorAmount / totalCost : 0;
@@ -270,10 +304,12 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
 
   // KPIs
   const equityContrib = funding.totalEquityInjected;
-  const projectDuration = inputs.preliminary.projectSpanMonths;
-  const years = projectDuration / 12;
-  const cashOnCash = equityContrib > 0 ? (totalProfit + equityContrib) / equityContrib : 0;
-  const annualCoC = years > 0 ? cashOnCash / years : 0;
+  // Cash-on-Cash = profit / equity (not equity multiple which would be (profit+equity)/equity)
+  const cashOnCash = equityContrib > 0 ? totalProfitAfterCoupon / equityContrib : 0;
+  // Annualised CoC = compound annual return: (1 + totalReturn)^(1/years) - 1
+  const annualCoC = equityContrib > 0 && years > 0
+    ? Math.pow(1 + totalProfitAfterCoupon / equityContrib, 1 / years) - 1
+    : 0;
   const roi = totalCost > 0 ? totalProfit / totalCost : 0;
 
   // IRR - monthly equity cashflows
@@ -321,7 +357,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       stampDuty: totalStampDuty,
       buildCosts: totalBuildCosts + totalContingency,
       contingency: totalContingency,
-      seniorFinanceCosts: totalSeniorFinCosts,
+      seniorFinanceCosts: totalSeniorFinCosts + totalLandLoanFinCosts,
       mezzFinanceCosts: totalMezzFinCosts,
       otherFinancingCosts: totalOtherFin,
       standardCosts,
@@ -331,8 +367,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       pmFee: totalPMFees,
       totalCost,
       totalProfit,
-      loanCouponInterest: 0,
-      totalProfitAfterCoupon: totalProfit,
+      loanCouponInterest,
+      totalProfitAfterCoupon,
     },
     kpis: {
       totalCashOnCash: cashOnCash,
@@ -424,8 +460,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
         profitSharePercent: inputs.equityJV.profitShare,
         totalProfitShare: totalProfit * inputs.equityJV.profitShare,
       },
-      kokoda: {
-        entity: 'Kokoda',
+      developer: {
+        entity: 'Developer',
         fundingContribPercent: inputs.equityKokoda.equityContribution,
         totalEquityContributed: equityContrib * inputs.equityKokoda.equityContribution,
         irr,
@@ -433,7 +469,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
         equityRepatriation2nd: equityContrib * inputs.equityKokoda.equityContribution,
         totalEquityRepatriation: equityContrib * inputs.equityKokoda.equityContribution,
         establishmentFee: 0,
-        couponInterest: 0,
+        couponInterest: loanCouponInterest,
         couponInterestPercent: inputs.equityKokoda.interestRate,
         profitShareBalance: totalProfit * inputs.equityKokoda.profitShare,
         profitSharePercent: inputs.equityKokoda.profitShare,
@@ -449,5 +485,6 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       unsoldGRV: totalAptGRV - grvSoldExchanged,
     },
     cashflows,
+    warnings: getSCurveWarnings(),
   };
 }
