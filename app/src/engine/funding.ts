@@ -139,7 +139,7 @@ function runFundingWaterfall(
   monthlyCostsExcFinance: number[],
   monthlyRevenue: number[],
   _monthlyGSTNet: number[],
-  gstOnRevenue: number[],
+  _gstOnRevenue: number[],
   inputs: MainInputs,
   tdc: number, // Total Development Costs including finance (for LTC)
   daysPerYear: number,
