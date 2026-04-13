@@ -4,6 +4,7 @@ import { Analytics } from '@vercel/analytics/react';
 declare const __BUILD_TIME__: string;
 import { useStore } from './store/useStore';
 import { runCalculations } from './engine';
+import { saveProject } from './db/projectDb';
 import { MainInputTab } from './components/inputs/MainInputTab';
 import { InternalDashboard } from './components/dashboards/InternalDashboard';
 import { ExternalDashboard } from './components/dashboards/ExternalDashboard';
@@ -55,7 +56,7 @@ const TABS: { id: TabId; label: string }[] = [
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
-  const { activeTab, setActiveTab, admin, inputs, setDashboardData, dashboardData, isCalculating, setIsCalculating } = useStore();
+  const { activeTab, setActiveTab, admin, inputs, setDashboardData, dashboardData, isCalculating, setIsCalculating, currentProjectId } = useStore();
   const [showProjectManager, setShowProjectManager] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
   const [dismissedWarnings, setDismissedWarnings] = useState(false);
@@ -68,6 +69,12 @@ function App() {
       try {
         const result = runCalculations(admin, inputs);
         setDashboardData(result);
+        // Auto-save to DB when a project is currently loaded
+        if (currentProjectId !== null) {
+          saveProject(currentProjectId, admin, inputs, result).catch((err) => {
+            console.warn('Auto-save failed:', err);
+          });
+        }
       } catch (e) {
         console.error('Calculation error:', e);
         setCalcError(e instanceof Error ? e.message : String(e));

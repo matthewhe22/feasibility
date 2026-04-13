@@ -31,12 +31,13 @@ interface Props {
 }
 
 export function ProjectManager({ onClose, onLoad }: Props) {
-  const { admin, inputs, dashboardData, setAdmin, setInputs, setDashboardData } = useStore();
+  const { admin, inputs, dashboardData, setAdmin, setInputs, setDashboardData, currentProjectId, setCurrentProjectId } = useStore();
 
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [saveName, setSaveName] = useState(admin.projectName || '');
   const [saveDesc, setSaveDesc] = useState('');
-  const [currentId, setCurrentId] = useState<number | null>(null);
+  const currentId = currentProjectId;
+  const setCurrentId = setCurrentProjectId;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
