@@ -46,7 +46,7 @@ export function ExternalDashboard() {
               <Row label="Total GRV" value={formatCurrency(f.totalGRV)} />
               <div className="h-px bg-gray-200" />
               <Row label="Land" value={formatCurrency(f.land)} />
-              <Row label="Stamp Duty" value={formatCurrency(f.stampDuty)} />
+              <Row label="Acquisition Costs (Stamp Duty, Reg Fees)" value={formatCurrency(f.stampDuty)} />
               <Row label="Build Costs" value={formatCurrency(f.buildCosts)} />
               <Row label="Senior Finance Costs" value={formatCurrency(f.seniorFinanceCosts)} />
               <Row label="Mezzanine Finance Costs" value={formatCurrency(f.mezzFinanceCosts)} />

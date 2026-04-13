@@ -61,7 +61,7 @@ export function InternalDashboard() {
               <DashValue label="Total GRV (net incentives)" value={f.totalGRV} />
               <div className="h-px bg-gray-200" />
               <DashValue label="Land" value={f.land} />
-              <DashValue label="Stamp Duty" value={f.stampDuty} />
+              <DashValue label="Acquisition Costs (Stamp Duty, Reg Fees)" value={f.stampDuty} />
               <DashValue label="Build Costs" value={f.buildCosts} />
               <DashValue label="Senior Finance Costs" value={f.seniorFinanceCosts} />
               <DashValue label="Mezzanine Finance Costs" value={f.mezzFinanceCosts} />

@@ -4,7 +4,7 @@ import { Analytics } from '@vercel/analytics/react';
 declare const __BUILD_TIME__: string;
 import { useStore } from './store/useStore';
 import { runCalculations } from './engine';
-import { saveProject } from './db/projectDb';
+import { saveProject, listProjects } from './db/projectDb';
 import { MainInputTab } from './components/inputs/MainInputTab';
 import { InternalDashboard } from './components/dashboards/InternalDashboard';
 import { ExternalDashboard } from './components/dashboards/ExternalDashboard';
@@ -56,7 +56,7 @@ const TABS: { id: TabId; label: string }[] = [
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
-  const { activeTab, setActiveTab, admin, inputs, setDashboardData, dashboardData, isCalculating, setIsCalculating, currentProjectId } = useStore();
+  const { activeTab, setActiveTab, admin, inputs, setAdmin, setInputs, setDashboardData, dashboardData, isCalculating, setIsCalculating, currentProjectId, setCurrentProjectId } = useStore();
   const [showProjectManager, setShowProjectManager] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
   const [dismissedWarnings, setDismissedWarnings] = useState(false);
@@ -85,7 +85,44 @@ function App() {
   };
 
   useEffect(() => {
-    calculate();
+    // On first load with no active project, try to restore "Project Demo 2"
+    // from the database so the user's saved defaults are shown automatically.
+    if (currentProjectId !== null) {
+      // A project is already active — just recalculate with persisted inputs.
+      calculate();
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const projects = await listProjects();
+        const demo = projects.find(p => p.name === 'Project Demo 2');
+        if (!cancelled && demo?.id != null) {
+          setAdmin(demo.admin);
+          setInputs(demo.inputs);
+          setCurrentProjectId(demo.id);
+          // Calculate immediately with the loaded data (state updates are async,
+          // so call runCalculations directly rather than relying on stale closure).
+          setIsCalculating(true);
+          setCalcError(null);
+          try {
+            const result = runCalculations(demo.admin, demo.inputs);
+            if (!cancelled) setDashboardData(result);
+          } catch (e) {
+            if (!cancelled) setCalcError(e instanceof Error ? e.message : String(e));
+          } finally {
+            if (!cancelled) setIsCalculating(false);
+          }
+          return;
+        }
+      } catch {
+        // DB unavailable — fall through to default calculate
+      }
+      if (!cancelled) calculate();
+    })();
+
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -225,6 +225,11 @@ function runFundingWaterfall(
   let cumulativeSenior = 0;
   let cumulativeLandLoan = 0;
   let cumulativeFinanceCosts = 0;
+  // Net revenue received so far (revenue minus GST remitted).  Including this
+  // in totalFunded stops the uncapped equity backstop from triggering during
+  // settlement periods: once revenue arrives it effectively "funds" ongoing
+  // construction costs even when debt facilities are fully drawn.
+  let cumulativeNetRevenue = 0;
 
   // Track equity returned so far (incremental as revenue arrives)
   let totalEqRepatriated = 0;
@@ -423,10 +428,18 @@ function runFundingWaterfall(
       }
     }
 
+    // ── 7.5. Accumulate net revenue for gap-fill awareness ────────────────────
+    // Revenue that has arrived this period (net of GST remitted) reduces the
+    // funding gap because it will sweep to debt repayment in step 9.  Tracking
+    // it here prevents the uncapped equity backstop from firing in settlement
+    // periods 65-74 where large revenue tranches arrive alongside residual
+    // construction costs.
+    cumulativeNetRevenue += Math.max(0, monthlyRevenue[i] - gstOnRevenue[i]);
+
     // ── 8. Gap filling via user-configured drawdown sequence ──────────────────
     {
       const totalNeed = cumulativeCosts + cumulativeFinanceCosts;
-      const totalFunded = cumulativeEquity + cumulativeMezz + cumulativeSenior + cumulativeLandLoan;
+      const totalFunded = cumulativeEquity + cumulativeMezz + cumulativeSenior + cumulativeLandLoan + cumulativeNetRevenue;
       let remainGap = Math.max(0, totalNeed - totalFunded);
 
       if (remainGap > 0) {
