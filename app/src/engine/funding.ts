@@ -139,7 +139,7 @@ function runFundingWaterfall(
   monthlyCostsExcFinance: number[],
   monthlyRevenue: number[],
   _monthlyGSTNet: number[],
-  _gstOnRevenue: number[],
+  gstOnRevenue: number[],
   inputs: MainInputs,
   tdc: number, // Total Development Costs including finance (for LTC)
   daysPerYear: number,
@@ -482,21 +482,13 @@ function runFundingWaterfall(
     }
 
     // ── 9. Revenue repayments (sweep excess cash → debt → equity → profit) ─────
-    // Excess = revenue net of GST, plus GST Input Tax Credits (ITC) received from
-    // ATO, minus operating costs (including GST paid to suppliers).
-    //
-    // GST accounting:
-    //   - monthlyCostsExcFinance includes gstOnCosts (GST paid to suppliers)
-    //   - The ATO refunds gstOnCosts back to the project as ITCs
-    //   - The project remits gstOnRevenue to ATO (GST collected from buyers)
-    //   - Net GST cash to/from ATO = gstOnRevenue - gstOnCosts = _monthlyGSTNet[i]
-    //
-    // Correct formula:  revenue − net_GST_to_ATO − operating_costs
-    //   = monthlyRevenue[i] − _monthlyGSTNet[i] − monthlyCostsExcFinance[i]
-    //
-    // Without _monthlyGSTNet the ITC refunds are never swept to profit, leaving a
-    // permanent positive residual in the cumulative cashflow.
-    const periodNetCash = monthlyRevenue[i] - _monthlyGSTNet[i] - monthlyCostsExcFinance[i];
+    // Excess = revenue net of GST remitted to ATO, minus operating costs
+    // (which already include gstOnCosts — the GST paid to suppliers that is
+    // recovered as Input Tax Credits from the ATO; those ITCs reduce future
+    // gap-fill needs rather than appearing as a separate cash inflow here).
+    // All non-capitalised finance charges were already funded via gap fill, so
+    // they are implicitly covered and do not need to be re-deducted here.
+    const periodNetCash = (monthlyRevenue[i] - gstOnRevenue[i]) - monthlyCostsExcFinance[i];
     let revAvailable = Math.max(0, periodNetCash);
 
     if (revAvailable > 0 && snrRunningBalance > 0) {
