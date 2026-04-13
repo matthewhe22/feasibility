@@ -15,9 +15,15 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const buildSCurves = admin.buildSCurves ?? {};
 
   // ===== 1. SPREAD COSTS =====
+  // When a payment stage has a percentOfLand > 0, derive the cash amount from
+  // the user-entered landPurchasePrice so the cashflow always sums to the land
+  // price shown in the inputs — even after the user edits that field without
+  // manually updating every stage amount.
   const landPayments = spreadLandPayments(
     inputs.landPurchase.paymentStages.map(s => ({
-      amount: s.amount,
+      amount: s.percentOfLand > 0
+        ? s.percentOfLand * inputs.landPurchase.landPurchasePrice
+        : s.amount,
       monthStart: s.monthStart,
       monthSpan: s.monthSpan,
     })),
@@ -266,6 +272,11 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
 
   // GST totals
   const totalGSTOnCosts = sum(gstOnCosts);
+  // GST on revenue is remitted to the ATO — it is a cash outflow that reduces
+  // what the developer actually receives from settlements.  Deducting it from
+  // totalProfit ensures the dashboard figure equals sum(profitDistributions)
+  // from the funding waterfall, which uses periodNetCash = revenue − gstOnRevenue − costs.
+  const totalGSTOnRevenue = sum(gstOnRevenue);
 
   // Senior finance costs = senior interest + senior fees only (land loan is a separate facility)
   const totalSeniorFinCosts = funding.totalSeniorInterest + funding.totalSeniorFees;
@@ -279,7 +290,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     totalSeniorFinCosts + totalLandLoanFinCosts + totalMezzFinCosts + totalOtherFin +
     standardCosts + totalGSTOnCosts + totalMarketing + commissions.total + totalPMFees;
 
-  const totalProfit = grv - totalCost;
+  const totalProfit = grv - totalGSTOnRevenue - totalCost;
 
   // Preferred equity coupon (accrued over project duration at simple interest)
   const prefEquityBalance = inputs.equityPreferred.fixedAmount;
