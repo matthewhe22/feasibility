@@ -225,6 +225,10 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // the true change in the project bank account each period.
   // Net should be ≈ 0 every period: drawdowns fund costs, revenue repays debt.
   // Capitalised interest is excluded because it is a balance adjustment, not cash.
+  //
+  // GST treatment: gstOnCosts is paid to suppliers (outflow) but fully recovered
+  // from the ATO as Input Tax Credits (inflow) — these cancel out.  Only the net
+  // GST remittance to the ATO (gstOnRevenue) remains as an outflow.
   let cumCF = 0;
   for (const cf of cashflows) {
     cf.netCashflow =
@@ -232,11 +236,14 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       cf.grvSettlements + cf.rentalIncome + cf.otherIncome
       // Financing inflows (drawdowns + equity injections)
       + cf.landLoanDrawdown + cf.seniorDrawdown + cf.mezzDrawdown + cf.equityInjection
-      // Operating costs (base costs + GST paid to vendors + GST remitted to ATO)
+      // Operating costs (base costs + GST paid to vendors)
       - cf.landCosts - cf.acquisitionCosts - cf.developmentCosts
       - cf.constructionCosts - cf.contingency - cf.marketingCosts
       - cf.otherStandardCosts - cf.pmFees - cf.sellingCostsFrontEnd
       - cf.sellingCostsBackEnd - cf.otherFinancingCosts - cf.gstOnCosts
+      // ITC refund from ATO offsets gstOnCosts (net cash impact of cost-side GST = 0)
+      + cf.gstOnCosts
+      // Net GST remittance to ATO on revenue
       - cf.gstOnRevenue
       // Cash financing costs (land loan is never capitalised)
       - cf.landLoanInterest
