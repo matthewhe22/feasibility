@@ -217,23 +217,16 @@ function runFundingWaterfall(
   let llRunningBalance = 0;
   let snrRunningBalance = 0;
   let mzRunningBalance = 0;
-  let llAccruedInterest = 0; // track quarterly land loan interest
+  let llAccruedInterest = 0; // quarterly land loan interest accumulator
 
-  let cumulativeCosts = 0;
+  // Equity tracking (for cap enforcement and return ordering)
   let cumulativeEquity = 0;
-  let cumulativeMezz = 0;
-  let cumulativeSenior = 0;
-  let cumulativeLandLoan = 0;
-  let cumulativeFinanceCosts = 0;
-  // Net revenue received so far (revenue minus GST remitted).  Including this
-  // in totalFunded stops the uncapped equity backstop from triggering during
-  // settlement periods: once revenue arrives it effectively "funds" ongoing
-  // construction costs even when debt facilities are fully drawn.
-  let cumulativeNetRevenue = 0;
-
-  // Track equity returned so far (incremental as revenue arrives)
   let totalEqRepatriated = 0;
 
+  // Mezz is non-revolving: track total drawn for capacity limit
+  let totalMezzDrawn = 0;
+
+  // Reporting totals
   let totalSeniorInterest = 0;
   let totalSeniorFees = 0;
   let totalMezzInterest = 0;
@@ -241,33 +234,35 @@ function runFundingWaterfall(
   let totalLandInterest = 0;
   let totalLandFees = 0;
   let peakDebt = 0;
-
-  let totalSnrDrawn = 0;
-  let totalMezzDrawn = 0;
+  let peakSnrBalance = 0; // for seniorFacilitySize (peak outstanding balance)
 
   const snrAllInRate = senior.margin + senior.bbsy;
   const mezzAllInRate = mezz.margin + mezz.bbsy;
 
-  // ===== SINGLE PASS: Drawdowns + Interest (on opening balance) + Repayments =====
+  // ===== SINGLE PASS: Bank-balance approach =====
   //
-  // Key ordering principle for "interest on opening balance":
-  //   Interest for period i is charged on the balance at the START of period i —
-  //   i.e., before any draws or repayments occur in period i.  New drawdowns in
-  //   period i do not incur interest until period i+1.
+  // Each period starts with bankBalance = 0 (all prior cash was swept).
+  // Cash flows within the period adjust bankBalance; gap fill draws if negative;
+  // surplus sweeps to repayments then equity return then profit.
+  //
+  // The senior facility is REVOLVING: repayments restore drawing capacity.
+  // Available senior capacity = seniorLimit - snrRunningBalance (balance-based).
+  // When snrRunningBalance falls (via repayment), capacity is automatically restored.
   //
   // Loop order:
-  //   1. Save opening balances
-  //   2. Land loan lump-sum draw (at llStartIdx)
-  //   3. Land loan interest on opening balance (not on post-draw balance)
-  //   4. Land loan repayment at snrStartIdx (flush accrued + repay principal)
-  //   5. Accumulate period operating costs
-  //   6. Senior & mezz interest/fees on opening balances BEFORE gap fill
-  //      – non-capitalised → added to cumulativeFinanceCosts so gap fill covers them
-  //      – capitalised → accrete to running balance (repaid later via revenue)
-  //   7. Senior initialisation (land loan refi + excess equity repatriation)
-  //   8. Gap fill (drawdowns to cover costs + non-capitalised finance charges)
-  //   9. Revenue repayments (sweep excess cash to debt → equity → profit)
-  //  10. Record closing balances
+  //   1. Save opening balances (for interest calculations)
+  //   2. Land loan lump-sum draw + establishment fee
+  //   3. Land loan interest (accrued quarterly on opening balance)
+  //   4. Land loan repayment at snrStartIdx (flush accrued interest then principal)
+  //   5. Operating costs deducted from bankBalance
+  //   6. Senior & mezz interest/fees:
+  //      – capitalised → accrete to running balance (no cash flow)
+  //      – non-capitalised → deducted from bankBalance (cash outflow, covered by gap fill)
+  //   7. Senior initialisation: refi land loan into senior; repatriate excess equity
+  //   8. Revenue added to bankBalance
+  //   9. Gap fill: draw from facilities (in configured priority) to cover bankBalance < 0
+  //  10. Revenue sweep: if bankBalance > 0, repay debt → return equity → distribute profit
+  //  11. Record closing balances
 
   for (let i = 0; i < n; i++) {
     const days = periods[i].daysInPeriod;
@@ -278,81 +273,76 @@ function runFundingWaterfall(
     const snrOpenBalance = snrRunningBalance;
     const mzOpenBalance  = mzRunningBalance;
 
-    // ── 2. Land loan lump-sum draw ─────────────────────────────────────────────
+    // Period cash position — resets to zero each period (prior surplus was swept)
+    let bankBalance = 0;
+
+    // ── 2. Land loan lump-sum draw + establishment fee ─────────────────────────
     if (i === llStartIdx && landLoan.facilityLimit > 0) {
       llDrawdowns[i] = landLoan.facilityLimit;
-      cumulativeLandLoan += landLoan.facilityLimit;
       llRunningBalance += landLoan.facilityLimit;
+      bankBalance += landLoan.facilityLimit;
       const estFee = landLoan.facilityLimit * landLoan.establishmentFeePercent;
-      llFees[i] = estFee;
-      totalLandFees += estFee;
-      cumulativeFinanceCosts += estFee;
+      if (estFee > 0) {
+        llFees[i] = estFee;
+        totalLandFees += estFee;
+        bankBalance -= estFee; // establishment fee is a cash outflow
+      }
     }
 
-    // ── 3. Land loan interest on opening balance ───────────────────────────────
-    // Interest accrues monthly on the opening balance; charged at quarter-end.
-    // In the period the land loan is first drawn, opening balance = 0 so no
-    // interest is due in that period (correct: first interest quarter starts next period).
+    // ── 3. Land loan interest on opening balance (accrued quarterly) ───────────
+    // Interest accrues on the opening balance; charged at quarter-end.
+    // In the draw period, opening balance = 0, so no interest is due (correct).
     if (llOpenBalance > 0) {
       const accrued = periodInterest(llOpenBalance, landLoan.interestRate, days, daysPerYear);
       llAccruedInterest += accrued;
 
       const monthsSinceLLStart = i - llStartIdx;
       const freq = landLoan.interestPaymentFrequency > 0 ? landLoan.interestPaymentFrequency : 1;
-      const isQuarterEnd = (monthsSinceLLStart + 1) % freq === 0;
-
-      if (isQuarterEnd) {
+      if ((monthsSinceLLStart + 1) % freq === 0) {
         llInterest[i] = llAccruedInterest;
         totalLandInterest += llAccruedInterest;
-        cumulativeFinanceCosts += llAccruedInterest;
+        bankBalance -= llAccruedInterest; // cash outflow
         llAccruedInterest = 0;
       }
     }
 
     // ── 4. Land loan repayment at senior start (refinanced into senior) ────────
     if (hasSenior && i === snrStartIdx && llRunningBalance > 0) {
-      // Flush any remaining accrued interest
+      // Flush any remaining accrued interest before closing the land loan
       if (llAccruedInterest > 0) {
         llInterest[i] += llAccruedInterest;
         totalLandInterest += llAccruedInterest;
-        cumulativeFinanceCosts += llAccruedInterest;
+        bankBalance -= llAccruedInterest;
         llAccruedInterest = 0;
       }
       llRepayments[i] = llRunningBalance;
-      // Remove land loan from cumulative funding — it is being replaced by the
-      // senior refi draw added in step 7.  Without this, both cumulativeLandLoan
-      // and cumulativeSenior (refi draw) would count the same principal, inflating
-      // totalFunded by the full land-loan amount and blocking gap-fill draws for
-      // several periods (the "dead zone").
-      cumulativeLandLoan -= llRunningBalance;
+      bankBalance -= llRunningBalance; // cash outflow — funded by step 7 senior refi draw
       llRunningBalance = 0;
     }
     llBalance[i] = llRunningBalance;
 
-    // ── 5. Accumulate period operating costs ───────────────────────────────────
-    cumulativeCosts += monthlyCostsExcFinance[i];
+    // ── 5. Operating costs ─────────────────────────────────────────────────────
+    bankBalance -= monthlyCostsExcFinance[i];
 
-    // ── 6. Senior & mezz interest/fees on opening balances (BEFORE gap fill) ───
+    // ── 6. Senior & mezz interest/fees (on opening balances, before gap fill) ───
     //
-    // Charging interest on the opening balance (before this period's draws) is the
-    // correct financial convention.  Non-capitalised charges are added to
-    // cumulativeFinanceCosts so the gap fill in step 8 will draw enough to cover them.
-    // Capitalised charges accrete to the running balance; they are not cash flows and
-    // do not trigger additional gap-fill drawdowns.
+    // Capitalised charges accrete to the running balance (no cash impact).
+    // Non-capitalised charges are deducted from bankBalance — gap fill in step 9
+    // will draw enough to cover them if bankBalance goes negative.
 
-    // Senior interest (on opening balance, before gap fill draws)
+    // Senior interest on opening balance
     if (snrOpenBalance > 0) {
       const snrInt = periodInterest(snrOpenBalance, snrAllInRate, days, daysPerYear);
       snrInterest[i] = snrInt;
       totalSeniorInterest += snrInt;
       if (senior.isCapitalised) {
-        snrRunningBalance += snrInt;
+        snrRunningBalance += snrInt; // accretes to balance, no cash flow
       } else {
-        cumulativeFinanceCosts += snrInt;
+        bankBalance -= snrInt;
       }
     }
 
-    // Senior fees: line fee on opening balance; establishment fee at start
+    // Senior fees: line fee on outstanding balance; establishment fee once at start
     if (seniorActive) {
       let periodFees = 0;
       if (snrOpenBalance > 0) {
@@ -367,12 +357,12 @@ function runFundingWaterfall(
         if (senior.isCapitalised) {
           snrRunningBalance += periodFees;
         } else {
-          cumulativeFinanceCosts += periodFees;
+          bankBalance -= periodFees;
         }
       }
     }
 
-    // Mezzanine interest (on opening balance)
+    // Mezzanine interest on opening balance
     if (mzOpenBalance > 0) {
       const mzInt = periodInterest(mzOpenBalance, mezzAllInRate, days, daysPerYear);
       mzInterest[i] = mzInt;
@@ -380,10 +370,10 @@ function runFundingWaterfall(
       if (mezz.isCapitalised) {
         mzRunningBalance += mzInt;
       } else {
-        cumulativeFinanceCosts += mzInt;
+        bankBalance -= mzInt;
       }
 
-      // Line fee on opening balance
+      // Mezz line fee on opening balance
       const mzLineFee = periodInterest(mezzLimit, mezz.lineFeePercent, days, daysPerYear);
       if (mzLineFee > 0) {
         mzFees[i] += mzLineFee;
@@ -391,12 +381,12 @@ function runFundingWaterfall(
         if (mezz.isCapitalised) {
           mzRunningBalance += mzLineFee;
         } else {
-          cumulativeFinanceCosts += mzLineFee;
+          bankBalance -= mzLineFee;
         }
       }
     }
 
-    // Mezzanine establishment fee (at start of facility)
+    // Mezzanine establishment fee (once at facility start)
     if (hasMezz && i === mezzStartIdx) {
       const mzEstFee = mezzLimit * mezz.establishmentFeePercent;
       if (mzEstFee > 0) {
@@ -405,134 +395,122 @@ function runFundingWaterfall(
         if (mezz.isCapitalised) {
           mzRunningBalance += mzEstFee;
         } else {
-          cumulativeFinanceCosts += mzEstFee;
+          bankBalance -= mzEstFee;
         }
       }
     }
 
-    // ── 7. Senior initialization (land loan refi + excess equity repatriation) ─
+    // ── 7. Senior initialisation: land loan refi + excess equity repatriation ──
     if (hasSenior && i === snrStartIdx) {
+      // Senior draws to fund the land loan repayment (step 4 deducted it)
       if (llRepayments[i] > 0) {
         snrDrawdowns[i] += llRepayments[i];
-        // Credit the refi draw into cumulativeSenior immediately so the gap-fill
-        // in step 8 sees the correct totalFunded (land-loan slot transferred to
-        // senior slot, net change = 0).  The flush in step 10 must not double-add
-        // this amount — it subtracts llRepayments[i] again there.
-        cumulativeSenior += llRepayments[i];
+        snrRunningBalance += llRepayments[i];
+        bankBalance += llRepayments[i]; // offsets step 4 deduction — net = 0
       }
+      // If equity was over-injected before senior start, repatriate excess via senior draw
       if (cumulativeEquity > equityCap) {
-        const excessEquity = cumulativeEquity - equityCap;
-        snrDrawdowns[i] += excessEquity;
-        eqRepatriations[i] += excessEquity;
-        cumulativeEquity -= excessEquity;
+        const excess = cumulativeEquity - equityCap;
+        const snrAvail = Math.max(0, seniorLimit - snrRunningBalance);
+        const draw = Math.min(excess, snrAvail);
+        if (draw > 0) {
+          snrDrawdowns[i] += draw;
+          snrRunningBalance += draw;
+          eqRepatriations[i] += draw;
+          cumulativeEquity -= draw;
+          // bankBalance: +draw (senior draw) then -draw (equity return) = net 0
+        }
       }
     }
 
-    // ── 7.5. Accumulate net revenue for gap-fill awareness ────────────────────
-    // Revenue that has arrived this period (net of GST remitted) reduces the
-    // funding gap because it will sweep to debt repayment in step 9.  Tracking
-    // it here prevents the uncapped equity backstop from firing in settlement
-    // periods 65-74 where large revenue tranches arrive alongside residual
-    // construction costs.
-    cumulativeNetRevenue += Math.max(0, monthlyRevenue[i] - gstOnRevenue[i]);
+    // ── 8. Revenue: add to bankBalance ────────────────────────────────────────
+    bankBalance += monthlyRevenue[i] - gstOnRevenue[i];
 
-    // ── 8. Gap filling via user-configured drawdown sequence ──────────────────
-    {
-      const totalNeed = cumulativeCosts + cumulativeFinanceCosts;
-      const totalFunded = cumulativeEquity + cumulativeMezz + cumulativeSenior + cumulativeLandLoan + cumulativeNetRevenue;
-      let remainGap = Math.max(0, totalNeed - totalFunded);
+    // ── 9. Gap fill: draw from facilities to cover negative bankBalance ─────────
+    //
+    // Senior is REVOLVING — available capacity = seniorLimit - snrRunningBalance.
+    // After settlement revenue repays senior in step 10, capacity is restored,
+    // allowing senior to be redrawn in subsequent construction periods.
+    if (bankBalance < 0) {
+      for (const entry of drawdownSequence) {
+        if (bankBalance >= 0) break;
 
-      if (remainGap > 0) {
-        const snrInitDrawnThisPeriod = snrDrawdowns[i];
-
-        for (const entry of drawdownSequence) {
-          if (remainGap <= 0) break;
-
-          if (entry.type === 'senior' && hasSenior && i >= snrStartIdx) {
-            const available = Math.max(0, seniorLimit - totalSnrDrawn - snrInitDrawnThisPeriod);
-            if (available > 0) {
-              const draw = Math.min(remainGap, available);
-              snrDrawdowns[i] += draw;
-              remainGap -= draw;
-            }
-          } else if (entry.type === 'mezz' && hasMezz && i >= mezzStartIdx) {
-            const available = Math.max(0, mezzLimit - totalMezzDrawn);
-            if (available > 0) {
-              const draw = Math.min(remainGap, available);
-              mzDrawdowns[i] += draw;
-              totalMezzDrawn += draw;
-              cumulativeMezz += draw;
-              mzRunningBalance += draw;
-              remainGap -= draw;
-            }
-          } else if (entry.type === 'equity') {
-            const available = Math.max(0, equityCap - cumulativeEquity);
-            if (available > 0) {
-              const draw = Math.min(remainGap, available);
-              eqInjections[i] += draw;
-              cumulativeEquity += draw;
-              remainGap -= draw;
-            }
+        if (entry.type === 'senior' && seniorActive) {
+          // Available = limit minus current outstanding balance (revolving)
+          const avail = Math.max(0, seniorLimit - snrRunningBalance);
+          if (avail > 0) {
+            const draw = Math.min(-bankBalance, avail);
+            snrDrawdowns[i] += draw;
+            snrRunningBalance += draw;
+            bankBalance += draw;
+          }
+        } else if (entry.type === 'mezz' && hasMezz && i >= mezzStartIdx) {
+          // Mezz is non-revolving: capacity depletes with total draws
+          const avail = Math.max(0, mezzLimit - totalMezzDrawn);
+          if (avail > 0) {
+            const draw = Math.min(-bankBalance, avail);
+            mzDrawdowns[i] += draw;
+            mzRunningBalance += draw;
+            totalMezzDrawn += draw;
+            bankBalance += draw;
+          }
+        } else if (entry.type === 'equity') {
+          const avail = Math.max(0, equityCap - cumulativeEquity);
+          if (avail > 0) {
+            const draw = Math.min(-bankBalance, avail);
+            eqInjections[i] += draw;
+            cumulativeEquity += draw;
+            bankBalance += draw;
           }
         }
+      }
 
-        // Equity backstop: inject uncapped equity if all configured facilities exhausted
-        if (remainGap > 0) {
-          eqInjections[i] += remainGap;
-          cumulativeEquity += remainGap;
+      // Equity backstop: inject uncapped equity if all configured facilities exhausted
+      if (bankBalance < 0) {
+        const backstop = -bankBalance;
+        eqInjections[i] += backstop;
+        cumulativeEquity += backstop;
+        bankBalance = 0;
+      }
+    }
+
+    // ── 10. Revenue sweep: surplus → senior → mezz → equity return → profit ────
+    //
+    // Repaying senior restores its revolving capacity (snrRunningBalance falls →
+    // seniorLimit - snrRunningBalance rises), enabling redraws in future periods.
+    if (bankBalance > 0) {
+      if (snrRunningBalance > 0) {
+        const repay = Math.min(bankBalance, snrRunningBalance);
+        snrRepayments[i] = repay;
+        snrRunningBalance -= repay;
+        bankBalance -= repay;
+      }
+      if (bankBalance > 0 && mzRunningBalance > 0) {
+        const repay = Math.min(bankBalance, mzRunningBalance);
+        mzRepayments[i] = repay;
+        mzRunningBalance -= repay;
+        bankBalance -= repay;
+      }
+      if (bankBalance > 0) {
+        const equityLeft = cumulativeEquity - totalEqRepatriated;
+        if (equityLeft > 0) {
+          const eqReturn = Math.min(bankBalance, equityLeft);
+          eqRepatriations[i] += eqReturn;
+          totalEqRepatriated += eqReturn;
+          bankBalance -= eqReturn;
+        }
+        if (bankBalance > 0) {
+          profitDist[i] = bankBalance;
+          bankBalance = 0;
         }
       }
     }
 
-    // Flush senior cumulative tracking for this period (init + gap-fill draws).
-    // At snrStartIdx the refi draw was already credited to cumulativeSenior in
-    // step 7, so subtract it here to avoid double-counting.
-    if (hasSenior && i >= snrStartIdx) {
-      const refiAlreadyCounted = (i === snrStartIdx) ? llRepayments[i] : 0;
-      totalSnrDrawn += snrDrawdowns[i];
-      cumulativeSenior += snrDrawdowns[i] - refiAlreadyCounted;
-      snrRunningBalance += snrDrawdowns[i];
-    }
-
-    // ── 9. Revenue repayments (sweep excess cash → debt → equity → profit) ─────
-    // Excess = revenue net of GST remitted to ATO, minus operating costs
-    // (which already include gstOnCosts — the GST paid to suppliers that is
-    // recovered as Input Tax Credits from the ATO; those ITCs reduce future
-    // gap-fill needs rather than appearing as a separate cash inflow here).
-    // All non-capitalised finance charges were already funded via gap fill, so
-    // they are implicitly covered and do not need to be re-deducted here.
-    const periodNetCash = (monthlyRevenue[i] - gstOnRevenue[i]) - monthlyCostsExcFinance[i];
-    let revAvailable = Math.max(0, periodNetCash);
-
-    if (revAvailable > 0 && snrRunningBalance > 0) {
-      const repay = Math.min(revAvailable, snrRunningBalance);
-      snrRepayments[i] = repay;
-      snrRunningBalance -= repay;
-      revAvailable -= repay;
-    }
-    if (revAvailable > 0 && mzRunningBalance > 0) {
-      const repay = Math.min(revAvailable, mzRunningBalance);
-      mzRepayments[i] = repay;
-      mzRunningBalance -= repay;
-      revAvailable -= repay;
-    }
-    if (revAvailable > 0) {
-      const equityLeft = cumulativeEquity - totalEqRepatriated;
-      if (equityLeft > 0) {
-        const eqReturn = Math.min(revAvailable, equityLeft);
-        eqRepatriations[i] += eqReturn;
-        totalEqRepatriated += eqReturn;
-        revAvailable -= eqReturn;
-      }
-      if (revAvailable > 0) {
-        profitDist[i] += revAvailable;
-      }
-    }
-
-    // ── 10. Record closing balances ────────────────────────────────────────────
+    // ── 11. Record closing balances ────────────────────────────────────────────
     snrBalance[i] = Math.max(0, snrRunningBalance);
     mzBalance[i] = Math.max(0, mzRunningBalance);
     peakDebt = Math.max(peakDebt, snrRunningBalance + llRunningBalance + mzRunningBalance);
+    peakSnrBalance = Math.max(peakSnrBalance, snrRunningBalance);
   }
 
   return {
@@ -562,7 +540,7 @@ function runFundingWaterfall(
     totalLandLoanFees: totalLandFees,
     totalEquityInjected: cumulativeEquity,
     peakDebt,
-    seniorFacilitySize: totalSnrDrawn,
+    seniorFacilitySize: peakSnrBalance,
     mezzFacilitySize: hasMezz ? mezzLimit : 0,
   };
 }
