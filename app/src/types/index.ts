@@ -257,6 +257,7 @@ export interface MonthlyCashflow {
   landLoanDrawdown: number;
   landLoanRepayment: number;
   landLoanInterest: number;
+  landLoanFees: number;
   seniorDrawdown: number;
   seniorRepayment: number;
   seniorInterest: number;

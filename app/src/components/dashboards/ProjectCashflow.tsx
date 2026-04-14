@@ -78,6 +78,7 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
       { label: 'Land Loan Drawdown', getValue: c => c.landLoanDrawdown },
       { label: 'Land Loan Repayment', getValue: c => c.landLoanRepayment },
       { label: 'Land Loan Interest', getValue: c => c.landLoanInterest },
+      { label: 'Land Loan Fees', getValue: c => c.landLoanFees },
       { label: 'Land Loan Balance', getValue: c => c.landLoanBalance, bold: true, bg: 'bg-orange-50' },
     ],
   },

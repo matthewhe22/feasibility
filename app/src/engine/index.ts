@@ -201,6 +201,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     landLoanDrawdown: funding.landLoanDrawdowns[i],
     landLoanRepayment: funding.landLoanRepayments[i],
     landLoanInterest: funding.landLoanInterest[i],
+    landLoanFees: funding.landLoanFees[i],
     seniorDrawdown: funding.seniorDrawdowns[i],
     seniorRepayment: funding.seniorRepayments[i],
     seniorInterest: funding.seniorInterest[i],
@@ -245,7 +246,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       - cf.sellingCostsBackEnd - cf.otherFinancingCosts - cf.gstOnCosts
       - cf.gstOnRevenue
       // Cash financing costs (land loan is never capitalised)
-      - cf.landLoanInterest
+      - cf.landLoanInterest - cf.landLoanFees
       // Senior/mezz interest & fees only if they are cash (non-capitalised)
       - (seniorCapitalised ? 0 : cf.seniorInterest + cf.seniorFees)
       - (mezzCapitalised   ? 0 : cf.mezzInterest   + cf.mezzFees)
