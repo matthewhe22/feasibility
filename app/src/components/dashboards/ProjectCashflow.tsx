@@ -26,11 +26,12 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
       { label: 'Selling Costs (Front End)', getValue: c => c.sellingCostsFrontEnd },
       { label: 'Selling Costs (Back End)', getValue: c => c.sellingCostsBackEnd },
       { label: 'Other Financing Costs', getValue: c => c.otherFinancingCosts },
+      { label: 'GST on Costs (paid to vendors, ITC claimable)', getValue: c => c.gstOnCosts, textColor: 'text-orange-700' },
       {
-        label: 'Total Costs',
+        label: 'Total Costs (incl. GST on Costs)',
         getValue: c => c.landCosts + c.acquisitionCosts + c.developmentCosts + c.constructionCosts +
           c.contingency + c.marketingCosts + c.otherStandardCosts + c.pmFees +
-          c.sellingCostsFrontEnd + c.sellingCostsBackEnd + c.otherFinancingCosts,
+          c.sellingCostsFrontEnd + c.sellingCostsBackEnd + c.otherFinancingCosts + c.gstOnCosts,
         bold: true, bg: 'bg-red-50',
       },
     ],
@@ -42,9 +43,10 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
       { label: 'GRV Settlements', getValue: c => c.grvSettlements, textColor: 'text-green-700' },
       { label: 'Rental Income', getValue: c => c.rentalIncome, textColor: 'text-green-700' },
       { label: 'Other Income', getValue: c => c.otherIncome, textColor: 'text-green-700' },
+      { label: 'GST on Revenue (remitted to ATO)', getValue: c => c.gstOnRevenue, textColor: 'text-orange-700' },
       {
-        label: 'Total Revenue',
-        getValue: c => c.grvSettlements + c.rentalIncome + c.otherIncome,
+        label: 'Total Revenue (net of GST on Revenue)',
+        getValue: c => c.grvSettlements + c.rentalIncome + c.otherIncome - c.gstOnRevenue,
         bold: true, bg: 'bg-green-50', textColor: 'text-green-800',
       },
     ],

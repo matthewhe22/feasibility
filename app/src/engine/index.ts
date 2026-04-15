@@ -109,16 +109,21 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const gstOnRevenue = new Array(n).fill(0);
 
   // GST on costs (items with addGST = true)
+  // NOTE: use explicit === true check so that legacy saved items where addGST is
+  // undefined (field added after the project was first saved) still get GST applied.
+  // Items that were intentionally set to false will remain GST-free.
   const allCostItems = [
     ...inputs.developmentCosts,
     ...inputs.constructionCosts,
     ...inputs.marketingCosts,
-    ...inputs.pmFees,
+    // Use pmFeesWithTotal so the dynamic PM fee total is used for GST calculation
+    ...pmFeesWithTotal,
     ...inputs.otherStandardCosts,
     ...inputs.otherFinancingCosts,
   ];
   for (const item of allCostItems) {
-    if (item.addGST) {
+    // Treat undefined as true (apply GST) — explicit false means GST-free
+    if (item.addGST !== false) {
       const spread = spreadCosts([item], periods, admin.manualSCurves, buildSCurves);
       for (let i = 0; i < n; i++) {
         gstOnCosts[i] += spread[i] * gstRate;
@@ -378,6 +383,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       otherFinancingCosts: totalOtherFin,
       standardCosts,
       gst: totalGSTOnCosts,
+      gstOnRevenue: totalGSTOnRevenue,
+      gstNet: totalGSTOnRevenue - totalGSTOnCosts,
       marketingAndAdvertising: totalMarketing,
       salesCommissions: commissions.total,
       pmFee: totalPMFees,

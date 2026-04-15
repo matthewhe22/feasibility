@@ -289,7 +289,12 @@ export interface FeasibilitySummary {
   mezzFinanceCosts: number;
   otherFinancingCosts: number;
   standardCosts: number;
+  /** GST paid to vendors on costs (input tax credits claimable via BAS) */
   gst: number;
+  /** GST embedded in sale prices and remitted to ATO */
+  gstOnRevenue: number;
+  /** Net GST payable to ATO = gstOnRevenue - gst */
+  gstNet: number;
   marketingAndAdvertising: number;
   salesCommissions: number;
   pmFee: number;
