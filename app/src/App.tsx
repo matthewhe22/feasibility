@@ -11,6 +11,7 @@ import { ExternalDashboard } from './components/dashboards/ExternalDashboard';
 import { ProjectCashflow } from './components/dashboards/ProjectCashflow';
 import { ProjectSummary } from './components/dashboards/ProjectSummary';
 import { ChartsTab } from './components/charts/Charts';
+import { ChecksTab } from './components/dashboards/ChecksTab';
 import { ProjectManager } from './components/ProjectManager';
 
 // ── Error Boundary ────────────────────────────────────────────────────────────
@@ -42,7 +43,7 @@ class DashboardErrorBoundary extends Component<
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
 
-type TabId = 'input' | 'internalDash' | 'externalDash' | 'cashflow' | 'summary' | 'charts';
+type TabId = 'input' | 'internalDash' | 'externalDash' | 'cashflow' | 'summary' | 'charts' | 'checks';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'input', label: 'Inputs' },
@@ -51,6 +52,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'cashflow', label: 'Project Cashflow' },
   { id: 'summary', label: 'Project Summary' },
   { id: 'charts', label: 'Charts & Visualisations' },
+  { id: 'checks', label: 'Checks' },
 ];
 
 // ── App ───────────────────────────────────────────────────────────────────────
@@ -200,6 +202,7 @@ function App() {
           {activeTab === 'cashflow' && <ProjectCashflow />}
           {activeTab === 'summary' && <ProjectSummary />}
           {activeTab === 'charts' && <ChartsTab />}
+          {activeTab === 'checks' && <ChecksTab />}
         </DashboardErrorBoundary>
       </main>
 

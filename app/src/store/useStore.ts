@@ -29,7 +29,7 @@ import {
   defaultOtherFinancingCosts,
 } from './defaults';
 
-export type TabId = 'admin' | 'input' | 'timeDist' | 'actuals' | 'internalDash' | 'externalDash' | 'cashflow' | 'summary' | 'charts';
+export type TabId = 'admin' | 'input' | 'timeDist' | 'actuals' | 'internalDash' | 'externalDash' | 'cashflow' | 'summary' | 'charts' | 'checks';
 
 interface AppState {
   activeTab: TabId;

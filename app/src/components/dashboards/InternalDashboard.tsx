@@ -67,7 +67,9 @@ export function InternalDashboard() {
               <DashValue label="Mezzanine Finance Costs" value={f.mezzFinanceCosts} />
               <DashValue label="Other Financing Costs" value={f.otherFinancingCosts} />
               <DashValue label="Standard Costs" value={f.standardCosts} />
-              <DashValue label="GST" value={f.gst} />
+              <DashValue label="GST on Costs (ITC Claimable)" value={f.gst} indent />
+              <DashValue label="GST on Revenue (Remitted to ATO)" value={f.gstOnRevenue} indent />
+              <DashValue label="Net GST Payable to ATO" value={f.gstNet} indent bold />
               <DashValue label="Marketing and Advertising" value={f.marketingAndAdvertising} />
               <DashValue label="Sales Commissions" value={f.salesCommissions} />
               <DashValue label="Project Management Fee" value={f.pmFee} />
