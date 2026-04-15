@@ -1,0 +1,15 @@
+{
+  "name": "feasibility-api",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@supabase/supabase-js": "^2.103.0",
+    "@vercel/node": "^5.0.2",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}
