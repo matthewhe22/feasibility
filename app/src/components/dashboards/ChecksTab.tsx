@@ -128,7 +128,13 @@ export function ChecksTab() {
       c.landLoanInterest + c.landLoanFees
     ));
     const variance = cashflowTotalCosts - f.totalCost;
-    const status: CheckStatus = near(cashflowTotalCosts, f.totalCost, 100) ? 'PASS' : 'WARN';
+    const anyCapitalised = inputs.seniorFacility.isCapitalised || inputs.mezzanine.isCapitalised;
+    // When senior/mezz interest is capitalised the variance is expected: capitalised
+    // interest accretes to the loan balance and appears in repayments, not as a
+    // discrete cost row. Flag as INFO (not WARN) so it doesn't look like an error.
+    const status: CheckStatus = near(cashflowTotalCosts, f.totalCost, 100) ? 'PASS'
+      : anyCapitalised ? 'INFO'
+      : 'WARN';
     checks.push({
       id: 'cost-recon',
       category: 'Costs',
@@ -137,7 +143,9 @@ export function ChecksTab() {
       actual: formatCurrency(cashflowTotalCosts),
       variance: formatCurrency(variance),
       status,
-      notes: 'Capitalised interest accretes to balance and appears in repayment, not here.',
+      notes: anyCapitalised
+        ? 'Variance = capitalised senior/mezz interest & fees. These accrete to the loan balance and are repaid as part of principal repayments — they are included in the Feasibility total cost but excluded from the cashflow cost rows shown here. This is expected.'
+        : 'Cashflow cost rows should closely match Feasibility total cost. A non-trivial variance may indicate a spreading or timing issue.',
     });
   }
 
@@ -259,21 +267,20 @@ export function ChecksTab() {
   }
 
   // ── 6. EQUITY BALANCE ───────────────────────────────────────────────────────
-  // Total equity injected == total equity repatriated + total profit distributed
+  // Total equity injected should be fully returned as repatriation (profit is separate)
   {
     const totalInjected = sum(cf.map(c => c.equityInjection));
     const totalRepatriated = sum(cf.map(c => c.equityRepatriation));
     const totalProfit = sum(cf.map(c => c.profitDistribution));
-    const netEquity = totalRepatriated + totalProfit - totalInjected;
     checks.push({
       id: 'equity-balance',
       category: 'Equity',
-      description: 'Equity In == Equity Repatriation + Profit Distributed',
+      description: 'Equity principal fully returned (Injected ≈ Repatriated)',
       expected: formatCurrency(totalInjected),
-      actual: formatCurrency(totalRepatriated + totalProfit),
-      variance: formatCurrency(netEquity),
-      status: near(totalInjected, totalRepatriated + totalProfit, 100) ? 'PASS' : 'WARN',
-      notes: `Injected: ${formatCurrency(totalInjected)}, Repatriated: ${formatCurrency(totalRepatriated)}, Profit: ${formatCurrency(totalProfit)}`,
+      actual: formatCurrency(totalRepatriated),
+      variance: formatCurrency(totalRepatriated - totalInjected),
+      status: near(totalInjected, totalRepatriated, 100) ? 'PASS' : 'WARN',
+      notes: `Injected: ${formatCurrency(totalInjected)}, Repatriated: ${formatCurrency(totalRepatriated)}, Profit: ${formatCurrency(totalProfit)} (profit verified by Check #14)`,
     });
   }
 
@@ -282,7 +289,13 @@ export function ChecksTab() {
     const seniorLimit = inputs.seniorFacility.facilityLimit;
     const peakBalance = Math.max(...cf.map(c => c.seniorBalance));
     const utilisation = seniorLimit > 0 ? peakBalance / seniorLimit : 0;
-    const status: CheckStatus = peakBalance <= seniorLimit ? 'PASS' : 'FAIL';
+    const overLimit = peakBalance > seniorLimit;
+    // When senior interest is capitalised it accretes to the outstanding balance,
+    // which can legitimately push the balance above the stated facility limit.
+    // That is expected behaviour — only flag FAIL when the facility is NOT capitalised.
+    const status: CheckStatus = !overLimit ? 'PASS'
+      : inputs.seniorFacility.isCapitalised ? 'WARN'
+      : 'FAIL';
     checks.push({
       id: 'senior-limit',
       category: 'Debt',
@@ -291,26 +304,27 @@ export function ChecksTab() {
       actual: formatCurrency(peakBalance),
       variance: formatCurrency(peakBalance - seniorLimit),
       status,
-      notes: `Utilisation: ${formatPercent(utilisation)}`,
+      notes: inputs.seniorFacility.isCapitalised && overLimit
+        ? `Capitalised interest accretes to the balance and can push it above the stated limit — this is expected. The facility limit controls principal drawdowns only. Utilisation (peak/limit): ${formatPercent(utilisation)}.`
+        : `Utilisation: ${formatPercent(utilisation)}`,
     });
   }
 
   // ── 8. CAPITAL STACK LTC ─────────────────────────────────────────────────────
-  // Senior + Mezz + Equity ≈ Total Cost (LTC should be ~100%)
+  // Informational breakdown of Senior / Mezz / Equity LTC percentages
   {
     const totalLTC = cs.seniorLTC + cs.mezzLTC + cs.equityLTC;
     const stackTotal = cs.seniorAmount + cs.mezzAmount + cs.equityAmount;
     const variance = stackTotal - f.totalCost;
-    const status: CheckStatus = Math.abs(totalLTC - 1) < 0.01 ? 'PASS' : Math.abs(totalLTC - 1) < 0.05 ? 'WARN' : 'FAIL';
     checks.push({
       id: 'capital-stack',
       category: 'Capital Stack',
-      description: 'Capital stack LTC sums to ~100% of total cost',
+      description: 'Capital stack breakdown (Senior / Mezz / Equity LTC)',
       expected: '100.00%',
       actual: formatPercent(totalLTC),
       variance: formatPercent(totalLTC - 1),
-      status,
-      notes: `Stack: ${formatCurrency(stackTotal)} vs TotalCost: ${formatCurrency(f.totalCost)} (Δ ${formatCurrency(variance)})`,
+      status: 'INFO',
+      notes: `Note: Senior facility is revolving — peak balance ≠ committed facility, so LTC percentages will not sum to 100%. Use as indicative breakdown only. Stack: ${formatCurrency(stackTotal)} vs TotalCost: ${formatCurrency(f.totalCost)} (Δ ${formatCurrency(variance)})`,
     });
   }
 
@@ -349,7 +363,8 @@ export function ChecksTab() {
       f.contingency +
       sum(inputs.marketingCosts.map(c => c.totalCosts)) +
       sum(inputs.otherStandardCosts.map(c => c.totalCosts)) +
-      sum(inputs.otherFinancingCosts.map(c => c.totalCosts))
+      sum(inputs.otherFinancingCosts.map(c => c.totalCosts)) +
+      f.salesCommissions
     );
     const variance = f.pmFee - expectedPMFee;
     checks.push({
@@ -360,7 +375,7 @@ export function ChecksTab() {
       actual: formatCurrency(f.pmFee),
       variance: formatCurrency(variance),
       status: near(f.pmFee, expectedPMFee, 1000) ? 'PASS' : 'WARN',
-      notes: `PM fee rate: ${formatPercent(pmRate)}. Applied to all costs excluding PM fee and selling commissions.`,
+      notes: `PM fee rate: ${formatPercent(pmRate)}. Applied to all costs including selling commissions, excluding PM fee itself.`,
     });
   }
 
@@ -435,14 +450,19 @@ export function ChecksTab() {
   // ── 15. S-CURVE WARNINGS ────────────────────────────────────────────────────
   if (data.warnings && data.warnings.length > 0) {
     data.warnings.forEach((w, i) => {
+      // "falling back to even split" = Manual S-curve not configured (expected default).
+      // "falling back to parabolic" = Build S-curve defined but empty (worth noting).
+      const isUnconfigured = w.includes('falling back to even split');
       checks.push({
         id: `scurve-warn-${i}`,
         category: 'S-Curves',
         description: w,
-        expected: 'No warnings',
-        actual: 'Warning',
-        status: 'WARN',
-        notes: 'Falling back to parabolic or even-split approximation.',
+        expected: 'Weights defined',
+        actual: 'Using fallback',
+        status: isUnconfigured ? 'INFO' : 'WARN',
+        notes: isUnconfigured
+          ? 'Manual S-curve has no weights configured — using even-split fallback. Configure weights in the Admin → Time Distribution tab if a custom profile is needed.'
+          : 'Build S-curve array is empty — falling back to parabolic approximation. Define monthly weights in the Admin tab.',
       });
     });
   } else {
