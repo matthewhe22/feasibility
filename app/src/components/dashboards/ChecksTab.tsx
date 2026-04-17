@@ -1,4 +1,3 @@
-import React from 'react';
 import { useStore } from '../../store/useStore';
 import { formatCurrency, formatPercent, sum } from '../../utils';
 
@@ -339,10 +338,6 @@ export function ChecksTab() {
     const pmRate = inputs.pmFees.length > 0 && inputs.pmFees[0].units > 0
       ? inputs.pmFees[0].units
       : 0.02;
-    const totalCostsExcPM =
-      f.totalCost - f.pmFee
-      - (inputs.seniorFacility.isCapitalised ? 0 : f.seniorFinanceCosts)
-      - (inputs.mezzanine.isCapitalised ? 0 : f.mezzFinanceCosts);
     const expectedPMFee = pmRate * (
       sum(inputs.landPurchase.paymentStages.map(s =>
         s.percentOfLand > 0 ? s.percentOfLand * inputs.landPurchase.landPurchasePrice : s.amount
