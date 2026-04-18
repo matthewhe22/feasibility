@@ -209,20 +209,31 @@ export function ChecksTab() {
         description: 'GST on revenue is $0 despite gstIncluded items existing',
         expected: '>$0',
         actual: '$0',
-        status: 'FAIL',
-        notes: 'Check that gstRate > 0 and GRV items with gstIncluded:true have currentSalePrice > 0.',
+        status: 'WARN',
+        notes: 'GST rate may be 0% — set gstRate > 0 in Land Purchase inputs if GST applies. Standard Australian rate is 10%.',
       });
     }
-    if (f.gst === 0 && inputs.developmentCosts.some(c => c.addGST !== false)) {
-      checks.push({
-        id: 'gst-costs-zero',
-        category: 'GST',
-        description: 'GST on costs is $0 despite addGST items existing',
-        expected: '>$0',
-        actual: '$0',
-        status: 'FAIL',
-        notes: 'Check that gstRate > 0. This may indicate cost items were saved before the addGST field was added to the schema.',
-      });
+    {
+      // Check ALL cost categories that the engine applies GST to, not just dev costs
+      const allGSTCostItems = [
+        ...inputs.developmentCosts,
+        ...inputs.constructionCosts,
+        ...inputs.marketingCosts,
+        ...inputs.pmFees,
+        ...inputs.otherStandardCosts,
+        ...inputs.otherFinancingCosts,
+      ];
+      if (f.gst === 0 && allGSTCostItems.some(c => c.addGST !== false)) {
+        checks.push({
+          id: 'gst-costs-zero',
+          category: 'GST',
+          description: 'GST on costs is $0 despite addGST items existing',
+          expected: '>$0',
+          actual: '$0',
+          status: 'WARN',
+          notes: 'GST rate may be 0% — set gstRate > 0 in Land Purchase inputs if GST applies. If GST-free is intentional, mark all cost items addGST: false.',
+        });
+      }
     }
   }
 
