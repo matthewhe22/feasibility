@@ -134,7 +134,7 @@ function App() {
       <header className="bg-gray-800 text-white px-4 py-3 flex items-center justify-between shadow">
         <div>
           <h1 className="text-lg font-bold tracking-wide">Project Development Feasibility Model</h1>
-          <p className="text-xs text-gray-400">Property Development Feasibility Analysis</p>
+          <p className="text-xs text-gray-400">{admin.projectName || 'Property Development Feasibility Analysis'}</p>
         </div>
         <div className="flex gap-2">
           <button

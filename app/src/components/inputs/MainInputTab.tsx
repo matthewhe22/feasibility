@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useStore } from '../../store/useStore';
-import { CurrencyInput, PercentInput, NumberInput, SectionHeader } from '../common/FormFields';
+import { CurrencyInput, PercentInput, NumberInput, TextInput, SectionHeader } from '../common/FormFields';
 import { FinancingInputs } from './FinancingInputs';
 import { formatCurrency, excelDateToDate, addMonths, endOfMonth } from '../../utils';
 import { calculateStampDuty, STAMP_DUTY_STATES, type StampDutyState } from '../../utils/stampDuty';
@@ -642,8 +642,22 @@ export function MainInputTab() {
       {/* Preliminary */}
       {section === 'preliminary' && (
         <div>
-          <SectionHeader number="1.1" title="Preliminary" />
+          <SectionHeader number="1.1" title="Preliminary">
+            <button
+              onClick={() => {
+                if (!confirm('Clear all General inputs?')) return;
+                setAdmin({ projectName: '' });
+                setInputs({
+                  preliminary: { ...inputs.preliminary, projectLots: 0, projectGFA: 0, siteArea: 0, projectStartMonth: 0, projectSpanMonths: 0 },
+                  landPurchase: { ...inputs.landPurchase, gstRate: 0 },
+                });
+              }}
+              className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+            >Clear All</button>
+          </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-4 space-y-1.5">
+            <TextInput label="Project Name" value={admin.projectName}
+              onChange={v => setAdmin({ projectName: v })} />
             <NumberInput label="Project Lots #" value={inputs.preliminary.projectLots}
               onChange={v => setInputs({ preliminary: { ...inputs.preliminary, projectLots: v } })} />
             <NumberInput label="Project GFA SqM" value={inputs.preliminary.projectGFA}
@@ -654,6 +668,8 @@ export function MainInputTab() {
               onChange={v => setInputs({ preliminary: { ...inputs.preliminary, projectStartMonth: v } })} />
             <NumberInput label="Project Duration (months)" value={inputs.preliminary.projectSpanMonths}
               onChange={v => setInputs({ preliminary: { ...inputs.preliminary, projectSpanMonths: v } })} />
+            <PercentInput label="GST Rate" value={inputs.landPurchase.gstRate}
+              onChange={v => setInputs({ landPurchase: { ...inputs.landPurchase, gstRate: v } })} />
           </div>
         </div>
       )}
@@ -661,14 +677,27 @@ export function MainInputTab() {
       {/* Land */}
       {section === 'land' && (
         <div>
-          <SectionHeader number="2.1" title="Land Purchase, PRSV & Acquisition Costs" />
+          <SectionHeader number="2.1" title="Land Purchase, PRSV & Acquisition Costs">
+            <button
+              onClick={() => {
+                if (!confirm('Clear all Land inputs?')) return;
+                setInputs({
+                  landPurchase: {
+                    ...inputs.landPurchase,
+                    landPurchasePrice: 0, prsvUplift: 0, prsvMonth: 0, prsvSpan: 0,
+                    stampDutyAmount: 0, interestOnDeposit: 0, profitShareToLandOwner: 0,
+                    paymentStages: [], acquisitionCosts: [],
+                  },
+                });
+              }}
+              className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+            >Clear All</button>
+          </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-4 space-y-1.5">
             <CurrencyInput label="Land Purchase Price" value={inputs.landPurchase.landPurchasePrice}
               onChange={handleLandPriceChangeWithSD} />
             <CurrencyInput label="PRSV Uplift" value={inputs.landPurchase.prsvUplift}
               onChange={v => setInputs({ landPurchase: { ...inputs.landPurchase, prsvUplift: v } })} />
-            <PercentInput label="GST Rate" value={inputs.landPurchase.gstRate}
-              onChange={v => setInputs({ landPurchase: { ...inputs.landPurchase, gstRate: v } })} />
             {/* Stamp Duty by State */}
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-gray-600 w-40 shrink-0">State</span>
@@ -697,7 +726,12 @@ export function MainInputTab() {
       {/* Development Costs */}
       {section === 'devCosts' && (
         <div>
-          <SectionHeader number="2.2" title="Development Costs" />
+          <SectionHeader number="2.2" title="Development Costs">
+            <button
+              onClick={() => { if (confirm('Clear all Development Costs?')) setInputs({ developmentCosts: [] }); }}
+              className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+            >Clear All</button>
+          </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
             <CostLineTable items={inputs.developmentCosts}
               onChange={items => setInputs({ developmentCosts: items })} />
@@ -708,7 +742,12 @@ export function MainInputTab() {
       {/* Construction */}
       {section === 'construction' && (
         <div>
-          <SectionHeader number="2.3" title="Total Construction Costs" />
+          <SectionHeader number="2.3" title="Total Construction Costs">
+            <button
+              onClick={() => { if (confirm('Clear all Construction Costs?')) setInputs({ constructionCosts: [], constructionContingencyPercent: 0 }); }}
+              className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+            >Clear All</button>
+          </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
             <CostLineTable items={inputs.constructionCosts}
               onChange={items => setInputs({ constructionCosts: items })} />
@@ -721,7 +760,12 @@ export function MainInputTab() {
       {/* Marketing */}
       {section === 'marketing' && (
         <div>
-          <SectionHeader number="2.4" title="Marketing & Advertising" />
+          <SectionHeader number="2.4" title="Marketing & Advertising">
+            <button
+              onClick={() => { if (confirm('Clear all Marketing Costs?')) setInputs({ marketingCosts: [] }); }}
+              className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+            >Clear All</button>
+          </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
             <CostLineTable items={inputs.marketingCosts}
               onChange={items => setInputs({ marketingCosts: items })} />
@@ -732,7 +776,12 @@ export function MainInputTab() {
       {/* Other Standard Costs */}
       {section === 'otherCosts' && (
         <div>
-          <SectionHeader number="2.5" title="Other Standard Costs" />
+          <SectionHeader number="2.5" title="Other Standard Costs">
+            <button
+              onClick={() => { if (confirm('Clear all Other Standard Costs?')) setInputs({ otherStandardCosts: [] }); }}
+              className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+            >Clear All</button>
+          </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
             <CostLineTable items={inputs.otherStandardCosts}
               onChange={items => setInputs({ otherStandardCosts: items })} />
@@ -743,7 +792,12 @@ export function MainInputTab() {
       {/* PM Fees */}
       {section === 'pmFees' && (
         <div>
-          <SectionHeader number="2.6" title="Development & Project Management Fees" />
+          <SectionHeader number="2.6" title="Development & Project Management Fees">
+            <button
+              onClick={() => { if (confirm('Clear all PM Fees?')) setInputs({ pmFees: [] }); }}
+              className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+            >Clear All</button>
+          </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
             <CostLineTable items={inputs.pmFees}
               onChange={items => setInputs({ pmFees: items })} />
@@ -754,7 +808,12 @@ export function MainInputTab() {
       {/* Selling */}
       {section === 'selling' && (
         <div>
-          <SectionHeader number="2.7" title="Selling & Leasing Costs" />
+          <SectionHeader number="2.7" title="Selling & Leasing Costs">
+            <button
+              onClick={() => { if (confirm('Clear all Selling Costs?')) setInputs({ sellingCosts: [], frontEndSellingCosts: [], backEndSellingCosts: [] }); }}
+              className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+            >Clear All</button>
+          </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
             <div className="overflow-x-auto">
               <table className="w-full text-xs border-collapse mb-3">
@@ -822,7 +881,12 @@ export function MainInputTab() {
       {/* GRV */}
       {section === 'grv' && (
         <div>
-          <SectionHeader number="3.1" title="Gross Realisable Value (GRV)" />
+          <SectionHeader number="3.1" title="Gross Realisable Value (GRV)">
+            <button
+              onClick={() => { if (confirm('Clear all GRV, Rental & Other Income?')) setInputs({ grvItems: [], rentalIncome: [], otherIncome: [] }); }}
+              className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+            >Clear All</button>
+          </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
             <GRVTable items={inputs.grvItems}
               onChange={items => setInputs({ grvItems: items })} />
@@ -831,12 +895,44 @@ export function MainInputTab() {
       )}
 
       {/* Financing */}
-      {section === 'financing' && <FinancingInputs />}
+      {section === 'financing' && (
+        <div>
+          <div className="flex justify-end mb-1">
+            <button
+              onClick={() => {
+                if (!confirm('Clear all Financing inputs? This resets all equity and debt facilities to zero.')) return;
+                const zeroEquity = { name: '', fixedAmount: 0, percentage: 0, interestRate: 0, interestCompound: 0, repayEquityBeforeDebt: 0, equityContribution: 0, profitShare: 0, drawdownPriority: 1 };
+                const zeroDebt = { name: '', facilityLimit: 0, startMonth: 0, maturityMonth: 0, interestRate: 0, bbsy: 0, margin: 0, establishmentFeePercent: 0, lineFeePercent: 0, interestPaymentFrequency: 1, isCapitalised: false, ltcTarget: 0, lvrTarget: 0, drawdownPriority: 1 };
+                setInputs({
+                  equityKokoda: { ...zeroEquity, name: 'Kokoda' },
+                  equityJV: { ...zeroEquity, name: 'JV Partner' },
+                  equityPreferred: { ...zeroEquity, name: 'Preferred Equity' },
+                  equityAdditional: { ...zeroEquity, name: 'Additional Equity' },
+                  landLoan: { ...zeroDebt, name: 'Land Loan' },
+                  mezzanine: { ...zeroDebt, name: 'Mezzanine' },
+                  seniorFacility: { ...zeroDebt, name: 'Senior Facility' },
+                  residualStockFacility: { ...zeroDebt, name: 'Residual Stock' },
+                  additionalLoan1: { ...zeroDebt, name: 'Additional Loan #1' },
+                  additionalLoan2: { ...zeroDebt, name: 'Additional Loan #2' },
+                  additionalLoan3: { ...zeroDebt, name: 'Additional Loan #3' },
+                });
+              }}
+              className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+            >Clear All</button>
+          </div>
+          <FinancingInputs />
+        </div>
+      )}
 
       {/* Other Financing Costs */}
       {section === 'otherFin' && (
         <div>
-          <SectionHeader number="4.3" title="Other Financing Costs" />
+          <SectionHeader number="4.3" title="Other Financing Costs">
+            <button
+              onClick={() => { if (confirm('Clear all Other Financing Costs?')) setInputs({ otherFinancingCosts: [] }); }}
+              className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+            >Clear All</button>
+          </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
             <CostLineTable items={inputs.otherFinancingCosts}
               onChange={items => setInputs({ otherFinancingCosts: items })} />
@@ -847,7 +943,22 @@ export function MainInputTab() {
       {/* Actuals */}
       {section === 'actuals' && (
         <div>
-          <SectionHeader number="6" title="Actual Costs by Period" />
+          <SectionHeader number="6" title="Actual Costs by Period">
+            <button
+              onClick={() => {
+                if (!confirm('Clear all Actual Costs entries?')) return;
+                const clearActuals = (items: typeof inputs.developmentCosts) => items.map(i => ({ ...i, actuals: undefined }));
+                setInputs({
+                  developmentCosts: clearActuals(inputs.developmentCosts),
+                  constructionCosts: clearActuals(inputs.constructionCosts),
+                  marketingCosts: clearActuals(inputs.marketingCosts),
+                  otherStandardCosts: clearActuals(inputs.otherStandardCosts),
+                  otherFinancingCosts: clearActuals(inputs.otherFinancingCosts),
+                });
+              }}
+              className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+            >Clear All</button>
+          </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-4">
             <p className="text-xs text-gray-500 mb-4">
               Enter actual costs incurred for each line item in each period.
@@ -887,7 +998,12 @@ export function MainInputTab() {
       {/* Manual S-Curves */}
       {section === 'sCurves' && (
         <div>
-          <SectionHeader number="5" title="S-Curve Distributions" />
+          <SectionHeader number="5" title="S-Curve Distributions">
+            <button
+              onClick={() => { if (confirm('Clear all Manual S-Curve weights?')) setAdmin({ manualSCurves: [[], [], []], buildSCurves: {} }); }}
+              className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+            >Clear All</button>
+          </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-4">
             <p className="text-xs text-gray-500 mb-4">
               Enter monthly weight values for each S-curve. Values are normalised automatically —

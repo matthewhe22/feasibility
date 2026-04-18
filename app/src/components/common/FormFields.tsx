@@ -1,4 +1,5 @@
 // FormFields.tsx
+import type { ReactNode } from 'react';
 
 interface CurrencyInputProps {
   label: string;
@@ -135,13 +136,15 @@ interface SectionHeaderProps {
   number: string;
   title: string;
   className?: string;
+  children?: ReactNode;
 }
 
-export function SectionHeader({ number, title, className = '' }: SectionHeaderProps) {
+export function SectionHeader({ number, title, className = '', children }: SectionHeaderProps) {
   return (
     <div className={`flex items-center gap-2 bg-gray-700 text-white px-3 py-1.5 rounded-t ${className}`}>
       <span className="font-bold text-sm">{number}</span>
-      <span className="font-semibold text-sm">{title}</span>
+      <span className="font-semibold text-sm flex-1">{title}</span>
+      {children}
     </div>
   );
 }
