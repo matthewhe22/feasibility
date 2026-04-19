@@ -342,10 +342,13 @@ function runFundingWaterfall(
       }
     }
 
-    // Senior line fee on total facility limit; establishment fee once at start
+    // Senior line fee on total facility limit (charged while balance is outstanding);
+    // establishment fee once at start
     if (seniorActive) {
       let periodFees = 0;
-      periodFees += periodInterest(seniorLimit, senior.lineFeePercent, days, daysPerYear);
+      if (snrOpenBalance > 0) {
+        periodFees += periodInterest(seniorLimit, senior.lineFeePercent, days, daysPerYear);
+      }
       if (i === snrStartIdx) {
         periodFees += seniorLimit * senior.establishmentFeePercent;
       }
