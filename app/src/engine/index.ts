@@ -298,7 +298,11 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
 
   const totalRentalIncome = sum(rentalInc);
   const totalOtherIncome = sum(otherInc);
-  const totalProfit = grv + totalRentalIncome + totalOtherIncome - totalGSTOnRevenue - totalCost;
+  // Use sum(settlements) rather than totalGRV so that GRV items without a
+  // settlement date are excluded — they are not in the waterfall revenue and
+  // would otherwise cause totalProfit > sum(profitDistributions).
+  const totalSettlementsRevenue = sum(settlements);
+  const totalProfit = totalSettlementsRevenue + totalRentalIncome + totalOtherIncome - totalGSTOnRevenue - totalCost;
 
   // Preferred equity coupon (accrued over project duration at simple interest)
   const prefEquityBalance = inputs.equityPreferred.fixedAmount;
@@ -376,6 +380,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   return {
     feasibility: {
       totalGRV: grv,
+      totalSettlementsRevenue,
       land: totalLand,
       stampDuty: totalStampDuty,
       buildCosts: totalBuildCosts + totalContingency,
