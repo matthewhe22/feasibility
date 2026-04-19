@@ -281,6 +281,7 @@ export interface MonthlyCashflow {
 // ===== DASHBOARD =====
 export interface FeasibilitySummary {
   totalGRV: number;
+  totalSettlementsRevenue: number;
   land: number;
   stampDuty: number;
   buildCosts: number;

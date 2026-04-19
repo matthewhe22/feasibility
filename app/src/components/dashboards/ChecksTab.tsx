@@ -424,19 +424,20 @@ export function ChecksTab() {
   }
 
   // ── 13. PROFIT CONSISTENCY ───────────────────────────────────────────────────
-  // Feasibility profit should match: GRV − gstOnRevenue − totalCost
+  // totalProfit = settled revenue − gstOnRevenue − totalCost
+  // Uses settled revenue (not raw GRV) so unsettled items don't inflate profit.
   {
-    const derivedProfit = f.totalGRV - f.gstOnRevenue - f.totalCost;
+    const derivedProfit = f.totalSettlementsRevenue - f.gstOnRevenue - f.totalCost;
     const variance = derivedProfit - f.totalProfit;
     checks.push({
       id: 'profit-consistency',
       category: 'Returns',
-      description: 'Total Profit = GRV − GST on Revenue − Total Cost',
+      description: 'Total Profit = Settled Revenue − GST on Revenue − Total Cost',
       expected: formatCurrency(derivedProfit),
       actual: formatCurrency(f.totalProfit),
       variance: formatCurrency(variance),
       status: near(derivedProfit, f.totalProfit, 1) ? 'PASS' : 'FAIL',
-      notes: `GRV ${formatCurrency(f.totalGRV)} − GST on Rev ${formatCurrency(f.gstOnRevenue)} − Costs ${formatCurrency(f.totalCost)}`,
+      notes: `Settled Rev ${formatCurrency(f.totalSettlementsRevenue)} − GST on Rev ${formatCurrency(f.gstOnRevenue)} − Costs ${formatCurrency(f.totalCost)}`,
     });
   }
 
