@@ -58,7 +58,7 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
       { label: 'Senior Drawdown', getValue: c => c.seniorDrawdown },
       { label: 'Senior Repayment', getValue: c => c.seniorRepayment },
       { label: 'Senior Interest', getValue: c => c.seniorInterest },
-      { label: 'Senior Fees', getValue: c => c.seniorFees },
+      { label: 'Senior Line fee', getValue: c => c.seniorFees },
       { label: 'Senior Balance', getValue: c => c.seniorBalance, bold: true, bg: 'bg-blue-50' },
     ],
   },
