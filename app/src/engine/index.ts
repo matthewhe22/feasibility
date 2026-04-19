@@ -296,7 +296,9 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     totalSeniorFinCosts + totalLandLoanFinCosts + totalMezzFinCosts + totalOtherFin +
     standardCosts + totalGSTOnCosts + totalMarketing + commissions.total + totalPMFees;
 
-  const totalProfit = grv - totalGSTOnRevenue - totalCost;
+  const totalRentalIncome = sum(rentalInc);
+  const totalOtherIncome = sum(otherInc);
+  const totalProfit = grv + totalRentalIncome + totalOtherIncome - totalGSTOnRevenue - totalCost;
 
   // Preferred equity coupon (accrued over project duration at simple interest)
   const prefEquityBalance = inputs.equityPreferred.fixedAmount;
