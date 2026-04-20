@@ -157,6 +157,13 @@ export interface DebtFacility {
   ltcTarget: number;
   lvrTarget: number;
   drawdownPriority: number; // 1 = drawn first, higher = drawn later; senior default 1, mezz default 2
+  // Per-period actual values (0-based index = period index).
+  // In actual periods these override the model-calculated values for reporting;
+  // the waterfall calculation itself is unchanged (no redistribution).
+  actualsDrawdown?: number[];
+  actualsRepayment?: number[];
+  actualsInterest?: number[];
+  actualsFees?: number[]; // combined line fee + establishment fee for the period
 }
 
 // ===== ADMIN =====

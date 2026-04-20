@@ -240,10 +240,10 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // and are NOT cash outflows in the period they accrue.  They inflate the balance
   // which is then swept out through repayments when revenue arrives, so they must
   // be excluded from the net cashflow formula to preserve net = 0 each period.
-  const seniorCapitalised  = inputs.seniorFacility.isCapitalised;
-  const senior2Capitalised = inputs.seniorFacility2.isCapitalised;
-  const senior3Capitalised = inputs.seniorFacility3.isCapitalised;
-  const mezzCapitalised    = inputs.mezzanine.isCapitalised;
+  const seniorCapitalised  = inputs.seniorFacility?.isCapitalised  ?? false;
+  const senior2Capitalised = inputs.seniorFacility2?.isCapitalised ?? false;
+  const senior3Capitalised = inputs.seniorFacility3?.isCapitalised ?? false;
+  const mezzCapitalised    = inputs.mezzanine?.isCapitalised       ?? false;
 
   // Calculate net cashflow — includes all cash financing flows so that it represents
   // the true change in the project bank account each period.
@@ -321,8 +321,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const totalProfit = totalSettlementsRevenue + totalRentalIncome + totalOtherIncome - totalGSTOnRevenue - totalCost;
 
   // Preferred equity coupon (accrued over project duration at simple interest)
-  const prefEquityBalance = inputs.equityPreferred.fixedAmount;
-  const prefEquityRate = inputs.equityPreferred.interestRate;
+  const prefEquityBalance = inputs.equityPreferred?.fixedAmount ?? 0;
+  const prefEquityRate = inputs.equityPreferred?.interestRate ?? 0;
   const projectDuration = inputs.preliminary.projectSpanMonths;
   const years = projectDuration / 12;
   const loanCouponInterest = prefEquityBalance > 0 && prefEquityRate > 0
@@ -377,11 +377,11 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     return periods[monthNum - 1]?.label || 'N/A';
   }
 
-  const seniorAllIn  = inputs.seniorFacility.margin  + inputs.seniorFacility.bbsy;
-  const senior2AllIn = inputs.seniorFacility2.margin + inputs.seniorFacility2.bbsy;
-  const senior3AllIn = inputs.seniorFacility3.margin + inputs.seniorFacility3.bbsy;
-  const landAllIn    = inputs.landLoan.interestRate;
-  const mezzAllIn    = inputs.mezzanine.interestRate;
+  const seniorAllIn  = (inputs.seniorFacility?.margin  ?? 0) + (inputs.seniorFacility?.bbsy  ?? 0);
+  const senior2AllIn = (inputs.seniorFacility2?.margin ?? 0) + (inputs.seniorFacility2?.bbsy ?? 0);
+  const senior3AllIn = (inputs.seniorFacility3?.margin ?? 0) + (inputs.seniorFacility3?.bbsy ?? 0);
+  const landAllIn    = inputs.landLoan?.interestRate  ?? 0;
+  const mezzAllIn    = inputs.mezzanine?.interestRate ?? 0;
 
   const maxMonthlyInterest = Math.max(...cashflows.map(cf =>
     cf.seniorInterest  + cf.seniorFees
@@ -472,29 +472,29 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
                + funding.mezzFacilitySize    + funding.totalMezzInterest    + funding.totalMezzFees,
     },
     debtRates: {
-      seniorEstablishment: inputs.seniorFacility.establishmentFeePercent,
-      seniorLineFee: inputs.seniorFacility.lineFeePercent,
-      seniorMargin: inputs.seniorFacility.margin,
-      seniorBBSY: inputs.seniorFacility.bbsy,
+      seniorEstablishment: inputs.seniorFacility?.establishmentFeePercent  ?? 0,
+      seniorLineFee: inputs.seniorFacility?.lineFeePercent  ?? 0,
+      seniorMargin: inputs.seniorFacility?.margin  ?? 0,
+      seniorBBSY: inputs.seniorFacility?.bbsy  ?? 0,
       seniorAllIn,
-      senior2Establishment: inputs.seniorFacility2.establishmentFeePercent,
-      senior2LineFee: inputs.seniorFacility2.lineFeePercent,
-      senior2Margin: inputs.seniorFacility2.margin,
-      senior2BBSY: inputs.seniorFacility2.bbsy,
+      senior2Establishment: inputs.seniorFacility2?.establishmentFeePercent ?? 0,
+      senior2LineFee: inputs.seniorFacility2?.lineFeePercent ?? 0,
+      senior2Margin: inputs.seniorFacility2?.margin ?? 0,
+      senior2BBSY: inputs.seniorFacility2?.bbsy ?? 0,
       senior2AllIn,
-      senior3Establishment: inputs.seniorFacility3.establishmentFeePercent,
-      senior3LineFee: inputs.seniorFacility3.lineFeePercent,
-      senior3Margin: inputs.seniorFacility3.margin,
-      senior3BBSY: inputs.seniorFacility3.bbsy,
+      senior3Establishment: inputs.seniorFacility3?.establishmentFeePercent ?? 0,
+      senior3LineFee: inputs.seniorFacility3?.lineFeePercent ?? 0,
+      senior3Margin: inputs.seniorFacility3?.margin ?? 0,
+      senior3BBSY: inputs.seniorFacility3?.bbsy ?? 0,
       senior3AllIn,
-      mezzEstablishment: inputs.mezzanine.establishmentFeePercent,
-      mezzLineFee: inputs.mezzanine.lineFeePercent,
-      mezzMargin: inputs.mezzanine.interestRate,
+      mezzEstablishment: inputs.mezzanine?.establishmentFeePercent ?? 0,
+      mezzLineFee: inputs.mezzanine?.lineFeePercent ?? 0,
+      mezzMargin: inputs.mezzanine?.interestRate ?? 0,
       mezzBBSY: 0,
       mezzAllIn,
-      landEstablishment: inputs.landLoan.establishmentFeePercent,
-      landLineFee: inputs.landLoan.lineFeePercent,
-      landMargin: inputs.landLoan.interestRate,
+      landEstablishment: inputs.landLoan?.establishmentFeePercent ?? 0,
+      landLineFee: inputs.landLoan?.lineFeePercent ?? 0,
+      landMargin: inputs.landLoan?.interestRate ?? 0,
       landBBSY: 0,
       landAllIn,
     },
@@ -502,14 +502,14 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       contractStartDate: monthLabel(1),
       establishJV: monthLabel(projectDuration),
       salesCommencement: monthLabel(salesStart),
-      landSettlement: monthLabel(inputs.landLoan.startMonth),
+      landSettlement: monthLabel(inputs.landLoan?.startMonth ?? 0),
       constructionStart: monthLabel(constructionStart),
       constructionCompletion: monthLabel(constructionStart + constructionSpan - 1),
       salesSettlementCompleted: monthLabel(lastSettlement),
       projectDurationMonths: projectDuration,
       constructionTimeMonths: constructionSpan,
       planningDesignMonths: constructionStart - 1,
-      landToSettlementMonths: lastSettlement - inputs.landLoan.startMonth,
+      landToSettlementMonths: lastSettlement - (inputs.landLoan?.startMonth ?? 0),
     },
     equityReturns: {
       total: {
@@ -529,33 +529,33 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       },
       jvPartner: {
         entity: 'JV Partner',
-        fundingContribPercent: inputs.equityJV.equityContribution,
-        totalEquityContributed: equityContrib * inputs.equityJV.equityContribution,
+        fundingContribPercent: inputs.equityJV?.equityContribution ?? 0,
+        totalEquityContributed: equityContrib * (inputs.equityJV?.equityContribution ?? 0),
         irr: 0,
         equityRepatriation1st: 0,
-        equityRepatriation2nd: equityContrib * inputs.equityJV.equityContribution,
-        totalEquityRepatriation: equityContrib * inputs.equityJV.equityContribution,
+        equityRepatriation2nd: equityContrib * (inputs.equityJV?.equityContribution ?? 0),
+        totalEquityRepatriation: equityContrib * (inputs.equityJV?.equityContribution ?? 0),
         establishmentFee: 0,
         couponInterest: 0,
-        couponInterestPercent: inputs.equityJV.interestRate,
-        profitShareBalance: totalProfit * inputs.equityJV.profitShare,
-        profitSharePercent: inputs.equityJV.profitShare,
-        totalProfitShare: totalProfit * inputs.equityJV.profitShare,
+        couponInterestPercent: inputs.equityJV?.interestRate ?? 0,
+        profitShareBalance: totalProfit * (inputs.equityJV?.profitShare ?? 0),
+        profitSharePercent: inputs.equityJV?.profitShare ?? 0,
+        totalProfitShare: totalProfit * (inputs.equityJV?.profitShare ?? 0),
       },
       developer: {
         entity: 'Developer',
-        fundingContribPercent: inputs.equityKokoda.equityContribution,
-        totalEquityContributed: equityContrib * inputs.equityKokoda.equityContribution,
+        fundingContribPercent: inputs.equityKokoda?.equityContribution ?? 0,
+        totalEquityContributed: equityContrib * (inputs.equityKokoda?.equityContribution ?? 0),
         irr,
         equityRepatriation1st: 0,
-        equityRepatriation2nd: equityContrib * inputs.equityKokoda.equityContribution,
-        totalEquityRepatriation: equityContrib * inputs.equityKokoda.equityContribution,
+        equityRepatriation2nd: equityContrib * (inputs.equityKokoda?.equityContribution ?? 0),
+        totalEquityRepatriation: equityContrib * (inputs.equityKokoda?.equityContribution ?? 0),
         establishmentFee: 0,
         couponInterest: loanCouponInterest,
-        couponInterestPercent: inputs.equityKokoda.interestRate,
-        profitShareBalance: totalProfit * inputs.equityKokoda.profitShare,
-        profitSharePercent: inputs.equityKokoda.profitShare,
-        totalProfitShare: totalProfit * inputs.equityKokoda.profitShare,
+        couponInterestPercent: inputs.equityKokoda?.interestRate ?? 0,
+        profitShareBalance: totalProfit * (inputs.equityKokoda?.profitShare ?? 0),
+        profitSharePercent: inputs.equityKokoda?.profitShare ?? 0,
+        totalProfitShare: totalProfit * (inputs.equityKokoda?.profitShare ?? 0),
       },
     },
     otherIndicators: {
