@@ -17,22 +17,23 @@ export function spreadSettlements(items: RevenueLineItem[], periods: Period[]): 
           actualTotal += actual;
         }
       }
-      // Forecast periods within the settlement window: distribute remaining evenly
+      // Forecast periods within the settlement window: redistribute remaining
+      // proportionally to each period's original weight (uniform: 1 per slot).
       const remaining = item.currentSalePrice - actualTotal;
       if (remaining > 0) {
         const startIdx = item.settlementMonth - 1;
         const span = item.settlementSpan || 1;
-        const forecastIdxs: number[] = [];
+        const forecastEntries: { idx: number; weight: number }[] = [];
         for (let i = 0; i < span; i++) {
           const idx = startIdx + i;
           if (idx >= 0 && idx < periods.length && !periods[idx].isActual) {
-            forecastIdxs.push(idx);
+            forecastEntries.push({ idx, weight: 1 }); // uniform: each slot has equal weight
           }
         }
-        if (forecastIdxs.length > 0) {
-          const perPeriod = remaining / forecastIdxs.length;
-          for (const idx of forecastIdxs) {
-            result[idx] += perPeriod;
+        const weightSum = forecastEntries.reduce((s, e) => s + e.weight, 0);
+        if (weightSum > 0) {
+          for (const { idx, weight } of forecastEntries) {
+            result[idx] += remaining * weight / weightSum;
           }
         }
       }
