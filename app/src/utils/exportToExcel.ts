@@ -132,14 +132,36 @@ const CASHFLOW_SECTIONS: {
     ],
   },
   {
-    header: 'SENIOR FACILITY',
+    header: 'SENIOR FACILITY #1',
     headerFill: CLR.senior,
     rows: [
       { label: 'Senior Drawdown',  getValue: c => c.seniorDrawdown },
       { label: 'Senior Repayment', getValue: c => c.seniorRepayment },
       { label: 'Senior Interest',  getValue: c => c.seniorInterest },
-      { label: 'Senior Line fee',   getValue: c => c.seniorFees },
+      { label: 'Senior Line fee',  getValue: c => c.seniorFees },
       { label: 'Senior Balance',   getValue: c => c.seniorBalance, bold: true, subtotalFill: CLR.seniorSub },
+    ],
+  },
+  {
+    header: 'SENIOR FACILITY #2',
+    headerFill: CLR.senior,
+    rows: [
+      { label: 'Senior #2 Drawdown',  getValue: c => c.senior2Drawdown },
+      { label: 'Senior #2 Repayment', getValue: c => c.senior2Repayment },
+      { label: 'Senior #2 Interest',  getValue: c => c.senior2Interest },
+      { label: 'Senior #2 Line fee',  getValue: c => c.senior2Fees },
+      { label: 'Senior #2 Balance',   getValue: c => c.senior2Balance, bold: true, subtotalFill: CLR.seniorSub },
+    ],
+  },
+  {
+    header: 'SENIOR FACILITY #3',
+    headerFill: CLR.senior,
+    rows: [
+      { label: 'Senior #3 Drawdown',  getValue: c => c.senior3Drawdown },
+      { label: 'Senior #3 Repayment', getValue: c => c.senior3Repayment },
+      { label: 'Senior #3 Interest',  getValue: c => c.senior3Interest },
+      { label: 'Senior #3 Line fee',  getValue: c => c.senior3Fees },
+      { label: 'Senior #3 Balance',   getValue: c => c.senior3Balance, bold: true, subtotalFill: CLR.seniorSub },
     ],
   },
   {
@@ -364,48 +386,70 @@ function buildSummarySheet(ws: ExcelJS.Worksheet, data: DashboardData, projectNa
 
   // ── Capital Stack ──
   row = writeSection(ws, 'CAPITAL STACK', [
-    ['Senior Facility',  cs.seniorAmount, ''],
-    ['  LTC',            cs.seniorLTC,    ''],
-    ['  LVR',            cs.seniorLVR,    ''],
-    ['Mezzanine',        cs.mezzAmount,   ''],
-    ['  LTC',            cs.mezzLTC,      ''],
-    ['  LVR',            cs.mezzLVR,      ''],
-    ['Equity',           cs.equityAmount, ''],
-    ['  LTC',            cs.equityLTC,    ''],
-    ['Total Capital',    cs.total,        ''],
+    ['Senior Facility #1', cs.seniorAmount,  ''],
+    ['  LTC',              cs.seniorLTC,     ''],
+    ['  LVR',              cs.seniorLVR,     ''],
+    ['Senior Facility #2', cs.senior2Amount, ''],
+    ['  LTC',              cs.senior2LTC,    ''],
+    ['  LVR',              cs.senior2LVR,    ''],
+    ['Senior Facility #3', cs.senior3Amount, ''],
+    ['  LTC',              cs.senior3LTC,    ''],
+    ['  LVR',              cs.senior3LVR,    ''],
+    ['Mezzanine',          cs.mezzAmount,    ''],
+    ['  LTC',              cs.mezzLTC,       ''],
+    ['  LVR',              cs.mezzLVR,       ''],
+    ['Equity',             cs.equityAmount,  ''],
+    ['  LTC',              cs.equityLTC,     ''],
+    ['Total Capital',      cs.total,         ''],
   ].map(([l, v]) => [l as string, v as number]), row);
 
-  // Apply formats
-  const csStart = row - 10;
-  for (const [offset, fmt] of [[1, CURRENCY_FMT], [2, PCT_FMT], [3, PCT_FMT], [4, CURRENCY_FMT], [5, PCT_FMT], [6, PCT_FMT], [7, CURRENCY_FMT], [8, PCT_FMT], [9, CURRENCY_FMT]] as [number, string][]) {
+  // Apply formats (currency for amounts, % for LTC/LVR)
+  const csStart = row - 16;
+  for (const [offset, fmt] of [
+    [1, CURRENCY_FMT], [2, PCT_FMT], [3, PCT_FMT],
+    [4, CURRENCY_FMT], [5, PCT_FMT], [6, PCT_FMT],
+    [7, CURRENCY_FMT], [8, PCT_FMT], [9, PCT_FMT],
+    [10, CURRENCY_FMT], [11, PCT_FMT], [12, PCT_FMT],
+    [13, CURRENCY_FMT], [14, PCT_FMT], [15, CURRENCY_FMT],
+  ] as [number, string][]) {
     ws.getRow(csStart + offset).getCell(2).numFmt = fmt;
   }
 
   // ── Debt Summary ──
   row = writeSection(ws, 'DEBT SUMMARY', [
-    ['Senior Principal',        ds.seniorPrincipal],
-    ['Senior Interest & Fees',  ds.seniorInterest],
-    ['Senior Total',            ds.seniorTotal],
-    ['Mezz Principal',          ds.mezzPrincipal],
-    ['Mezz Interest & Fees',    ds.mezzInterest],
-    ['Mezz Total',              ds.mezzTotal],
-    ['Total Debt',              ds.totalDebt],
+    ['Senior #1 Principal',        ds.seniorPrincipal],
+    ['Senior #1 Interest & Fees',  ds.seniorInterest],
+    ['Senior #1 Total',            ds.seniorTotal],
+    ['Senior #2 Principal',        ds.senior2Principal],
+    ['Senior #2 Interest & Fees',  ds.senior2Interest],
+    ['Senior #2 Total',            ds.senior2Total],
+    ['Senior #3 Principal',        ds.senior3Principal],
+    ['Senior #3 Interest & Fees',  ds.senior3Interest],
+    ['Senior #3 Total',            ds.senior3Total],
+    ['Mezz Principal',             ds.mezzPrincipal],
+    ['Mezz Interest & Fees',       ds.mezzInterest],
+    ['Mezz Total',                 ds.mezzTotal],
+    ['Total Debt',                 ds.totalDebt],
   ].map(([l, v]) => [l as string, v as number]), row);
-  const dsSt = row - 8;
-  for (let r2 = dsSt + 1; r2 <= dsSt + 7; r2++) ws.getRow(r2).getCell(2).numFmt = CURRENCY_FMT;
+  const dsSt = row - 14;
+  for (let r2 = dsSt + 1; r2 <= dsSt + 13; r2++) ws.getRow(r2).getCell(2).numFmt = CURRENCY_FMT;
 
   // ── Debt Rates ──
   row = writeSection(ws, 'DEBT RATES', [
-    ['Senior Margin',        dr.seniorMargin,       ''],
-    ['Senior BBSY',          dr.seniorBBSY,         ''],
-    ['Senior All-In',        dr.seniorAllIn,        ''],
-    ['Senior Establishment', dr.seniorEstablishment, ''],
-    ['Senior Line Fee',      dr.seniorLineFee,      ''],
-    ['Mezz All-In',          dr.mezzAllIn,          ''],
-    ['Land Loan All-In',     dr.landAllIn,          ''],
+    ['Senior #1 Margin',        dr.seniorMargin,        ''],
+    ['Senior #1 BBSY',          dr.seniorBBSY,          ''],
+    ['Senior #1 All-In',        dr.seniorAllIn,         ''],
+    ['Senior #2 Margin',        dr.senior2Margin,       ''],
+    ['Senior #2 BBSY',          dr.senior2BBSY,         ''],
+    ['Senior #2 All-In',        dr.senior2AllIn,        ''],
+    ['Senior #3 Margin',        dr.senior3Margin,       ''],
+    ['Senior #3 BBSY',          dr.senior3BBSY,         ''],
+    ['Senior #3 All-In',        dr.senior3AllIn,        ''],
+    ['Mezz All-In',             dr.mezzAllIn,           ''],
+    ['Land Loan All-In',        dr.landAllIn,           ''],
   ].map(([l, v]) => [l as string, v as number]), row);
-  const drSt = row - 8;
-  for (let r2 = drSt + 1; r2 <= drSt + 7; r2++) ws.getRow(r2).getCell(2).numFmt = PCT_FMT;
+  const drSt = row - 12;
+  for (let r2 = drSt + 1; r2 <= drSt + 11; r2++) ws.getRow(r2).getCell(2).numFmt = PCT_FMT;
 
   // ── Key Dates ──
   row = writeSection(ws, 'KEY DATES & DURATIONS', [

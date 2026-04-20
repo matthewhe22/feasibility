@@ -298,6 +298,40 @@ export const defaultSeniorFacility: DebtFacility = {
   drawdownPriority: 4, // senior drawn last (after equity, land loan, mezz)
 };
 
+export const defaultSeniorFacility2: DebtFacility = {
+  name: 'Senior Facility #2',
+  facilityLimit: 0,
+  startMonth: 33,
+  maturityMonth: 33,
+  interestRate: 0.025,
+  bbsy: 0.0196,
+  margin: 0.025,
+  establishmentFeePercent: 0.005,
+  lineFeePercent: 0.025,
+  interestPaymentFrequency: 0,
+  isCapitalised: true,
+  ltcTarget: 0.70,
+  lvrTarget: 0.65,
+  drawdownPriority: 5,
+};
+
+export const defaultSeniorFacility3: DebtFacility = {
+  name: 'Senior Facility #3',
+  facilityLimit: 0,
+  startMonth: 33,
+  maturityMonth: 33,
+  interestRate: 0.03,
+  bbsy: 0.0196,
+  margin: 0.03,
+  establishmentFeePercent: 0.005,
+  lineFeePercent: 0.03,
+  interestPaymentFrequency: 0,
+  isCapitalised: true,
+  ltcTarget: 0.75,
+  lvrTarget: 0.70,
+  drawdownPriority: 6,
+};
+
 export const defaultResidualStock: DebtFacility = {
   name: 'Residual Stock Facility',
   facilityLimit: 0,

@@ -52,7 +52,7 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
     ],
   },
   {
-    header: 'SENIOR FACILITY',
+    header: 'SENIOR FACILITY #1',
     headerBg: 'bg-blue-800 text-white',
     rows: [
       { label: 'Senior Drawdown', getValue: c => c.seniorDrawdown },
@@ -60,6 +60,28 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
       { label: 'Senior Interest', getValue: c => c.seniorInterest },
       { label: 'Senior Line fee', getValue: c => c.seniorFees },
       { label: 'Senior Balance', getValue: c => c.seniorBalance, bold: true, bg: 'bg-blue-50' },
+    ],
+  },
+  {
+    header: 'SENIOR FACILITY #2',
+    headerBg: 'bg-blue-700 text-white',
+    rows: [
+      { label: 'Senior #2 Drawdown', getValue: c => c.senior2Drawdown },
+      { label: 'Senior #2 Repayment', getValue: c => c.senior2Repayment },
+      { label: 'Senior #2 Interest', getValue: c => c.senior2Interest },
+      { label: 'Senior #2 Line fee', getValue: c => c.senior2Fees },
+      { label: 'Senior #2 Balance', getValue: c => c.senior2Balance, bold: true, bg: 'bg-blue-50' },
+    ],
+  },
+  {
+    header: 'SENIOR FACILITY #3',
+    headerBg: 'bg-blue-600 text-white',
+    rows: [
+      { label: 'Senior #3 Drawdown', getValue: c => c.senior3Drawdown },
+      { label: 'Senior #3 Repayment', getValue: c => c.senior3Repayment },
+      { label: 'Senior #3 Interest', getValue: c => c.senior3Interest },
+      { label: 'Senior #3 Line fee', getValue: c => c.senior3Fees },
+      { label: 'Senior #3 Balance', getValue: c => c.senior3Balance, bold: true, bg: 'bg-blue-50' },
     ],
   },
   {
