@@ -1,9 +1,17 @@
-import { useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { useStore } from '../../store/useStore';
 import { CurrencyInput, PercentInput, NumberInput, TextInput, SectionHeader } from '../common/FormFields';
 import { FinancingInputs } from './FinancingInputs';
 import { formatCurrency, excelDateToDate, addMonths, endOfMonth } from '../../utils';
 import { calculateStampDuty, STAMP_DUTY_STATES, type StampDutyState } from '../../utils/stampDuty';
+import {
+  getActualPeriodCount,
+  monthCountToExcelSerial,
+  getPeriodLabels,
+  downloadActualsTemplate,
+  parseActualsFile,
+  applyActualsToInputs,
+} from '../../utils/actualsExcel';
 import type { CostLineItem, RevenueLineItem } from '../../types';
 
 // ── Manual S-Curve Editor ─────────────────────────────────────────────────────
@@ -529,6 +537,229 @@ function GRVTable({ items, onChange }: {
   );
 }
 
+// ── Actuals Section ───────────────────────────────────────────────────────────
+// Handles: Current Month input, Excel download/upload, manual per-period entry.
+function ActualsSection() {
+  const { inputs, setInputs, admin, setAdmin } = useStore();
+
+  // ── Current month derived from admin.lastActualsPeriod ──
+  const currentMonth = getActualPeriodCount(
+    inputs.preliminary.dateOfFirstPeriod,
+    admin.lastActualsPeriod,
+  );
+
+  const resolvedLabel = (() => {
+    if (currentMonth <= 0) return '—';
+    const labels = getPeriodLabels(inputs.preliminary.dateOfFirstPeriod, currentMonth);
+    return labels[labels.length - 1];
+  })();
+
+  const handleCurrentMonthChange = (val: number) => {
+    const clamped = Math.max(0, Math.min(120, Math.round(val)));
+    const serial = clamped === 0 ? 0 : monthCountToExcelSerial(
+      inputs.preliminary.dateOfFirstPeriod,
+      clamped,
+    );
+    setAdmin({ lastActualsPeriod: serial });
+  };
+
+  // ── Upload state ──
+  const [uploadStatus, setUploadStatus] = useState<{
+    type: 'success' | 'error';
+    matched: number;
+    unmatched: string[];
+    message?: string;
+  } | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const uploadRef = useRef<HTMLInputElement>(null);
+
+  const clearAll = () => {
+    if (!confirm('Clear ALL actual entries (costs + revenue)?')) return;
+    const clearCosts = (items: typeof inputs.developmentCosts) =>
+      items.map(i => ({ ...i, actuals: undefined }));
+    const clearRev = (items: typeof inputs.grvItems) =>
+      items.map(i => ({ ...i, actuals: undefined }));
+    const clearInc = (items: typeof inputs.rentalIncome) =>
+      items.map(i => ({ ...i, actuals: undefined }));
+    setInputs({
+      developmentCosts:   clearCosts(inputs.developmentCosts),
+      constructionCosts:  clearCosts(inputs.constructionCosts),
+      marketingCosts:     clearCosts(inputs.marketingCosts),
+      otherStandardCosts: clearCosts(inputs.otherStandardCosts),
+      otherFinancingCosts: clearCosts(inputs.otherFinancingCosts),
+      grvItems:    clearRev(inputs.grvItems),
+      rentalIncome: clearInc(inputs.rentalIncome),
+      otherIncome:  clearInc(inputs.otherIncome),
+    });
+    setUploadStatus(null);
+  };
+
+  const handleDownload = async () => {
+    if (currentMonth === 0) {
+      alert('Set Current Month to at least 1 before downloading the template.');
+      return;
+    }
+    await downloadActualsTemplate(inputs, admin);
+  };
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (currentMonth === 0) {
+      alert('Set Current Month before uploading.');
+      e.target.value = '';
+      return;
+    }
+    setIsUploading(true);
+    setUploadStatus(null);
+    try {
+      const parsed = await parseActualsFile(file, currentMonth);
+      const { updatedInputs, matchedCount, unmatchedCodes } = applyActualsToInputs(inputs, parsed);
+      setInputs(updatedInputs);
+      setUploadStatus({ type: 'success', matched: matchedCount, unmatched: unmatchedCodes });
+    } catch (err) {
+      setUploadStatus({
+        type: 'error',
+        matched: 0,
+        unmatched: [],
+        message: err instanceof Error ? err.message : 'Upload failed.',
+      });
+    } finally {
+      setIsUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  return (
+    <div>
+      <SectionHeader number="6" title="Actual Costs & Revenue by Period">
+        <button
+          onClick={clearAll}
+          className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+        >Clear All</button>
+      </SectionHeader>
+
+      <div className="bg-white border border-t-0 border-gray-200 rounded-b p-4">
+
+        {/* ── Current Month + bulk upload controls ── */}
+        <div className="mb-5 p-3 bg-indigo-50 border border-indigo-200 rounded">
+          <p className="text-xs font-bold text-indigo-800 mb-3">Actuals Settings</p>
+
+          {/* Current Month */}
+          <div className="flex items-center gap-3 mb-3">
+            <label className="text-xs font-semibold text-gray-700 w-36 shrink-0">Current Month</label>
+            <input
+              type="number"
+              min={0}
+              max={120}
+              step={1}
+              value={currentMonth === 0 ? '' : currentMonth}
+              placeholder="0"
+              onChange={e => handleCurrentMonthChange(parseFloat(e.target.value) || 0)}
+              className="w-20 text-xs text-right border border-gray-300 rounded px-2 py-0.5 bg-white"
+            />
+            <span className="text-xs text-indigo-700 font-medium">
+              {currentMonth > 0 ? `→ ${resolvedLabel}` : '(set a month number to activate actuals)'}
+            </span>
+          </div>
+
+          {/* Download / Upload */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleDownload}
+              disabled={currentMonth === 0}
+              className="text-xs bg-green-600 hover:bg-green-700 disabled:opacity-40 text-white px-3 py-1 rounded flex items-center gap-1"
+            >
+              ↓ Download Template
+            </button>
+            <button
+              onClick={() => uploadRef.current?.click()}
+              disabled={currentMonth === 0 || isUploading}
+              className="text-xs bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white px-3 py-1 rounded flex items-center gap-1"
+            >
+              {isUploading ? 'Uploading…' : '↑ Upload Actuals (.xlsx)'}
+            </button>
+            <input
+              ref={uploadRef}
+              type="file"
+              accept=".xlsx"
+              className="hidden"
+              onChange={handleUpload}
+            />
+            <span className="text-[10px] text-gray-400">
+              Download the template, fill in actual values in yellow cells, then upload. Uploading replaces all existing actuals.
+            </span>
+          </div>
+
+          {/* Upload result banner */}
+          {uploadStatus && (
+            <div className={`mt-2 p-2 rounded text-xs ${
+              uploadStatus.type === 'success'
+                ? 'bg-green-50 border border-green-200 text-green-800'
+                : 'bg-red-50 border border-red-200 text-red-800'
+            }`}>
+              {uploadStatus.type === 'success' ? (
+                <>
+                  <span className="font-semibold">Upload successful</span>
+                  {' — '}
+                  {uploadStatus.matched} line item{uploadStatus.matched !== 1 ? 's' : ''} updated.
+                  {uploadStatus.unmatched.length > 0 && (
+                    <span className="ml-2 text-amber-700">
+                      {uploadStatus.unmatched.length} unmatched code{uploadStatus.unmatched.length !== 1 ? 's' : ''}:{' '}
+                      {uploadStatus.unmatched.join(', ')}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <><span className="font-semibold">Error:</span> {uploadStatus.message}</>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── Manual per-period entry (costs) ── */}
+        <p className="text-xs text-gray-500 mb-3">
+          You can also enter or adjust actual values manually below.
+          Actual-period values are used directly; the remaining budget is redistributed
+          over forecast periods using the S-curve weighting.
+        </p>
+
+        {currentMonth === 0 ? (
+          <p className="text-xs text-gray-400 italic">Set Current Month above to activate the actuals editors.</p>
+        ) : (
+          <>
+            <ActualCostsEditor
+              label="Development Costs"
+              items={inputs.developmentCosts}
+              onChange={items => setInputs({ developmentCosts: items })}
+            />
+            <ActualCostsEditor
+              label="Construction Costs"
+              items={inputs.constructionCosts}
+              onChange={items => setInputs({ constructionCosts: items })}
+            />
+            <ActualCostsEditor
+              label="Marketing Costs"
+              items={inputs.marketingCosts}
+              onChange={items => setInputs({ marketingCosts: items })}
+            />
+            <ActualCostsEditor
+              label="Other Standard Costs"
+              items={inputs.otherStandardCosts}
+              onChange={items => setInputs({ otherStandardCosts: items })}
+            />
+            <ActualCostsEditor
+              label="Other Financing Costs"
+              items={inputs.otherFinancingCosts}
+              onChange={items => setInputs({ otherFinancingCosts: items })}
+            />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function MainInputTab() {
   const { inputs, setInputs, admin, setAdmin } = useStore();
   const [section, setSection] = useState<string>('preliminary');
@@ -942,57 +1173,7 @@ export function MainInputTab() {
 
       {/* Actuals */}
       {section === 'actuals' && (
-        <div>
-          <SectionHeader number="6" title="Actual Costs by Period">
-            <button
-              onClick={() => {
-                if (!confirm('Clear all Actual Costs entries?')) return;
-                const clearActuals = (items: typeof inputs.developmentCosts) => items.map(i => ({ ...i, actuals: undefined }));
-                setInputs({
-                  developmentCosts: clearActuals(inputs.developmentCosts),
-                  constructionCosts: clearActuals(inputs.constructionCosts),
-                  marketingCosts: clearActuals(inputs.marketingCosts),
-                  otherStandardCosts: clearActuals(inputs.otherStandardCosts),
-                  otherFinancingCosts: clearActuals(inputs.otherFinancingCosts),
-                });
-              }}
-              className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
-            >Clear All</button>
-          </SectionHeader>
-          <div className="bg-white border border-t-0 border-gray-200 rounded-b p-4">
-            <p className="text-xs text-gray-500 mb-4">
-              Enter actual costs incurred for each line item in each period.
-              The engine will use these values for actual periods (up to the "Last Actuals Period" in Admin)
-              and redistribute the remaining budget over forecast periods using the S-curve weighting.
-              Leave blank to use the S-curve forecast for all periods.
-            </p>
-            <ActualCostsEditor
-              label="Development Costs"
-              items={inputs.developmentCosts}
-              onChange={items => setInputs({ developmentCosts: items })}
-            />
-            <ActualCostsEditor
-              label="Construction Costs"
-              items={inputs.constructionCosts}
-              onChange={items => setInputs({ constructionCosts: items })}
-            />
-            <ActualCostsEditor
-              label="Marketing Costs"
-              items={inputs.marketingCosts}
-              onChange={items => setInputs({ marketingCosts: items })}
-            />
-            <ActualCostsEditor
-              label="Other Standard Costs"
-              items={inputs.otherStandardCosts}
-              onChange={items => setInputs({ otherStandardCosts: items })}
-            />
-            <ActualCostsEditor
-              label="Other Financing Costs"
-              items={inputs.otherFinancingCosts}
-              onChange={items => setInputs({ otherFinancingCosts: items })}
-            />
-          </div>
-        </div>
+        <ActualsSection />
       )}
 
       {/* Manual S-Curves */}

@@ -111,7 +111,10 @@ export interface RevenueLineItem {
   settlementMonth: number;
   settlementSpan: number;
   gstIncluded: boolean;
+  actuals?: number[]; // per-period actual revenue (0-based period index); overrides forecast for actual periods
 }
+
+
 
 export interface RentalIncomeItem {
   code: string;
@@ -123,6 +126,7 @@ export interface RentalIncomeItem {
   monthStart: number;
   monthSpan: number;
   addGST: boolean;
+  actuals?: number[]; // per-period actual income (0-based period index); overrides forecast for actual periods
 }
 
 // ===== FINANCING =====

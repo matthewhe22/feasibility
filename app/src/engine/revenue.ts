@@ -1,10 +1,46 @@
 import type { RevenueLineItem, RentalIncomeItem, Period, SellingCostConfig } from '../types';
 
-// Spread GRV settlements across periods
+// Spread GRV settlements across periods, blending per-period actuals with
+// remaining-budget redistribution (same pattern as spreadCost in costSpreading.ts).
 export function spreadSettlements(items: RevenueLineItem[], periods: Period[]): number[] {
   const result = new Array(periods.length).fill(0);
   for (const item of items) {
     if (item.currentSalePrice === 0 || item.settlementMonth <= 0) continue;
+
+    if (item.actuals && item.actuals.some(v => v != null && v > 0)) {
+      // Actual periods: use uploaded values
+      let actualTotal = 0;
+      for (let i = 0; i < periods.length; i++) {
+        if (periods[i].isActual) {
+          const actual = item.actuals[i] ?? 0;
+          result[i] += actual;
+          actualTotal += actual;
+        }
+      }
+      // Forecast periods within the settlement window: redistribute remaining
+      // proportionally to each period's original weight (uniform: 1 per slot).
+      const remaining = item.currentSalePrice - actualTotal;
+      if (remaining > 0) {
+        const startIdx = item.settlementMonth - 1;
+        const span = item.settlementSpan || 1;
+        const forecastEntries: { idx: number; weight: number }[] = [];
+        for (let i = 0; i < span; i++) {
+          const idx = startIdx + i;
+          if (idx >= 0 && idx < periods.length && !periods[idx].isActual) {
+            forecastEntries.push({ idx, weight: 1 }); // uniform: each slot has equal weight
+          }
+        }
+        const weightSum = forecastEntries.reduce((s, e) => s + e.weight, 0);
+        if (weightSum > 0) {
+          for (const { idx, weight } of forecastEntries) {
+            result[idx] += remaining * weight / weightSum;
+          }
+        }
+      }
+      continue;
+    }
+
+    // Standard: even distribution across settlement span
     const startIdx = item.settlementMonth - 1;
     const span = item.settlementSpan || 1;
     const perMonth = item.currentSalePrice / span;
@@ -23,8 +59,7 @@ export function spreadDeposits(items: RevenueLineItem[], periods: Period[]): num
   const result = new Array(periods.length).fill(0);
   for (const item of items) {
     if (item.currentSalePrice === 0 || item.preSaleExchangeMonth <= 0 || item.preSaleSpan <= 0) continue;
-    // Deposit is typically 10% of sale price, spread across presale period
-    const depositAmount = item.currentSalePrice * 0.1; // default 10% deposit
+    const depositAmount = item.currentSalePrice * 0.1;
     const startIdx = item.preSaleExchangeMonth - 1;
     const span = item.preSaleSpan;
     const perMonth = depositAmount / span;
@@ -90,13 +125,46 @@ export function spreadBackEndCommissions(
   return result;
 }
 
-// Spread rental/other income
+// Spread rental/other income, blending per-period actuals with remaining-budget
+// redistribution over forecast periods within the item's span.
 export function spreadIncome(items: RentalIncomeItem[], periods: Period[]): number[] {
   const result = new Array(periods.length).fill(0);
   for (const item of items) {
     const total = item.units * item.baseRate;
     if (total === 0 || item.monthSpan <= 0) continue;
     const startIdx = item.monthStart - 1;
+
+    if (item.actuals && item.actuals.some(v => v != null && v > 0)) {
+      // Actual periods: use uploaded values
+      let actualTotal = 0;
+      for (let i = 0; i < periods.length; i++) {
+        if (periods[i].isActual) {
+          const actual = item.actuals[i] ?? 0;
+          result[i] += actual;
+          actualTotal += actual;
+        }
+      }
+      // Forecast periods within the income span: distribute remaining evenly
+      const remaining = total - actualTotal;
+      if (remaining > 0) {
+        const forecastIdxs: number[] = [];
+        for (let i = 0; i < item.monthSpan; i++) {
+          const idx = startIdx + i;
+          if (idx >= 0 && idx < periods.length && !periods[idx].isActual) {
+            forecastIdxs.push(idx);
+          }
+        }
+        if (forecastIdxs.length > 0) {
+          const perPeriod = remaining / forecastIdxs.length;
+          for (const idx of forecastIdxs) {
+            result[idx] += perPeriod;
+          }
+        }
+      }
+      continue;
+    }
+
+    // Standard: even distribution
     const perMonth = total / item.monthSpan;
     for (let i = 0; i < item.monthSpan; i++) {
       const idx = startIdx + i;
