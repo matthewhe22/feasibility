@@ -12,7 +12,7 @@ import {
   parseActualsFile,
   applyActualsToInputs,
 } from '../../utils/actualsExcel';
-import type { CostLineItem, RevenueLineItem } from '../../types';
+import type { CostLineItem, RevenueLineItem, DebtFacility } from '../../types';
 
 // ── Manual S-Curve Editor ─────────────────────────────────────────────────────
 // Renders a period-by-period weight input for one manual S-curve.
@@ -537,6 +537,103 @@ function GRVTable({ items, onChange }: {
   );
 }
 
+// ── Financing Actuals Editor ──────────────────────────────────────────────────
+// Per-period actual entry for a single debt facility: drawdown, repayment,
+// interest, and fees (line fee + establishment fee combined).
+function FinancingActualsEditor({
+  label,
+  facility,
+  actualPeriods,
+  onChange,
+}: {
+  label: string;
+  facility: DebtFacility;
+  actualPeriods: number;
+  onChange: (updated: DebtFacility) => void;
+}) {
+  if (actualPeriods === 0 || !facility || facility.facilityLimit === 0) return null;
+
+  const periodHeaders = Array.from({ length: actualPeriods }, (_, i) => `P${i + 1}`);
+
+  const rows: { key: 'actualsDrawdown' | 'actualsRepayment' | 'actualsInterest' | 'actualsFees'; label: string }[] = [
+    { key: 'actualsDrawdown',  label: 'Drawdown' },
+    { key: 'actualsRepayment', label: 'Repayment' },
+    { key: 'actualsInterest',  label: 'Interest' },
+    { key: 'actualsFees',      label: 'Fees (line+est)' },
+  ];
+
+  const updateCell = (field: typeof rows[number]['key'], periodIdx: number, raw: string) => {
+    const v = parseFloat(raw);
+    const current = [...(facility[field] ?? new Array(periodIdx + 1).fill(0))];
+    while (current.length <= periodIdx) current.push(0);
+    current[periodIdx] = isNaN(v) ? 0 : Math.max(0, v);
+    onChange({ ...facility, [field]: current });
+  };
+
+  const clearRow = (field: typeof rows[number]['key']) => {
+    onChange({ ...facility, [field]: undefined });
+  };
+
+  const hasAny = rows.some(r => (facility[r.key] ?? []).some(v => v > 0));
+
+  return (
+    <div className="mb-4">
+      <div className="flex items-center gap-2 mb-1">
+        <h5 className="text-[10px] font-bold text-gray-700">{label}</h5>
+        {hasAny && (
+          <button
+            onClick={() => onChange({ ...facility, actualsDrawdown: undefined, actualsRepayment: undefined, actualsInterest: undefined, actualsFees: undefined })}
+            className="text-[9px] bg-red-100 hover:bg-red-200 text-red-600 px-1.5 py-0.5 rounded"
+          >Clear All</button>
+        )}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="text-[10px] border-collapse">
+          <thead>
+            <tr className="bg-gray-500 text-white">
+              <th className="px-2 py-1 text-left w-28">Metric</th>
+              <th className="px-1 py-1 w-14">Actions</th>
+              {periodHeaders.map(h => (
+                <th key={h} className="px-1 py-1 text-center w-20">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ key, label: rowLabel }, rowIdx) => {
+              const vals = facility[key] ?? [];
+              const hasRowActuals = vals.some(v => v > 0);
+              return (
+                <tr key={key} className={`border-b border-gray-100 ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                  <td className="px-2 py-0.5 font-medium text-gray-600">{rowLabel}</td>
+                  <td className="px-1 py-0.5 text-center">
+                    {hasRowActuals && (
+                      <button
+                        onClick={() => clearRow(key)}
+                        className="text-[9px] bg-red-100 hover:bg-red-200 text-red-600 px-1.5 py-0.5 rounded"
+                      >Clear</button>
+                    )}
+                  </td>
+                  {periodHeaders.map((_, pIdx) => (
+                    <td key={pIdx} className="px-0.5 py-0.5">
+                      <input
+                        type="number" min="0" step="1000"
+                        value={(vals[pIdx] ?? 0) === 0 ? '' : (vals[pIdx] ?? 0)}
+                        placeholder="0"
+                        onChange={e => updateCell(key, pIdx, e.target.value)}
+                        className="w-20 text-[10px] text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
+                      />
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── Actuals Section ───────────────────────────────────────────────────────────
 // Handles: Current Month input, Excel download/upload, manual per-period entry.
 function ActualsSection() {
@@ -574,13 +671,15 @@ function ActualsSection() {
   const uploadRef = useRef<HTMLInputElement>(null);
 
   const clearAll = () => {
-    if (!confirm('Clear ALL actual entries (costs + revenue)?')) return;
+    if (!confirm('Clear ALL actual entries (costs, revenue, and financing)?')) return;
     const clearCosts = (items: typeof inputs.developmentCosts) =>
       items.map(i => ({ ...i, actuals: undefined }));
     const clearRev = (items: typeof inputs.grvItems) =>
       items.map(i => ({ ...i, actuals: undefined }));
     const clearInc = (items: typeof inputs.rentalIncome) =>
       items.map(i => ({ ...i, actuals: undefined }));
+    const clearFacility = (f: typeof inputs.landLoan) =>
+      f ? { ...f, actualsDrawdown: undefined, actualsRepayment: undefined, actualsInterest: undefined, actualsFees: undefined } : f;
     setInputs({
       developmentCosts:   clearCosts(inputs.developmentCosts),
       constructionCosts:  clearCosts(inputs.constructionCosts),
@@ -590,6 +689,11 @@ function ActualsSection() {
       grvItems:    clearRev(inputs.grvItems),
       rentalIncome: clearInc(inputs.rentalIncome),
       otherIncome:  clearInc(inputs.otherIncome),
+      landLoan:        clearFacility(inputs.landLoan),
+      seniorFacility:  clearFacility(inputs.seniorFacility),
+      seniorFacility2: clearFacility(inputs.seniorFacility2),
+      seniorFacility3: clearFacility(inputs.seniorFacility3),
+      mezzanine:       clearFacility(inputs.mezzanine),
     });
     setUploadStatus(null);
   };
@@ -752,6 +856,46 @@ function ActualsSection() {
               label="Other Financing Costs"
               items={inputs.otherFinancingCosts}
               onChange={items => setInputs({ otherFinancingCosts: items })}
+            />
+
+            {/* ── Financing Facilities Actuals ── */}
+            <div className="mt-4 mb-2">
+              <p className="text-xs font-semibold text-gray-700 mb-1">Financing Facility Actuals</p>
+              <p className="text-[10px] text-gray-500 mb-3">
+                Enter actual drawdowns, repayments, interest, and fees for each active facility.
+                These override the model-calculated values for display in actual periods only —
+                the underlying waterfall calculation is unchanged.
+              </p>
+            </div>
+            <FinancingActualsEditor
+              label={inputs.landLoan?.name || 'Land Loan'}
+              facility={inputs.landLoan}
+              actualPeriods={currentMonth}
+              onChange={f => setInputs({ landLoan: f })}
+            />
+            <FinancingActualsEditor
+              label={inputs.seniorFacility?.name || 'Senior Facility'}
+              facility={inputs.seniorFacility}
+              actualPeriods={currentMonth}
+              onChange={f => setInputs({ seniorFacility: f })}
+            />
+            <FinancingActualsEditor
+              label={inputs.seniorFacility2?.name || 'Senior Facility #2'}
+              facility={inputs.seniorFacility2}
+              actualPeriods={currentMonth}
+              onChange={f => setInputs({ seniorFacility2: f })}
+            />
+            <FinancingActualsEditor
+              label={inputs.seniorFacility3?.name || 'Senior Facility #3'}
+              facility={inputs.seniorFacility3}
+              actualPeriods={currentMonth}
+              onChange={f => setInputs({ seniorFacility3: f })}
+            />
+            <FinancingActualsEditor
+              label={inputs.mezzanine?.name || 'Mezzanine'}
+              facility={inputs.mezzanine}
+              actualPeriods={currentMonth}
+              onChange={f => setInputs({ mezzanine: f })}
             />
           </>
         )}

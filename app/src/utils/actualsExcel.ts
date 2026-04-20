@@ -13,7 +13,7 @@
 
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-import type { MainInputs, AdminConfig, CostLineItem, RevenueLineItem, RentalIncomeItem } from '../types';
+import type { MainInputs, AdminConfig, CostLineItem, RevenueLineItem, RentalIncomeItem, DebtFacility } from '../types';
 import { excelDateToDate, addMonths, endOfMonth, formatMonthYear, dateToExcelSerial } from './index';
 
 // ─── Period helpers ───────────────────────────────────────────────────────────
@@ -208,6 +208,59 @@ function addCategoryHeader(ws: ExcelJS.Worksheet, label: string, totalCols: numb
   row.height = 16;
 }
 
+// Synthetic codes used for financing actuals rows (col B key for parse matching).
+// Format: <FACILITY>_<METRIC>
+export const FINANCING_ACTUALS_CODES = {
+  LAND_DRAW:  'LAND_DRAW',  LAND_REPAY: 'LAND_REPAY',  LAND_INT:  'LAND_INT',  LAND_FEES:  'LAND_FEES',
+  SNR_DRAW:   'SNR_DRAW',   SNR_REPAY:  'SNR_REPAY',   SNR_INT:   'SNR_INT',   SNR_FEES:   'SNR_FEES',
+  SNR2_DRAW:  'SNR2_DRAW',  SNR2_REPAY: 'SNR2_REPAY',  SNR2_INT:  'SNR2_INT',  SNR2_FEES:  'SNR2_FEES',
+  SNR3_DRAW:  'SNR3_DRAW',  SNR3_REPAY: 'SNR3_REPAY',  SNR3_INT:  'SNR3_INT',  SNR3_FEES:  'SNR3_FEES',
+  MEZZ_DRAW:  'MEZZ_DRAW',  MEZZ_REPAY: 'MEZZ_REPAY',  MEZZ_INT:  'MEZZ_INT',  MEZZ_FEES:  'MEZZ_FEES',
+};
+
+function addFinancingRow(
+  ws: ExcelJS.Worksheet,
+  category: string,
+  code: string,
+  description: string,
+  facilityLimit: number,
+  existingActuals: number[] | undefined,
+  numPeriods: number,
+) {
+  const actuals = existingActuals ?? [];
+  const values: (number | string)[] = [
+    category, code, description, facilityLimit,
+    ...Array.from({ length: numPeriods }, (_, i) => actuals[i] ?? 0),
+  ];
+  const row = ws.addRow(values);
+  styleRef(row.getCell(1));
+  styleRef(row.getCell(2), true);
+  styleRef(row.getCell(3));
+  row.getCell(4).fill = REF_FILL;
+  row.getCell(4).font = { size: 9 };
+  row.getCell(4).border = BORDER;
+  row.getCell(4).numFmt = CURRENCY_FMT;
+  row.getCell(4).alignment = { horizontal: 'right' };
+  for (let c = 5; c < 5 + numPeriods; c++) {
+    styleEditable(row.getCell(c));
+  }
+  row.height = 14;
+}
+
+function addFinancingFacilityRows(
+  ws: ExcelJS.Worksheet,
+  facility: DebtFacility,
+  prefix: string,
+  numPeriods: number,
+) {
+  if (!facility || facility.facilityLimit === 0) return;
+  const cat = 'Financing';
+  addFinancingRow(ws, cat, `${prefix}_DRAW`,  `${facility.name} – Drawdown`,        facility.facilityLimit, facility.actualsDrawdown,  numPeriods);
+  addFinancingRow(ws, cat, `${prefix}_REPAY`, `${facility.name} – Repayment`,       facility.facilityLimit, facility.actualsRepayment, numPeriods);
+  addFinancingRow(ws, cat, `${prefix}_INT`,   `${facility.name} – Interest`,         0,                     facility.actualsInterest,  numPeriods);
+  addFinancingRow(ws, cat, `${prefix}_FEES`,  `${facility.name} – Fees (line+est)`, 0,                     facility.actualsFees,      numPeriods);
+}
+
 // ─── Public: download template ────────────────────────────────────────────────
 
 export async function downloadActualsTemplate(
@@ -286,6 +339,21 @@ export async function downloadActualsTemplate(
   addCategoryHeader(ws, 'Other Income', totalCols);
   for (const item of inputs.otherIncome) {
     addIncomeRow(ws, 'Other Income', item, numPeriods);
+  }
+
+  // ── Financing actuals rows (one section per active facility) ──
+  const hasAnyFinancing = [
+    inputs.landLoan, inputs.seniorFacility, inputs.seniorFacility2,
+    inputs.seniorFacility3, inputs.mezzanine,
+  ].some(f => f && f.facilityLimit > 0);
+
+  if (hasAnyFinancing) {
+    addCategoryHeader(ws, 'Financing – Actual Drawdowns, Repayments & Costs', totalCols);
+    addFinancingFacilityRows(ws, inputs.landLoan,        'LAND', numPeriods);
+    addFinancingFacilityRows(ws, inputs.seniorFacility,  'SNR',  numPeriods);
+    addFinancingFacilityRows(ws, inputs.seniorFacility2, 'SNR2', numPeriods);
+    addFinancingFacilityRows(ws, inputs.seniorFacility3, 'SNR3', numPeriods);
+    addFinancingFacilityRows(ws, inputs.mezzanine,       'MEZZ', numPeriods);
   }
 
   // ── Save ──
@@ -403,6 +471,45 @@ export function applyActualsToInputs(
     });
   }
 
+  // ── Financing actuals: map synthetic codes to facility fields ──
+  function applyToFacility(
+    facility: MainInputs['landLoan'],
+    prefix: string,
+  ): MainInputs['landLoan'] {
+    if (!facility) return facility;
+    let updated = { ...facility };
+    const drawCode  = `${prefix}_DRAW`;
+    const repayCode = `${prefix}_REPAY`;
+    const intCode   = `${prefix}_INT`;
+    const feesCode  = `${prefix}_FEES`;
+
+    if (actualsMap.has(drawCode)) {
+      remaining.delete(drawCode); matchedCount++;
+      updated = { ...updated, actualsDrawdown: Array.from({ length: numPeriods }, (_, i) => actualsMap.get(drawCode)![i] ?? 0) };
+    } else {
+      updated = { ...updated, actualsDrawdown: undefined };
+    }
+    if (actualsMap.has(repayCode)) {
+      remaining.delete(repayCode); matchedCount++;
+      updated = { ...updated, actualsRepayment: Array.from({ length: numPeriods }, (_, i) => actualsMap.get(repayCode)![i] ?? 0) };
+    } else {
+      updated = { ...updated, actualsRepayment: undefined };
+    }
+    if (actualsMap.has(intCode)) {
+      remaining.delete(intCode); matchedCount++;
+      updated = { ...updated, actualsInterest: Array.from({ length: numPeriods }, (_, i) => actualsMap.get(intCode)![i] ?? 0) };
+    } else {
+      updated = { ...updated, actualsInterest: undefined };
+    }
+    if (actualsMap.has(feesCode)) {
+      remaining.delete(feesCode); matchedCount++;
+      updated = { ...updated, actualsFees: Array.from({ length: numPeriods }, (_, i) => actualsMap.get(feesCode)![i] ?? 0) };
+    } else {
+      updated = { ...updated, actualsFees: undefined };
+    }
+    return updated;
+  }
+
   const updatedInputs: Partial<MainInputs> = {
     developmentCosts:   applyToCostItems(inputs.developmentCosts),
     constructionCosts:  applyToCostItems(inputs.constructionCosts),
@@ -412,6 +519,11 @@ export function applyActualsToInputs(
     grvItems:           applyToGRVItems(inputs.grvItems),
     rentalIncome:       applyToIncomeItems(inputs.rentalIncome),
     otherIncome:        applyToIncomeItems(inputs.otherIncome),
+    landLoan:           applyToFacility(inputs.landLoan,        'LAND'),
+    seniorFacility:     applyToFacility(inputs.seniorFacility,  'SNR'),
+    seniorFacility2:    applyToFacility(inputs.seniorFacility2, 'SNR2'),
+    seniorFacility3:    applyToFacility(inputs.seniorFacility3, 'SNR3'),
+    mezzanine:          applyToFacility(inputs.mezzanine,       'MEZZ'),
   };
 
   return {

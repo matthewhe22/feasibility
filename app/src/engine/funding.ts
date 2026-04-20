@@ -1,5 +1,14 @@
-import type { Period, MainInputs } from '../types';
+import type { Period, MainInputs, DebtFacility } from '../types';
 import { sum } from '../utils';
+
+// Zero-value facility used as a safe fallback when an optional facility is missing
+// (e.g. when loading a project saved before Senior Facility #2/#3 were added).
+const EMPTY_FACILITY: DebtFacility = {
+  name: '', facilityLimit: 0, startMonth: 0, maturityMonth: 0,
+  interestRate: 0, bbsy: 0, margin: 0, establishmentFeePercent: 0,
+  lineFeePercent: 0, interestPaymentFrequency: 0, isCapitalised: false,
+  ltcTarget: 0, lvrTarget: 0, drawdownPriority: 99,
+};
 
 // ===== DRAWDOWN SEQUENCE =====
 
@@ -20,32 +29,18 @@ export interface DrawdownSequenceEntry {
  * date and is not part of the flexible gap-filling waterfall.
  */
 export function computeDrawdownSequence(inputs: MainInputs): DrawdownSequenceEntry[] {
+  const sf  = inputs.seniorFacility;
+  const sf2 = inputs.seniorFacility2;
+  const sf3 = inputs.seniorFacility3;
+  const mz  = inputs.mezzanine;
+  const eq  = inputs.equityKokoda;
+
   const entries: DrawdownSequenceEntry[] = [
-    {
-      type: 'senior',
-      name: inputs.seniorFacility.name,
-      priority: inputs.seniorFacility.drawdownPriority ?? 1,
-    },
-    {
-      type: 'senior2',
-      name: inputs.seniorFacility2.name,
-      priority: inputs.seniorFacility2.drawdownPriority ?? 5,
-    },
-    {
-      type: 'senior3',
-      name: inputs.seniorFacility3.name,
-      priority: inputs.seniorFacility3.drawdownPriority ?? 6,
-    },
-    {
-      type: 'mezz',
-      name: inputs.mezzanine.name,
-      priority: inputs.mezzanine.drawdownPriority ?? 2,
-    },
-    {
-      type: 'equity',
-      name: inputs.equityKokoda.name,
-      priority: inputs.equityKokoda.drawdownPriority ?? 3,
-    },
+    ...(sf  ? [{ type: 'senior'  as DrawdownFacilityType, name: sf.name,  priority: sf.drawdownPriority  ?? 1 }] : []),
+    ...(sf2 ? [{ type: 'senior2' as DrawdownFacilityType, name: sf2.name, priority: sf2.drawdownPriority ?? 5 }] : []),
+    ...(sf3 ? [{ type: 'senior3' as DrawdownFacilityType, name: sf3.name, priority: sf3.drawdownPriority ?? 6 }] : []),
+    ...(mz  ? [{ type: 'mezz'   as DrawdownFacilityType, name: mz.name,  priority: mz.drawdownPriority  ?? 2 }] : []),
+    ...(eq  ? [{ type: 'equity' as DrawdownFacilityType, name: eq.name,  priority: eq.drawdownPriority  ?? 3 }] : []),
   ];
   return entries.sort((a, b) => a.priority - b.priority);
 }
@@ -166,7 +161,76 @@ export function solveFunding(
     prevSenior3FinCosts = newSenior3FinCosts;
   }
 
+  // Apply financing actuals overlay (post-convergence, does not affect waterfall logic).
+  applyFinancingActualsOverlay(result, periods, inputs);
+
   return result;
+}
+
+/**
+ * Overlays user-entered financing actuals onto the model-calculated result arrays
+ * for actual periods only. The waterfall balances and forecast periods are unchanged.
+ */
+function applyFinancingActualsOverlay(
+  result: FundingResult,
+  periods: Period[],
+  inputs: MainInputs,
+): void {
+  const landLoan = inputs.landLoan ?? EMPTY_FACILITY;
+  const senior   = inputs.seniorFacility  ?? EMPTY_FACILITY;
+  const senior2  = inputs.seniorFacility2 ?? EMPTY_FACILITY;
+  const senior3  = inputs.seniorFacility3 ?? EMPTY_FACILITY;
+  const mezz     = inputs.mezzanine       ?? EMPTY_FACILITY;
+
+  let anyActuals = false;
+
+  for (let i = 0; i < periods.length; i++) {
+    if (!periods[i].isActual) continue;
+
+    // Land loan
+    if (landLoan.actualsDrawdown?.[i]  != null) { result.landLoanDrawdowns[i]  = landLoan.actualsDrawdown[i];  anyActuals = true; }
+    if (landLoan.actualsRepayment?.[i] != null) { result.landLoanRepayments[i] = landLoan.actualsRepayment[i]; anyActuals = true; }
+    if (landLoan.actualsInterest?.[i]  != null) { result.landLoanInterest[i]   = landLoan.actualsInterest[i];  anyActuals = true; }
+    if (landLoan.actualsFees?.[i]      != null) { result.landLoanFees[i]       = landLoan.actualsFees[i];      anyActuals = true; }
+
+    // Senior 1
+    if (senior.actualsDrawdown?.[i]  != null) { result.seniorDrawdowns[i]  = senior.actualsDrawdown[i];  anyActuals = true; }
+    if (senior.actualsRepayment?.[i] != null) { result.seniorRepayments[i] = senior.actualsRepayment[i]; anyActuals = true; }
+    if (senior.actualsInterest?.[i]  != null) { result.seniorInterest[i]   = senior.actualsInterest[i];  anyActuals = true; }
+    if (senior.actualsFees?.[i]      != null) { result.seniorFees[i]       = senior.actualsFees[i];      anyActuals = true; }
+
+    // Senior 2
+    if (senior2.actualsDrawdown?.[i]  != null) { result.senior2Drawdowns[i]  = senior2.actualsDrawdown[i];  anyActuals = true; }
+    if (senior2.actualsRepayment?.[i] != null) { result.senior2Repayments[i] = senior2.actualsRepayment[i]; anyActuals = true; }
+    if (senior2.actualsInterest?.[i]  != null) { result.senior2Interest[i]   = senior2.actualsInterest[i];  anyActuals = true; }
+    if (senior2.actualsFees?.[i]      != null) { result.senior2Fees[i]       = senior2.actualsFees[i];      anyActuals = true; }
+
+    // Senior 3
+    if (senior3.actualsDrawdown?.[i]  != null) { result.senior3Drawdowns[i]  = senior3.actualsDrawdown[i];  anyActuals = true; }
+    if (senior3.actualsRepayment?.[i] != null) { result.senior3Repayments[i] = senior3.actualsRepayment[i]; anyActuals = true; }
+    if (senior3.actualsInterest?.[i]  != null) { result.senior3Interest[i]   = senior3.actualsInterest[i];  anyActuals = true; }
+    if (senior3.actualsFees?.[i]      != null) { result.senior3Fees[i]       = senior3.actualsFees[i];      anyActuals = true; }
+
+    // Mezzanine
+    if (mezz.actualsDrawdown?.[i]  != null) { result.mezzDrawdowns[i]  = mezz.actualsDrawdown[i];  anyActuals = true; }
+    if (mezz.actualsRepayment?.[i] != null) { result.mezzRepayments[i] = mezz.actualsRepayment[i]; anyActuals = true; }
+    if (mezz.actualsInterest?.[i]  != null) { result.mezzInterest[i]   = mezz.actualsInterest[i];  anyActuals = true; }
+    if (mezz.actualsFees?.[i]      != null) { result.mezzFees[i]       = mezz.actualsFees[i];      anyActuals = true; }
+  }
+
+  // Recompute running totals from the overlaid arrays so dashboard figures reflect actuals.
+  if (anyActuals) {
+    result.totalLandLoanInterest = sum(result.landLoanInterest);
+    result.totalLandLoanFees     = sum(result.landLoanFees);
+    result.totalSeniorInterest   = sum(result.seniorInterest);
+    result.totalSeniorFees       = sum(result.seniorFees);
+    result.totalSenior2Interest  = sum(result.senior2Interest);
+    result.totalSenior2Fees      = sum(result.senior2Fees);
+    result.totalSenior3Interest  = sum(result.senior3Interest);
+    result.totalSenior3Fees      = sum(result.senior3Fees);
+    result.totalMezzInterest     = sum(result.mezzInterest);
+    result.totalMezzFees         = sum(result.mezzFees);
+  }
 }
 
 function runFundingWaterfall(
@@ -180,11 +244,11 @@ function runFundingWaterfall(
   daysPerYear: number,
 ): FundingResult {
   const n = periods.length;
-  const landLoan = inputs.landLoan;
-  const senior  = inputs.seniorFacility;
-  const senior2 = inputs.seniorFacility2;
-  const senior3 = inputs.seniorFacility3;
-  const mezz    = inputs.mezzanine;
+  const landLoan = inputs.landLoan  ?? EMPTY_FACILITY;
+  const senior   = inputs.seniorFacility  ?? EMPTY_FACILITY;
+  const senior2  = inputs.seniorFacility2 ?? EMPTY_FACILITY;
+  const senior3  = inputs.seniorFacility3 ?? EMPTY_FACILITY;
+  const mezz     = inputs.mezzanine       ?? EMPTY_FACILITY;
 
   const drawdownSequence = computeDrawdownSequence(inputs);
 
