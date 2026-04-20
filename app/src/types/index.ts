@@ -223,6 +223,8 @@ export interface MainInputs {
   landLoan: DebtFacility;
   mezzanine: DebtFacility;
   seniorFacility: DebtFacility;
+  seniorFacility2: DebtFacility;
+  seniorFacility3: DebtFacility;
   residualStockFacility: DebtFacility;
   additionalLoan1: DebtFacility;
   additionalLoan2: DebtFacility;
@@ -262,6 +264,14 @@ export interface MonthlyCashflow {
   seniorRepayment: number;
   seniorInterest: number;
   seniorFees: number;
+  senior2Drawdown: number;
+  senior2Repayment: number;
+  senior2Interest: number;
+  senior2Fees: number;
+  senior3Drawdown: number;
+  senior3Repayment: number;
+  senior3Interest: number;
+  senior3Fees: number;
   mezzDrawdown: number;
   mezzRepayment: number;
   mezzInterest: number;
@@ -272,6 +282,8 @@ export interface MonthlyCashflow {
   // Balances
   landLoanBalance: number;
   seniorBalance: number;
+  senior2Balance: number;
+  senior3Balance: number;
   mezzBalance: number;
   equityBalance: number;
   netCashflow: number;
@@ -316,6 +328,12 @@ export interface CapitalStack {
   seniorAmount: number;
   seniorLTC: number;
   seniorLVR: number;
+  senior2Amount: number;
+  senior2LTC: number;
+  senior2LVR: number;
+  senior3Amount: number;
+  senior3LTC: number;
+  senior3LVR: number;
   mezzAmount: number;
   mezzLTC: number;
   mezzLVR: number;
@@ -329,6 +347,12 @@ export interface DebtSummary {
   seniorPrincipal: number;
   seniorInterest: number;
   seniorTotal: number;
+  senior2Principal: number;
+  senior2Interest: number;
+  senior2Total: number;
+  senior3Principal: number;
+  senior3Interest: number;
+  senior3Total: number;
   mezzPrincipal: number;
   mezzInterest: number;
   mezzTotal: number;
@@ -343,6 +367,16 @@ export interface DebtRates {
   seniorMargin: number;
   seniorBBSY: number;
   seniorAllIn: number;
+  senior2Establishment: number;
+  senior2LineFee: number;
+  senior2Margin: number;
+  senior2BBSY: number;
+  senior2AllIn: number;
+  senior3Establishment: number;
+  senior3LineFee: number;
+  senior3Margin: number;
+  senior3BBSY: number;
+  senior3AllIn: number;
   mezzEstablishment: number;
   mezzLineFee: number;
   mezzMargin: number;
