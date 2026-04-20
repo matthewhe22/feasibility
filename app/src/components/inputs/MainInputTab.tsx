@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useStore } from '../../store/useStore';
 import { CurrencyInput, PercentInput, NumberInput, TextInput, SectionHeader } from '../common/FormFields';
 import { FinancingInputs } from './FinancingInputs';
-import { formatCurrency, excelDateToDate, addMonths, endOfMonth, formatMonthYear } from '../../utils';
+import { formatCurrency, excelDateToDate, addMonths, endOfMonth } from '../../utils';
 import { calculateStampDuty, STAMP_DUTY_STATES, type StampDutyState } from '../../utils/stampDuty';
 import {
   getActualPeriodCount,
