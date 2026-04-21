@@ -95,7 +95,6 @@ const d = runCalculations(admin, inputs);
 const f = d.feasibility;
 const kpi = d.kpis;
 const wf = d.cashflows;
-const cs = d.capitalStack;
 const ds = d.debtSummary;
 
 const totalProfitDist = wf.reduce((s, cf) => s + cf.profitDistribution, 0);
