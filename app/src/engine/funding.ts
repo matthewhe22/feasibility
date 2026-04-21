@@ -310,6 +310,12 @@ function runFundingWaterfall(
   const snr3StartIdx = senior3.startMonth > 0 ? senior3.startMonth - 1 : -1;
   const mezzStartIdx = mezz.startMonth    > 0 ? mezz.startMonth    - 1 : -1;
 
+  // Maturity indices (0-indexed inclusive end). When maturityMonth is 0 or
+  // not set, the facility runs to the end of the timeline.
+  const snrEndIdx  = senior.maturityMonth  > 0 ? senior.maturityMonth  - 1 : n - 1;
+  const snr2EndIdx = senior2.maturityMonth > 0 ? senior2.maturityMonth - 1 : n - 1;
+  const snr3EndIdx = senior3.maturityMonth > 0 ? senior3.maturityMonth - 1 : n - 1;
+
   const hasSenior  = senior.facilityLimit  > 0 && snrStartIdx  >= 0;
   const hasSenior2 = senior2.facilityLimit > 0 && snr2StartIdx >= 0;
   const hasSenior3 = senior3.facilityLimit > 0 && snr3StartIdx >= 0;
@@ -386,9 +392,14 @@ function runFundingWaterfall(
   // ===== SINGLE PASS =====
   for (let i = 0; i < n; i++) {
     const days         = periods[i].daysInPeriod;
-    const seniorActive  = hasSenior  && i >= snrStartIdx;
-    const senior2Active = hasSenior2 && i >= snr2StartIdx;
-    const senior3Active = hasSenior3 && i >= snr3StartIdx;
+    // seniorActive: facility is within its committed term → line fees charged + drawdowns allowed.
+    // seniorDrawActive: drawdowns allowed beyond maturity (extension period) but no more line fees.
+    const seniorActive      = hasSenior  && i >= snrStartIdx  && i <= snrEndIdx;
+    const senior2Active     = hasSenior2 && i >= snr2StartIdx && i <= snr2EndIdx;
+    const senior3Active     = hasSenior3 && i >= snr3StartIdx && i <= snr3EndIdx;
+    const seniorDrawActive  = hasSenior  && i >= snrStartIdx;
+    const senior2DrawActive = hasSenior2 && i >= snr2StartIdx;
+    const senior3DrawActive = hasSenior3 && i >= snr3StartIdx;
 
     // ── 1. Opening balances ────────────────────────────────────────────────────
     const llOpenBalance   = llRunningBalance;
@@ -597,7 +608,7 @@ function runFundingWaterfall(
       for (const entry of drawdownSequence) {
         if (bankBalance >= 0) break;
 
-        if (entry.type === 'senior' && seniorActive) {
+        if (entry.type === 'senior' && seniorDrawActive) {
           const avail = Math.max(0, seniorLimit - snrRunningBalance);
           if (avail > 0) {
             const draw         = Math.min(-bankBalance, avail);
@@ -605,7 +616,7 @@ function runFundingWaterfall(
             snrRunningBalance += draw;
             bankBalance       += draw;
           }
-        } else if (entry.type === 'senior2' && senior2Active) {
+        } else if (entry.type === 'senior2' && senior2DrawActive) {
           const avail = Math.max(0, senior2Limit - snr2RunningBalance);
           if (avail > 0) {
             const draw          = Math.min(-bankBalance, avail);
@@ -613,7 +624,7 @@ function runFundingWaterfall(
             snr2RunningBalance += draw;
             bankBalance        += draw;
           }
-        } else if (entry.type === 'senior3' && senior3Active) {
+        } else if (entry.type === 'senior3' && senior3DrawActive) {
           const avail = Math.max(0, senior3Limit - snr3RunningBalance);
           if (avail > 0) {
             const draw          = Math.min(-bankBalance, avail);
