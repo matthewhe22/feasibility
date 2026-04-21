@@ -95,8 +95,11 @@ export interface FundingResult {
   totalEquityInjected: number;
   peakDebt: number;
   seniorFacilitySize: number;
+  seniorFacilityLimit: number;
   senior2FacilitySize: number;
+  senior2FacilityLimit: number;
   senior3FacilitySize: number;
+  senior3FacilityLimit: number;
   mezzFacilitySize: number;
 }
 
@@ -127,6 +130,11 @@ export function solveFunding(
   let prevMezzFinCosts = 0;
   let prevSenior2FinCosts = 0;
   let prevSenior3FinCosts = 0;
+  // Peak drawn balances from prior iteration — used as the line fee basis.
+  // Converges to the actual peak debt for each facility.
+  let prevPeakSnrBalance  = 0;
+  let prevPeakSnr2Balance = 0;
+  let prevPeakSnr3Balance = 0;
   let result: FundingResult = createEmptyResult(n);
 
   for (let iter = 0; iter < maxIterations; iter++) {
@@ -137,6 +145,7 @@ export function solveFunding(
     result = runFundingWaterfall(
       periods, monthlyCostsExcFinance, monthlyRevenue, _monthlyGSTNet, gstOnRevenue,
       inputs, tdc, daysPerYear,
+      prevPeakSnrBalance, prevPeakSnr2Balance, prevPeakSnr3Balance,
     );
 
     const newSeniorFinCosts = result.totalSeniorInterest + result.totalSeniorFees
@@ -159,6 +168,9 @@ export function solveFunding(
     prevMezzFinCosts    = newMezzFinCosts;
     prevSenior2FinCosts = newSenior2FinCosts;
     prevSenior3FinCosts = newSenior3FinCosts;
+    prevPeakSnrBalance  = result.seniorFacilitySize;
+    prevPeakSnr2Balance = result.senior2FacilitySize;
+    prevPeakSnr3Balance = result.senior3FacilitySize;
   }
 
   // Apply financing actuals overlay (post-convergence, does not affect waterfall logic).
@@ -242,6 +254,9 @@ function runFundingWaterfall(
   inputs: MainInputs,
   tdc: number,
   daysPerYear: number,
+  peakSnrBalancePrev = 0,
+  peakSnr2BalancePrev = 0,
+  peakSnr3BalancePrev = 0,
 ): FundingResult {
   const n = periods.length;
   const landLoan = inputs.landLoan  ?? EMPTY_FACILITY;
@@ -296,6 +311,12 @@ function runFundingWaterfall(
   const snr2StartIdx = senior2.startMonth > 0 ? senior2.startMonth - 1 : -1;
   const snr3StartIdx = senior3.startMonth > 0 ? senior3.startMonth - 1 : -1;
   const mezzStartIdx = mezz.startMonth    > 0 ? mezz.startMonth    - 1 : -1;
+
+  // Maturity indices (0-indexed inclusive end). When maturityMonth is 0 or
+  // not set, the facility runs to the end of the timeline.
+  const snrEndIdx  = senior.maturityMonth  > 0 ? senior.maturityMonth  - 1 : n - 1;
+  const snr2EndIdx = senior2.maturityMonth > 0 ? senior2.maturityMonth - 1 : n - 1;
+  const snr3EndIdx = senior3.maturityMonth > 0 ? senior3.maturityMonth - 1 : n - 1;
 
   const hasSenior  = senior.facilityLimit  > 0 && snrStartIdx  >= 0;
   const hasSenior2 = senior2.facilityLimit > 0 && snr2StartIdx >= 0;
@@ -373,9 +394,14 @@ function runFundingWaterfall(
   // ===== SINGLE PASS =====
   for (let i = 0; i < n; i++) {
     const days         = periods[i].daysInPeriod;
-    const seniorActive  = hasSenior  && i >= snrStartIdx;
-    const senior2Active = hasSenior2 && i >= snr2StartIdx;
-    const senior3Active = hasSenior3 && i >= snr3StartIdx;
+    // seniorActive: facility is within its committed term → line fees charged + drawdowns allowed.
+    // seniorDrawActive: drawdowns allowed beyond maturity (extension period) but no more line fees.
+    const seniorActive      = hasSenior  && i >= snrStartIdx  && i <= snrEndIdx;
+    const senior2Active     = hasSenior2 && i >= snr2StartIdx && i <= snr2EndIdx;
+    const senior3Active     = hasSenior3 && i >= snr3StartIdx && i <= snr3EndIdx;
+    const seniorDrawActive  = hasSenior  && i >= snrStartIdx;
+    const senior2DrawActive = hasSenior2 && i >= snr2StartIdx;
+    const senior3DrawActive = hasSenior3 && i >= snr3StartIdx;
 
     // ── 1. Opening balances ────────────────────────────────────────────────────
     const llOpenBalance   = llRunningBalance;
@@ -446,9 +472,10 @@ function runFundingWaterfall(
     }
     if (seniorActive) {
       let periodFees = 0;
-      if (snrOpenBalance > 0) {
-        periodFees += periodInterest(seniorLimit, senior.lineFeePercent, days, daysPerYear);
-      }
+      // Line fee charged on peak drawn balance (from previous solver iteration).
+      // Converges to the actual peak debt, matching term sheet convention where
+      // the fee applies to the maximum amount drawn/committed during the facility term.
+      periodFees += periodInterest(peakSnrBalancePrev, senior.lineFeePercent, days, daysPerYear);
       if (i === snrStartIdx) {
         periodFees += seniorLimit * senior.establishmentFeePercent;
       }
@@ -476,9 +503,7 @@ function runFundingWaterfall(
     }
     if (senior2Active) {
       let periodFees = 0;
-      if (snr2OpenBalance > 0) {
-        periodFees += periodInterest(senior2Limit, senior2.lineFeePercent, days, daysPerYear);
-      }
+      periodFees += periodInterest(peakSnr2BalancePrev, senior2.lineFeePercent, days, daysPerYear);
       if (i === snr2StartIdx) {
         periodFees += senior2Limit * senior2.establishmentFeePercent;
       }
@@ -506,9 +531,7 @@ function runFundingWaterfall(
     }
     if (senior3Active) {
       let periodFees = 0;
-      if (snr3OpenBalance > 0) {
-        periodFees += periodInterest(senior3Limit, senior3.lineFeePercent, days, daysPerYear);
-      }
+      periodFees += periodInterest(peakSnr3BalancePrev, senior3.lineFeePercent, days, daysPerYear);
       if (i === snr3StartIdx) {
         periodFees += senior3Limit * senior3.establishmentFeePercent;
       }
@@ -586,7 +609,7 @@ function runFundingWaterfall(
       for (const entry of drawdownSequence) {
         if (bankBalance >= 0) break;
 
-        if (entry.type === 'senior' && seniorActive) {
+        if (entry.type === 'senior' && seniorDrawActive) {
           const avail = Math.max(0, seniorLimit - snrRunningBalance);
           if (avail > 0) {
             const draw         = Math.min(-bankBalance, avail);
@@ -594,7 +617,7 @@ function runFundingWaterfall(
             snrRunningBalance += draw;
             bankBalance       += draw;
           }
-        } else if (entry.type === 'senior2' && senior2Active) {
+        } else if (entry.type === 'senior2' && senior2DrawActive) {
           const avail = Math.max(0, senior2Limit - snr2RunningBalance);
           if (avail > 0) {
             const draw          = Math.min(-bankBalance, avail);
@@ -602,7 +625,7 @@ function runFundingWaterfall(
             snr2RunningBalance += draw;
             bankBalance        += draw;
           }
-        } else if (entry.type === 'senior3' && senior3Active) {
+        } else if (entry.type === 'senior3' && senior3DrawActive) {
           const avail = Math.max(0, senior3Limit - snr3RunningBalance);
           if (avail > 0) {
             const draw          = Math.min(-bankBalance, avail);
@@ -742,8 +765,11 @@ function runFundingWaterfall(
     totalEquityInjected: cumulativeEquity,
     peakDebt,
     seniorFacilitySize:  peakSnrBalance,
+    seniorFacilityLimit: hasSenior ? seniorLimit : 0,
     senior2FacilitySize: peakSnr2Balance,
+    senior2FacilityLimit: hasSenior2 ? senior2Limit : 0,
     senior3FacilitySize: peakSnr3Balance,
+    senior3FacilityLimit: hasSenior3 ? senior3Limit : 0,
     mezzFacilitySize: hasMezz ? mezzLimit : 0,
   };
 }
@@ -768,7 +794,9 @@ function createEmptyResult(n: number): FundingResult {
     totalMezzInterest: 0, totalMezzFees: 0,
     totalLandLoanInterest: 0, totalLandLoanFees: 0,
     totalEquityInjected: 0, peakDebt: 0,
-    seniorFacilitySize: 0, senior2FacilitySize: 0, senior3FacilitySize: 0,
+    seniorFacilitySize: 0, seniorFacilityLimit: 0,
+    senior2FacilitySize: 0, senior2FacilityLimit: 0,
+    senior3FacilitySize: 0, senior3FacilityLimit: 0,
     mezzFacilitySize: 0,
   };
 }

@@ -260,6 +260,7 @@ export interface MonthlyCashflow {
   lettingFees: number;
   otherFinancingCosts: number;
   gstOnCosts: number;
+  itcRecovery: number;       // ATO refund of GST paid on costs (Input Tax Credit)
   // Revenue
   grvSettlements: number;
   grvDeposits: number;

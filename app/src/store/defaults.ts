@@ -285,7 +285,7 @@ export const defaultSeniorFacility: DebtFacility = {
   name: 'Senior Construction Facility',
   facilityLimit: 767034632,
   startMonth: 33,
-  maturityMonth: 33,
+  maturityMonth: 65,
   interestRate: 0.0215,
   bbsy: 0.0196,
   margin: 0.0215,

@@ -122,7 +122,7 @@ export function ChecksTab() {
       c.landCosts + c.acquisitionCosts + c.developmentCosts + c.constructionCosts +
       c.contingency + c.marketingCosts + c.otherStandardCosts + c.pmFees +
       c.sellingCostsFrontEnd + c.sellingCostsBackEnd + c.otherFinancingCosts +
-      c.gstOnCosts +
+      c.gstOnCosts - c.itcRecovery +   // net GST on costs = 0 (ITC fully offsets)
       (inputs.seniorFacility.isCapitalised ? 0 : c.seniorInterest + c.seniorFees) +
       (inputs.mezzanine.isCapitalised ? 0 : c.mezzInterest + c.mezzFees) +
       c.landLoanInterest + c.landLoanFees

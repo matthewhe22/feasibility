@@ -170,7 +170,9 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // Include rental and other income in the waterfall so these cash flows are
   // swept to debt repayment / profit distribution rather than left as a
   // positive residual in the cumulative cashflow.
-  const totalMonthlyRevenue = settlements.map((s, i) => s + rentalInc[i] + otherInc[i]);
+  // Also add ITC recovery (ATO refunds GST paid on costs each period) so the
+  // waterfall treats costs on an ex-GST basis, matching the formula profit calc.
+  const totalMonthlyRevenue = settlements.map((s, i) => s + rentalInc[i] + otherInc[i] + gstOnCosts[i]);
   const funding = solveFunding(
     periods,
     monthlyCostsExcFinance,
@@ -198,6 +200,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     lettingFees: 0,
     otherFinancingCosts: otherFinCosts[i],
     gstOnCosts: gstOnCosts[i],
+    itcRecovery: gstOnCosts[i],
     grvSettlements: settlements[i],
     grvDeposits: deposits[i],
     rentalIncome: rentalInc[i],
@@ -254,6 +257,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     cf.netCashflow =
       // Operating inflows
       cf.grvSettlements + cf.rentalIncome + cf.otherIncome
+      // ITC recovery: ATO refunds GST paid on costs (net effect = $0 on gstOnCosts)
+      + cf.itcRecovery
       // Financing inflows (drawdowns + equity injections)
       + cf.landLoanDrawdown + cf.seniorDrawdown + cf.senior2Drawdown + cf.senior3Drawdown
       + cf.mezzDrawdown + cf.equityInjection
@@ -308,9 +313,11 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // Standard costs = dev costs + other std
   const standardCosts = totalDevCosts + totalOtherStd;
 
+  // totalCost excludes GST on costs (recovered as ITC) and excludes GST on revenue
+  // (deducted separately in totalProfit below, matching Excel's approach).
   const totalCost = totalLand + totalStampDuty + totalBuildCosts + totalContingency +
     totalSeniorFinCosts + totalLandLoanFinCosts + totalMezzFinCosts + totalOtherFin +
-    standardCosts + totalGSTOnCosts + totalMarketing + commissions.total + totalPMFees;
+    standardCosts + totalMarketing + commissions.total + totalPMFees;
 
   const totalRentalIncome = sum(rentalInc);
   const totalOtherIncome = sum(otherInc);
@@ -318,6 +325,9 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // settlement date are excluded — they are not in the waterfall revenue and
   // would otherwise cause totalProfit > sum(profitDistributions).
   const totalSettlementsRevenue = sum(settlements);
+  // Deduct GST on revenue (remitted to ATO) separately — matches Excel where
+  // cost items are shown ex-GST and the net GST burden is gstOnRevenue only
+  // (ITC fully offsets gstOnCosts, so gstOnCosts is not a net cost).
   const totalProfit = totalSettlementsRevenue + totalRentalIncome + totalOtherIncome - totalGSTOnRevenue - totalCost;
 
   // Preferred equity coupon (accrued over project duration at simple interest)
@@ -334,9 +344,11 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const backEndSelling = commissions.backEnd;
   const nrvValue = totalNRV(inputs.grvItems, gstRate, backEndSelling);
 
-  const seniorAmount  = funding.seniorFacilitySize;
-  const senior2Amount = funding.senior2FacilitySize;
-  const senior3Amount = funding.senior3FacilitySize;
+  // Capital stack uses facility limit (committed amount) + accrued interest/fees
+  // to match Excel reporting — not peak drawn balance.
+  const seniorAmount  = funding.seniorFacilityLimit  + funding.totalSeniorInterest  + funding.totalSeniorFees;
+  const senior2Amount = funding.senior2FacilityLimit + funding.totalSenior2Interest + funding.totalSenior2Fees;
+  const senior3Amount = funding.senior3FacilityLimit + funding.totalSenior3Interest + funding.totalSenior3Fees;
   const mezzAmount    = funding.mezzFacilitySize;
   const totalCapital  = seniorAmount + senior2Amount + senior3Amount + mezzAmount + funding.totalEquityInjected;
   const seniorLTC   = totalCost > 0 ? seniorAmount  / totalCost : 0;
@@ -352,8 +364,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
 
   // KPIs
   const equityContrib = funding.totalEquityInjected;
-  // Cash-on-Cash = profit / equity (not equity multiple which would be (profit+equity)/equity)
-  const cashOnCash = equityContrib > 0 ? totalProfitAfterCoupon / equityContrib : 0;
+  // Cash-on-Cash = (profit + equity) / equity — matches Excel equity multiple definition
+  const cashOnCash = equityContrib > 0 ? (totalProfitAfterCoupon + equityContrib) / equityContrib : 0;
   // Annualised CoC = compound annual return: (1 + totalReturn)^(1/years) - 1
   const annualCoC = equityContrib > 0 && years > 0
     ? Math.pow(1 + totalProfitAfterCoupon / equityContrib, 1 / years) - 1
@@ -369,7 +381,9 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const constructionSpan = inputs.constructionCosts[0]?.monthSpan || 41;
   const settlementMonths = inputs.grvItems.map(g => g.settlementMonth).filter(m => m > 0);
   const lastSettlement = settlementMonths.length > 0 ? Math.max(...settlementMonths) : 0;
-  const presaleMonths = inputs.grvItems.filter(g => g.preSaleExchangeMonth > 0).map(g => g.preSaleExchangeMonth);
+  const presaleMonths = inputs.grvItems
+    .filter(g => g.preSaleExchangeMonth > 0 && g.revenueType === 'Residential')
+    .map(g => g.preSaleExchangeMonth);
   const salesStart = presaleMonths.length > 0 ? Math.min(...presaleMonths) : 0;
 
   function monthLabel(monthNum: number): string {
@@ -377,9 +391,9 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     return periods[monthNum - 1]?.label || 'N/A';
   }
 
-  const seniorAllIn  = (inputs.seniorFacility?.margin  ?? 0) + (inputs.seniorFacility?.bbsy  ?? 0);
-  const senior2AllIn = (inputs.seniorFacility2?.margin ?? 0) + (inputs.seniorFacility2?.bbsy ?? 0);
-  const senior3AllIn = (inputs.seniorFacility3?.margin ?? 0) + (inputs.seniorFacility3?.bbsy ?? 0);
+  const seniorAllIn  = (inputs.seniorFacility?.establishmentFeePercent  ?? 0) + (inputs.seniorFacility?.lineFeePercent  ?? 0) + (inputs.seniorFacility?.margin  ?? 0) + (inputs.seniorFacility?.bbsy  ?? 0);
+  const senior2AllIn = (inputs.seniorFacility2?.establishmentFeePercent ?? 0) + (inputs.seniorFacility2?.lineFeePercent ?? 0) + (inputs.seniorFacility2?.margin ?? 0) + (inputs.seniorFacility2?.bbsy ?? 0);
+  const senior3AllIn = (inputs.seniorFacility3?.establishmentFeePercent ?? 0) + (inputs.seniorFacility3?.lineFeePercent ?? 0) + (inputs.seniorFacility3?.margin ?? 0) + (inputs.seniorFacility3?.bbsy ?? 0);
   const landAllIn    = inputs.landLoan?.interestRate  ?? 0;
   const mezzAllIn    = inputs.mezzanine?.interestRate ?? 0;
 
@@ -449,27 +463,27 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       total: totalCapital,
     },
     debtSummary: {
-      seniorPrincipal: funding.seniorFacilitySize,
+      seniorPrincipal: funding.seniorFacilityLimit,
       seniorInterest:  funding.totalSeniorInterest  + funding.totalSeniorFees,
-      seniorTotal:     funding.seniorFacilitySize   + funding.totalSeniorInterest  + funding.totalSeniorFees,
-      senior2Principal: funding.senior2FacilitySize,
+      seniorTotal:     funding.seniorFacilityLimit  + funding.totalSeniorInterest  + funding.totalSeniorFees,
+      senior2Principal: funding.senior2FacilityLimit,
       senior2Interest:  funding.totalSenior2Interest + funding.totalSenior2Fees,
-      senior2Total:     funding.senior2FacilitySize  + funding.totalSenior2Interest + funding.totalSenior2Fees,
-      senior3Principal: funding.senior3FacilitySize,
+      senior2Total:     funding.senior2FacilityLimit + funding.totalSenior2Interest + funding.totalSenior2Fees,
+      senior3Principal: funding.senior3FacilityLimit,
       senior3Interest:  funding.totalSenior3Interest + funding.totalSenior3Fees,
-      senior3Total:     funding.senior3FacilitySize  + funding.totalSenior3Interest + funding.totalSenior3Fees,
+      senior3Total:     funding.senior3FacilityLimit + funding.totalSenior3Interest + funding.totalSenior3Fees,
       mezzPrincipal: funding.mezzFacilitySize,
       mezzInterest:  funding.totalMezzInterest + funding.totalMezzFees,
       mezzTotal:     funding.mezzFacilitySize  + funding.totalMezzInterest + funding.totalMezzFees,
-      totalPrincipal: funding.seniorFacilitySize + funding.senior2FacilitySize + funding.senior3FacilitySize + funding.mezzFacilitySize,
+      totalPrincipal: funding.seniorFacilityLimit + funding.senior2FacilityLimit + funding.senior3FacilityLimit + funding.mezzFacilitySize,
       totalInterest:  funding.totalSeniorInterest  + funding.totalSeniorFees
                     + funding.totalSenior2Interest + funding.totalSenior2Fees
                     + funding.totalSenior3Interest + funding.totalSenior3Fees
                     + funding.totalMezzInterest    + funding.totalMezzFees,
-      totalDebt: funding.seniorFacilitySize  + funding.totalSeniorInterest  + funding.totalSeniorFees
-               + funding.senior2FacilitySize + funding.totalSenior2Interest + funding.totalSenior2Fees
-               + funding.senior3FacilitySize + funding.totalSenior3Interest + funding.totalSenior3Fees
-               + funding.mezzFacilitySize    + funding.totalMezzInterest    + funding.totalMezzFees,
+      totalDebt: funding.seniorFacilityLimit  + funding.totalSeniorInterest  + funding.totalSeniorFees
+               + funding.senior2FacilityLimit + funding.totalSenior2Interest + funding.totalSenior2Fees
+               + funding.senior3FacilityLimit + funding.totalSenior3Interest + funding.totalSenior3Fees
+               + funding.mezzFacilitySize     + funding.totalMezzInterest    + funding.totalMezzFees,
     },
     debtRates: {
       seniorEstablishment: inputs.seniorFacility?.establishmentFeePercent  ?? 0,

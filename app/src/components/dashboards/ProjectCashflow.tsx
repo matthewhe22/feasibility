@@ -27,11 +27,12 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
       { label: 'Selling Costs (Back End)', getValue: c => c.sellingCostsBackEnd },
       { label: 'Other Financing Costs', getValue: c => c.otherFinancingCosts },
       { label: 'GST on Costs (paid to vendors, ITC claimable)', getValue: c => c.gstOnCosts, textColor: 'text-orange-700' },
+      { label: 'ITC Recovery (ATO refund of GST on costs)', getValue: c => c.itcRecovery, textColor: 'text-green-700' },
       {
-        label: 'Total Costs (incl. GST on Costs)',
+        label: 'Total Costs (incl. GST on Costs, net of ITC)',
         getValue: c => c.landCosts + c.acquisitionCosts + c.developmentCosts + c.constructionCosts +
           c.contingency + c.marketingCosts + c.otherStandardCosts + c.pmFees +
-          c.sellingCostsFrontEnd + c.sellingCostsBackEnd + c.otherFinancingCosts + c.gstOnCosts,
+          c.sellingCostsFrontEnd + c.sellingCostsBackEnd + c.otherFinancingCosts + c.gstOnCosts - c.itcRecovery,
         bold: true, bg: 'bg-red-50',
       },
     ],
