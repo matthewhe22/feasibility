@@ -98,3 +98,39 @@ src/
 5. Dashboard outputs (matching Excel layout exactly)
 6. Charts & visualizations (7 charts including funding structure over time)
 7. Verification against Excel values & polish
+
+## Calculation Methodology (Current Decisions)
+
+### Line Fee
+Charged on the **total committed facility size** (facilityLimit) throughout the committed term — per financing facility term sheet convention. The line fee applies for every period that `seniorActive` is true (start month to maturity month inclusive). Formula: `facilityLimit × lineFeePercent × daysInPeriod / daysPerYear`.
+
+This differs from the Excel reference model which appears to use a smaller effective base (~40–50% of facility), but the total-facility-size approach is the correct term sheet interpretation.
+
+### ITC Recovery
+GST paid on costs (`gstOnCosts`) is modelled as a **same-period cash recovery** from the ATO (Input Tax Credit). In the funding waterfall, `gstOnCosts` is added to revenue each period to net it against the cost outflow, so the waterfall funds costs on an effective ex-GST basis. The `MonthlyCashflow.itcRecovery` field records this recovery and is included in the net cashflow formula to keep the per-period net ≈ $0.
+
+### PM Fee Base
+PM fee = rate × sum of all other costs **excluding GST on costs and excluding finance costs** (current implementation). The Excel reference model uses a wider base (GST-inclusive costs + finance costs), which produces a higher PM fee total (~$23.2M vs app's ~$18.3M). This is a known open gap (GAP B).
+
+### Senior Interest
+Charged on the **opening drawn balance** each period using a daily-rate formula: `openBalance × allInRate × daysInPeriod / daysPerYear`. The all-in rate = margin + BBSY (line fee is a separate fee, not included in interest rate).
+
+### Reconciliation Status (vs KK Feaso Model Draft v43 defaults)
+| Metric | App | Excel | Gap | Status |
+|--------|-----|-------|-----|--------|
+| Total Profit | $153.9M | $170.1M | -9.6% | ❌ |
+| Senior Interest | $31.1M | $29.9M | +4.1% | ✅ |
+| Senior Fees | $49.2M | $29.5M | +66.9% | ❌ methodology |
+| PM Fees | $18.3M | $23.2M | -21.2% | ❌ GAP B |
+| IRR (waterfall) | 23.70% | 23.02% | +0.68pp | ✅ |
+| CoC | 2.180× | 2.303× | -5.3% | ❌ |
+| Equity In/Out | $130.4M | $130.4M | 0% | ✅ |
+| Profit Waterfall | $153.9M | $170.0M | -9.4% | ❌ |
+| Net Cashflow | ≈$0 | ≈$0 | — | ✅ |
+
+**Main profit variance drivers** (app vs Excel, $170.1M target):
+1. Senior fees: +$19.7M over-stated (line fee on full facility > Excel's effective base) → profit -$19.7M
+2. PM fees: -$4.9M under-stated (narrow base vs Excel's GST+finance inclusive base) → profit +$4.9M
+3. Senior interest: +$1.2M over (on-demand cycling vs full-draw-at-close) → profit -$1.2M
+4. GST on revenue: +$2.4M over (margin scheme minor difference) → profit -$2.4M
+5. Unexplained residual: +$2.2M (minor rounding / settlement timing differences)

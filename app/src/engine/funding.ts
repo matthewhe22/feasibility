@@ -460,10 +460,9 @@ function runFundingWaterfall(
     }
     if (seniorActive) {
       let periodFees = 0;
-      // Line fee charged on committed-but-undrawn balance (Excel: non-utilisation fee).
-      // Undrawn = facilityLimit − opening drawn balance (before this period's draws).
-      const snrUndrawn = Math.max(0, seniorLimit - snrOpenBalance);
-      periodFees += periodInterest(snrUndrawn, senior.lineFeePercent, days, daysPerYear);
+      // Line fee charged on total committed facility size — matches term sheet convention
+      // where the line fee applies to the full facility limit throughout the committed term.
+      periodFees += periodInterest(seniorLimit, senior.lineFeePercent, days, daysPerYear);
       if (i === snrStartIdx) {
         periodFees += seniorLimit * senior.establishmentFeePercent;
       }
@@ -491,8 +490,7 @@ function runFundingWaterfall(
     }
     if (senior2Active) {
       let periodFees = 0;
-      const snr2Undrawn = Math.max(0, senior2Limit - snr2OpenBalance);
-      periodFees += periodInterest(snr2Undrawn, senior2.lineFeePercent, days, daysPerYear);
+      periodFees += periodInterest(senior2Limit, senior2.lineFeePercent, days, daysPerYear);
       if (i === snr2StartIdx) {
         periodFees += senior2Limit * senior2.establishmentFeePercent;
       }
@@ -520,8 +518,7 @@ function runFundingWaterfall(
     }
     if (senior3Active) {
       let periodFees = 0;
-      const snr3Undrawn = Math.max(0, senior3Limit - snr3OpenBalance);
-      periodFees += periodInterest(snr3Undrawn, senior3.lineFeePercent, days, daysPerYear);
+      periodFees += periodInterest(senior3Limit, senior3.lineFeePercent, days, daysPerYear);
       if (i === snr3StartIdx) {
         periodFees += senior3Limit * senior3.establishmentFeePercent;
       }
