@@ -95,8 +95,11 @@ export interface FundingResult {
   totalEquityInjected: number;
   peakDebt: number;
   seniorFacilitySize: number;
+  seniorFacilityLimit: number;
   senior2FacilitySize: number;
+  senior2FacilityLimit: number;
   senior3FacilitySize: number;
+  senior3FacilityLimit: number;
   mezzFacilitySize: number;
 }
 
@@ -446,9 +449,10 @@ function runFundingWaterfall(
     }
     if (seniorActive) {
       let periodFees = 0;
-      if (snrOpenBalance > 0) {
-        periodFees += periodInterest(seniorLimit, senior.lineFeePercent, days, daysPerYear);
-      }
+      // Line fee applies to the undrawn committed balance (facility limit minus
+      // current drawn balance), not to the full facility limit.
+      const snrUndrawn = Math.max(0, seniorLimit - snrOpenBalance);
+      periodFees += periodInterest(snrUndrawn, senior.lineFeePercent, days, daysPerYear);
       if (i === snrStartIdx) {
         periodFees += seniorLimit * senior.establishmentFeePercent;
       }
@@ -742,8 +746,11 @@ function runFundingWaterfall(
     totalEquityInjected: cumulativeEquity,
     peakDebt,
     seniorFacilitySize:  peakSnrBalance,
+    seniorFacilityLimit: hasSenior ? seniorLimit : 0,
     senior2FacilitySize: peakSnr2Balance,
+    senior2FacilityLimit: hasSenior2 ? senior2Limit : 0,
     senior3FacilitySize: peakSnr3Balance,
+    senior3FacilityLimit: hasSenior3 ? senior3Limit : 0,
     mezzFacilitySize: hasMezz ? mezzLimit : 0,
   };
 }
@@ -768,7 +775,9 @@ function createEmptyResult(n: number): FundingResult {
     totalMezzInterest: 0, totalMezzFees: 0,
     totalLandLoanInterest: 0, totalLandLoanFees: 0,
     totalEquityInjected: 0, peakDebt: 0,
-    seniorFacilitySize: 0, senior2FacilitySize: 0, senior3FacilitySize: 0,
+    seniorFacilitySize: 0, seniorFacilityLimit: 0,
+    senior2FacilitySize: 0, senior2FacilityLimit: 0,
+    senior3FacilitySize: 0, senior3FacilityLimit: 0,
     mezzFacilitySize: 0,
   };
 }

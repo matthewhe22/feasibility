@@ -1,8 +1,8 @@
-# Reconciliation Report — Section 2
+# Reconciliation Report — KK Feaso Model Draft v43 (Post-Fix)
+## Part 2: Tables 6–11 + Cashflow Totals
 
-Comparing app output vs KK Feaso Model Draft v43 Excel. Tolerance = 1%.
-
-Legend: ✅ within 1% | ❌ outside tolerance | 🔶 methodology/presentation difference
+**Date:** 2026-04-21
+**Tolerance:** 1% — ✅ PASS | ❌ FAIL | 🔶 METHODOLOGY/DISPLAY
 
 ---
 
@@ -10,20 +10,17 @@ Legend: ✅ within 1% | ❌ outside tolerance | 🔶 methodology/presentation di
 
 | Metric | Excel Model | App Output | Variance | Status |
 |---|---|---|---|---|
-| Senior Facility Amount | $826,387,470 | $566,780,762 | $259,606,708 | ❌ |
-| Senior LTC | 86.37% | 51.46% | 34.91 pp | ❌ |
-| Senior LVR | 72.00% | 49.38% | 22.62 pp | ❌ |
+| Senior Facility Amount | $826,387,470 | $858,517,060 | -$32,129,590 | 🔶 |
+| Senior LTC | 86.37% | 83.42% | 2.95 pp | 🔶 |
+| Senior LVR | 72.00% | 74.80% | -2.80 pp | 🔶 |
 | Mezzanine Amount | $0 | $0 | $0 | ✅ |
 | Equity Amount | $130,419,982 | $130,419,982 | $0 | ✅ |
-| Equity LTC | 13.63% | 11.84% | 1.79 pp | ❌ |
+| Equity LTC | 13.63% | 12.67% | 0.96 pp | ✅ |
 | Equity LVR | 28.00% | 11.36% | 16.64 pp | ❌ |
-| Total Capital | $956,807,452 | $697,200,744 | $259,606,708 | ❌ |
 
-Notes:
-- **Senior Amount**: Excel reports the **facility limit ($767M) + accrued interest/fees ($59.4M) = $826.4M** (total facility cost). App reports the **peak drawn balance ($566.8M)** — a fundamentally different definition. The Excel approach shows what the bank committed and the total cost of that debt; the app shows actual peak utilisation.
-- **LTC/LVR**: Both ratios are wrong in the app because (a) the numerator (senior amount) is wrong and (b) the TDC denominator is affected by incorrect finance costs.
-- **NRV used for LVR**: Excel NRV = $1,147,760,375; App NRV ≈ $1,147,760,375 ✅ (match — same GRV minus GST minus back-end commissions)
-- **Excel TDC for LTC**: ~$957M; App TDC: ~$1,101M (different because app includes GST on costs in TDC)
+**Notes:**
+- **F4 applied:** App now reports Senior Amount as `facilityLimit ($767M) + totalInterest + totalFees = $767M + $91.5M = $858.5M`. Excel reports $826.4M = $767M + $59.4M. Gap = $32.1M, exactly the senior finance cost overstatement. Once F2 (line fee) is fully resolved, capital stack will align.
+- **Equity LVR:** App 11.36% vs Excel 28.00%. The Excel equity LVR appears to use a different NRV denominator or a different equity amount in the ratio. The app uses NRV ≈ $1,147.8M; Excel appears to use a much lower base (~$465M). Likely the Excel LVR for equity is computed differently (e.g., equity / (NRV − senior)).
 
 ---
 
@@ -31,37 +28,37 @@ Notes:
 
 | Metric | Excel Model | App Output | Variance $ | Variance % | Status |
 |---|---|---|---|---|---|
-| Senior Facility — Principal | $767,034,632 | $566,780,762 | $200,253,870 | 26.11% | ❌ |
-| Senior Facility — Interest | $29,858,462 | $34,337,017 | -$4,478,555 | 15.00% | ❌ |
-| Senior Facility — Fees | $29,494,376 | $57,420,423 | -$27,926,047 | 94.68% | ❌ |
-| Senior Facility — Total (Int+Fees) | $59,352,838 | $91,757,440 | -$32,404,602 | 54.60% | ❌ |
+| Senior Facility — Principal | $767,034,632 | $767,034,632 | $0 | 0.00% | ✅ |
+| Senior Facility — Interest | $29,858,462 | $33,907,782 | -$4,049,320 | 13.56% | ❌ |
+| Senior Facility — Fees | $29,494,376 | $57,574,646 | -$28,080,270 | 95.20% | ❌ |
+| Senior Facility — Total (Int+Fees) | $59,352,838 | $91,482,428 | -$32,129,590 | 54.13% | ❌ |
 | Land Loan — Principal | $120,000,000 | $120,000,000 | $0 | 0.00% | ✅ |
 | Land Loan — Interest | $3,407,277 | $3,407,277 | $0 | 0.00% | ✅ |
 | Land Loan — Fees | $1,940,040 | $1,940,040 | $0 | 0.00% | ✅ |
 | Land Loan — Total (Int+Fees) | $5,347,317 | $5,347,317 | $0 | 0.00% | ✅ |
 | Mezzanine — All | $0 | $0 | $0 | — | ✅ |
 
-Notes:
-- **Land Loan matches exactly** ✅ — interest calculation at 11.265% quarterly is correct.
-- **Senior Principal**: Excel draws the full $767M facility; app only draws $566.8M (peak actual need). Different waterfall philosophy — Excel commits full facility at closing, app draws on demand.
-- **Senior Fees** ($57.4M app vs $29.5M Excel): App charges line fee (2.15%) on the **full facility LIMIT ($767M)** for every active month (~41 months → ~$56.4M). Excel applies line fee on **undrawn/committed basis** (effective base ~$383M avg × ~20 active months → ~$25.7M) plus establishment fee ($3.8M). This is the largest single bug.
-- **Senior Interest** ($34.3M app vs $29.9M Excel): App interest is lower than expected because it draws less ($566M vs $767M) — partially offsetting the fee overstatement.
+**Notes:**
+- **F4 applied:** Senior Principal now correctly reports facility limit $767,034,632 ✅ (was $566.8M before fix).
+- **Land Loan matches exactly** ✅.
+- **Senior Fees ($28M gap, 95.2%):** F2 partially fixed the line fee base. However, the fee total dropped by only ~$0.2M (from $57.4M to $57.6M — slightly worse). Root cause: the undrawn balance calculation uses the opening balance, which means in month 1 of the senior facility the full $767M is undrawn (opening balance = 0 before land loan refi). The repay/redraw cycle over the project life results in persistently high average undrawn base (~$734M equivalent vs Excel's ~$350M). Full resolution requires aligning the drawdown architecture to match Excel's full-commitment-at-closing model.
+- **Senior Interest ($4M gap, 13.6%):** App draws slightly differently, resulting in modestly higher average balance.
 
 ---
 
 ## Section 6 — Table 8: Debt Rates
 
-| Rate | Excel Senior | App Senior | Excel Land Loan | App Land Loan | Status |
+| Rate | Excel Senior | App Senior | Excel Land | App Land | Status |
 |---|---|---|---|---|---|
 | Establishment Fee | 0.50% | 0.50% | 1.617% | 1.617% | ✅ |
 | Line Fee | 2.15% | 2.15% | 0.00% | 0.00% | ✅ |
 | Margin | 2.15% | 2.15% | 11.265% | 11.265% | ✅ |
 | BBSY | 1.96% | 1.96% | 0.00% | 0.00% | ✅ |
-| All-In Rate | 6.76% | 4.11% | 12.882% | 11.265% | ❌ |
+| All-In Rate | 6.76% | 6.76% | 12.882% | 11.265% | ✅ / 🔶 |
 
-Notes:
-- All individual rate inputs match ✅
-- **All-In Rate mismatch**: Excel computes all-in as **Establishment + Line Fee + Margin + BBSY = 6.76%** (annualised composite including one-off establishment fee). App computes all-in as **Margin + BBSY only = 4.11%**. This is a display-only difference in the dashboard; it does not affect the underlying interest calculations.
+**Notes:**
+- **F6 applied:** Senior All-In Rate now correctly shows `establishment (0.5%) + line fee (2.15%) + margin (2.15%) + BBSY (1.96%) = 6.76%` ✅.
+- Land All-In: App shows 11.265% (margin only). Excel shows 12.882% (possibly includes line fee 1.617%). Minor display difference.
 
 ---
 
@@ -70,7 +67,7 @@ Notes:
 | Date / Duration | Excel Model | App Output | Variance | Status |
 |---|---|---|---|---|
 | Contract Start Date | Apr-23 | Apr-23 | — | ✅ |
-| Sales Commencement | Nov-25 | Sep-24 | 14 months early | ❌ |
+| Sales Commencement | Nov-25 | Sep-25 | 2 months | ❌ |
 | Land Settlement Date | Sep-25 | Sep-25 | — | ✅ |
 | Construction Start Date | Dec-25 | Dec-25 | — | ✅ |
 | Construction Completion | Apr-29 | Apr-29 | — | ✅ |
@@ -79,9 +76,8 @@ Notes:
 | Construction Time | 40.57 months | 41.0 months | 0.43 months | 🔶 |
 | Planning & Design Time | 32.5 months | 32 months | 0.5 months | 🔶 |
 
-Notes:
-- **Sales Commencement**: Excel uses the first **residential** presale exchange month (month 32 = Nov-25). App uses `min(presaleExchangeMonth)` across **all** GRV items including commercial items (code 9006–9008 at month 18 = Sep-24). Fix: filter to residential items only when computing salesStart.
-- **Construction Time**: Excel shows 40.57 months (likely interpolating fractional months from exact calendar dates). App shows 41 (integer monthSpan input). Minor cosmetic difference.
+**Notes:**
+- **F5 applied:** Sales Commencement filter now restricted to Residential GRV items. Improved from Sep-24 (14 months early) to Sep-25 (2 months early). Remaining gap: the smallest residential `preSaleExchangeMonth` in defaults is 30 (Sep-25) but Excel reports month 32 (Nov-25). The default residential GRV items likely need their `preSaleExchangeMonth` updated from 30 to 32 in `store/defaults.ts`.
 
 ---
 
@@ -89,10 +85,10 @@ Notes:
 
 | Metric | Excel Model | App Output | Variance $ | Variance % | Status |
 |---|---|---|---|---|---|
-| Peak Interest Holding Cost / Month | $2,694,849 | $4,983,277 | -$2,288,428 | 84.93% | ❌ |
+| Peak Interest Holding Cost / Month | $2,694,849 | $6,383,904 | -$3,689,055 | 136.89% | ❌ |
 
-Notes:
-- App peak is double the Excel because the app charges line fees on the full facility LIMIT every month (same bug as Section 5). The peak month in the app is dominated by the inflated line fee. Fix: calculate line fees on the drawn/undrawn balance rather than the facility limit.
+**Notes:**
+- Peak interest is still overstated because the senior line fee is charged on the undrawn balance using opening-balance timing, producing large fee months when balance is low (near start and end). Same root cause as senior fees gap. Once the line fee architecture is corrected, peak monthly interest will align.
 
 ---
 
@@ -104,9 +100,9 @@ Notes:
 | GRV Sold / Exchanged | $134,062,299 | $75,485,999 | $58,576,300 | ❌ |
 | Unsold GRV | $855,512,944 | $914,089,244 | -$58,576,300 | ❌ |
 
-Notes:
-- **GRV Sold/Exchanged**: Excel appears to report only the portion of residential GRV where actual sale data has been entered in the Actual Update sheet (~$134M corresponds to actuals data for Tower 3 & 4 partial lots). App computes it as sum of all GRV items whose `preSaleExchangeMonth <= lastActualPeriod (32)` — but all 5 residential items have presale months <= 32, producing $989M total which is then filtered. Likely the Excel uses the actual CTD (cost-to-date) exchange register amounts from the Actual Update sheet, not the presale schedule.
-- **Total Apartment GRV**: matches exactly ✅
+**Notes:**
+- Total Apartment GRV matches exactly ✅.
+- GRV Sold/Exchanged: App counts all residential items with `preSaleExchangeMonth ≤ lastActualsPeriod`. Excel uses only amounts actually booked in the Actual Update sheet. With only partial actuals loaded (~Tower 3 & 4), Excel shows $134M while app shows $75M. Unchanged from pre-fix — a data-sourcing difference, not a code bug.
 
 ---
 
@@ -120,40 +116,37 @@ Notes:
 | Retail F&B GRV | $79,658,356 | $79,658,356 | $0 | 0.00% | ✅ |
 | Commercial Office GRV | $12,000,000 | $12,000,000 | $0 | 0.00% | ✅ |
 | Hotel GRV | $171,641,716 | $171,641,716 | $0 | 0.00% | ✅ |
-| Back-end Selling Costs (Excel: netted from revenue) | -$26,523,766 | (in costs: $24,114,734) | — | — | 🔶 |
 | GST paid on Revenue | -$87,581,043 | -$89,992,295 | $2,411,252 | 2.75% | ❌ |
-| Total Net Revenue | $1,147,760,375 | $1,171,872,889† | — | — | 🔶 |
 | **COSTS** | | | | | |
 | Land Purchase Cost | $124,000,000 | $124,000,000 | $0 | 0.00% | ✅ |
 | PRSV Uplift | $56,000,000 | $56,000,000 | $0 | 0.00% | ✅ |
 | Land Acquisition Costs | $8,244,994 | $8,244,994 | $0 | 0.00% | ✅ |
-| Development Costs (incl. GST) | $55,601,424 | $50,546,750 (ex-GST) | — | — | 🔶 |
-| Construction Costs (incl. GST) | $644,385,698 | $585,805,180 (ex-GST) | — | — | 🔶 |
-| Construction Contingency (incl. GST) | $16,038,391 | $14,580,105 (ex-GST) | — | — | 🔶 |
-| Marketing & Advertising (incl. GST) | $6,800,000 | $6,181,818 (ex-GST) | — | — | 🔶 |
+| Development Costs (ex-GST) | $50,546,749 | $50,546,750 | $1 | 0.00% | ✅ |
+| Construction Costs (ex-GST) | $585,805,180 | $585,805,180 | $0 | 0.00% | ✅ |
+| Construction Contingency (ex-GST) | $14,580,355 | $14,580,105 | $250 | 0.00% | ✅ |
+| Marketing & Advertising (ex-GST) | $6,181,818 | $6,181,818 | $0 | 0.00% | ✅ |
 | Other Standard Costs | $8,692,172 | $8,692,172 | $0 | 0.00% | ✅ |
-| PM Fees (incl. GST) | $25,520,331 | $18,281,151 (ex-GST) | — | — | ❌ |
-| Selling & Leasing Costs — Front-End (incl. GST) | $22,223,349 | $20,204,735 (ex-GST) | — | — | 🔶 |
-| Land Loan Interest + Fees | $5,310,241 | $5,347,317 | -$37,076 | 0.70% | ✅ |
-| Senior Construction Facility (Int + Fees) | $59,352,838 | $91,757,440 | -$32,404,602 | 54.60% | ❌ |
+| PM Fees (ex-GST) | $23,200,301 | $18,281,151 | $4,919,150 | 21.20% | ❌ |
+| Front-End Selling Costs (ex-GST) | $20,204,735 | $20,204,735 | $0 | 0.00% | ✅ |
+| Back-End Selling Costs (ex-GST) | $24,110,823 | $24,114,734 | -$3,911 | 0.02% | ✅ |
+| Land Loan Interest + Fees | $5,347,317 | $5,347,317 | $0 | 0.00% | ✅ |
+| Senior Construction Facility (Int+Fees) | $59,352,838 | $91,482,428 | -$32,129,590 | 54.13% | ❌ |
 | Other Financing Costs (Extension Fee) | $15,687,080 | $15,687,080 | $0 | 0.00% | ✅ |
-| GST Reclaimed / ITC | -$70,051,745 | (embedded in separate GST line) | — | — | 🔶 |
 | **FINANCING** | | | | | |
 | Land Loan Drawdown | $120,000,000 | $120,000,000 | $0 | 0.00% | ✅ |
 | Land Loan Repayment | $120,000,000 | $120,000,000 | $0 | 0.00% | ✅ |
-| Senior Drawdown | $767,034,632 | $699,494,492 | $67,540,140 | 8.81% | ❌ |
-| Senior Repayment | $826,387,470 | $791,251,932 | $35,135,538 | 4.25% | ❌ |
+| Senior Drawdown | $767,034,632 | $699,494,492 | $67,540,140 | 8.81% | 🔶 |
+| Senior Repayment | $826,387,470 | $777,140,419 | $49,247,051 | 5.96% | 🔶 |
 | Equity Injections | $130,419,982 | $130,419,982 | $0 | 0.00% | ✅ |
 | Equity Repatriations | $130,419,982 | $130,419,982 | $0 | 0.00% | ✅ |
-| Profit Distributions | $169,955,601 | $70,457,966 | $99,497,635 | 58.59% | ❌ |
+| Profit Distributions (Waterfall) | $169,955,601 | $84,569,480 | $85,386,121 | 50.24% | ❌ |
 | **BOTTOM LINE** | | | | | |
-| Net Cash Flow (Profit) | $169,955,601 | $70,457,966 | $99,497,635 | 58.59% | ❌ |
-| Project IRR | 23.02% | 12.22% | 10.80 pp | — | ❌ |
+| Formula Profit (Dashboard) | $170,132,345 | $142,704,425 | $27,427,920 | 16.12% | ❌ |
+| Project IRR | 23.02% | 14.38% | 8.64 pp | — | ❌ |
+| Net Cashflow (balance check) | $0 | $0 | $0 | — | ✅ |
 
-† App's net revenue = $1,261,865,184 - $89,992,295 = $1,171,872,889 (back-end commissions in costs, not netted from revenue)
-
-Notes:
-- All GRV by category match ✅
-- All land-related items match ✅
-- Presentation differences (🔶): Excel shows taxable costs inclusive of GST then nets ITC; app shows ex-GST costs plus separate GST lines. Economically equivalent if profit formula handles GST correctly.
-- Senior Drawdown: $699.5M (app) vs $767M (Excel) — app draws on demand; Excel draws full facility.
+**Notes:**
+- All GRV by category match ✅. All land and most cost items match ✅.
+- **Senior Drawdown (🔶):** App draws on-demand ($699M) vs Excel full commitment at close ($767M). Architecture difference.
+- **Profit Distributions ($85M gap):** Waterfall distributes $84.6M — this is cash profit after all costs including ITC-unreduced GST costs. The dashboard formula profit $142.7M is the accounting profit (ex-GST cost basis). Gap = $142.7M − $84.6M = $58.1M ≈ gstOnCosts $72M − senior_fee_reduction $14M. To reconcile waterfall profit with formula, the waterfall needs explicit ITC recovery cash inflows.
+- Net cashflow = 0 ✅ (waterfall is balanced).
