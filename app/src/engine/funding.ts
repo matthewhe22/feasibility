@@ -130,9 +130,6 @@ export function solveFunding(
   let prevMezzFinCosts = 0;
   let prevSenior2FinCosts = 0;
   let prevSenior3FinCosts = 0;
-  let prevPeakSnrBalance = 0;
-  let prevPeakSnr2Balance = 0;
-  let prevPeakSnr3Balance = 0;
   let result: FundingResult = createEmptyResult(n);
 
   for (let iter = 0; iter < maxIterations; iter++) {
@@ -143,7 +140,6 @@ export function solveFunding(
     result = runFundingWaterfall(
       periods, monthlyCostsExcFinance, monthlyRevenue, _monthlyGSTNet, gstOnRevenue,
       inputs, tdc, daysPerYear,
-      prevPeakSnrBalance, prevPeakSnr2Balance, prevPeakSnr3Balance,
     );
 
     const newSeniorFinCosts = result.totalSeniorInterest + result.totalSeniorFees
@@ -166,9 +162,6 @@ export function solveFunding(
     prevMezzFinCosts    = newMezzFinCosts;
     prevSenior2FinCosts = newSenior2FinCosts;
     prevSenior3FinCosts = newSenior3FinCosts;
-    prevPeakSnrBalance  = result.seniorFacilitySize;
-    prevPeakSnr2Balance = result.senior2FacilitySize;
-    prevPeakSnr3Balance = result.senior3FacilitySize;
   }
 
   // Apply financing actuals overlay (post-convergence, does not affect waterfall logic).
@@ -252,9 +245,6 @@ function runFundingWaterfall(
   inputs: MainInputs,
   tdc: number,
   daysPerYear: number,
-  peakSnrBalancePrev = 0,
-  peakSnr2BalancePrev = 0,
-  peakSnr3BalancePrev = 0,
 ): FundingResult {
   const n = periods.length;
   const landLoan = inputs.landLoan  ?? EMPTY_FACILITY;
@@ -470,11 +460,10 @@ function runFundingWaterfall(
     }
     if (seniorActive) {
       let periodFees = 0;
-      // Line fee charged on peak drawn balance from the previous solver iteration.
-      // This converges to the project's actual peak commitment, avoiding the
-      // over-count caused by charging on the full facility limit and the under-count
-      // caused by the repay/redraw cycling when using the live undrawn balance.
-      periodFees += periodInterest(peakSnrBalancePrev, senior.lineFeePercent, days, daysPerYear);
+      // Line fee charged on committed-but-undrawn balance (Excel: non-utilisation fee).
+      // Undrawn = facilityLimit − opening drawn balance (before this period's draws).
+      const snrUndrawn = Math.max(0, seniorLimit - snrOpenBalance);
+      periodFees += periodInterest(snrUndrawn, senior.lineFeePercent, days, daysPerYear);
       if (i === snrStartIdx) {
         periodFees += seniorLimit * senior.establishmentFeePercent;
       }
@@ -502,7 +491,8 @@ function runFundingWaterfall(
     }
     if (senior2Active) {
       let periodFees = 0;
-      periodFees += periodInterest(peakSnr2BalancePrev, senior2.lineFeePercent, days, daysPerYear);
+      const snr2Undrawn = Math.max(0, senior2Limit - snr2OpenBalance);
+      periodFees += periodInterest(snr2Undrawn, senior2.lineFeePercent, days, daysPerYear);
       if (i === snr2StartIdx) {
         periodFees += senior2Limit * senior2.establishmentFeePercent;
       }
@@ -530,7 +520,8 @@ function runFundingWaterfall(
     }
     if (senior3Active) {
       let periodFees = 0;
-      periodFees += periodInterest(peakSnr3BalancePrev, senior3.lineFeePercent, days, daysPerYear);
+      const snr3Undrawn = Math.max(0, senior3Limit - snr3OpenBalance);
+      periodFees += periodInterest(snr3Undrawn, senior3.lineFeePercent, days, daysPerYear);
       if (i === snr3StartIdx) {
         periodFees += senior3Limit * senior3.establishmentFeePercent;
       }

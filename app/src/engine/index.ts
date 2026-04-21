@@ -170,7 +170,9 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // Include rental and other income in the waterfall so these cash flows are
   // swept to debt repayment / profit distribution rather than left as a
   // positive residual in the cumulative cashflow.
-  const totalMonthlyRevenue = settlements.map((s, i) => s + rentalInc[i] + otherInc[i]);
+  // Also add ITC recovery (ATO refunds GST paid on costs each period) so the
+  // waterfall treats costs on an ex-GST basis, matching the formula profit calc.
+  const totalMonthlyRevenue = settlements.map((s, i) => s + rentalInc[i] + otherInc[i] + gstOnCosts[i]);
   const funding = solveFunding(
     periods,
     monthlyCostsExcFinance,
@@ -198,6 +200,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     lettingFees: 0,
     otherFinancingCosts: otherFinCosts[i],
     gstOnCosts: gstOnCosts[i],
+    itcRecovery: gstOnCosts[i],
     grvSettlements: settlements[i],
     grvDeposits: deposits[i],
     rentalIncome: rentalInc[i],
@@ -254,6 +257,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     cf.netCashflow =
       // Operating inflows
       cf.grvSettlements + cf.rentalIncome + cf.otherIncome
+      // ITC recovery: ATO refunds GST paid on costs (net effect = $0 on gstOnCosts)
+      + cf.itcRecovery
       // Financing inflows (drawdowns + equity injections)
       + cf.landLoanDrawdown + cf.seniorDrawdown + cf.senior2Drawdown + cf.senior3Drawdown
       + cf.mezzDrawdown + cf.equityInjection
