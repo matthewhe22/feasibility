@@ -11,7 +11,6 @@ const sections = [
   { id: 'interest', label: 'Interest & Fees' },
   { id: 'solver', label: 'Circular Reference Solver' },
   { id: 'kpis', label: 'KPI Calculations' },
-  { id: 'reconciliation', label: 'Reconciliation Status' },
 ];
 
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
@@ -451,40 +450,6 @@ export function ProjectDocs() {
           </SubSection>
         </Section>
 
-        {/* ── Reconciliation ── */}
-        <Section id="reconciliation" title="11. Reconciliation Status">
-          <p>Known gaps between this model and the KK Feaso Model Draft v43 Excel reference:</p>
-          <Table
-            headers={['Metric', 'App', 'Excel', 'Gap', 'Status']}
-            rows={[
-              ['Total Profit', '$169.4M', '$170.1M', '−0.41%', '✅ Within tolerance'],
-              ['Senior Interest', '$30.2M', '$29.9M', '+1.3%', '✅ Within tolerance'],
-              ['Senior Fees', '$34.5M', '$29.5M', '+17.0%', '❌ Peak-debt line fee vs Excel base'],
-              ['PM Fees', '$18.3M', '$23.2M', '−21.2%', '❌ GAP B — narrow vs GST+finance base'],
-              ['IRR (waterfall)', '25.62%', '23.02%', '+2.6 pp', '❌ Timing difference'],
-              ['Cash-on-Cash', '2.299×', '2.303×', '−0.2%', '✅ Within tolerance'],
-              ['Equity In/Out', '$130.4M', '$130.4M', '0%', '✅ Exact match'],
-              ['Profit Waterfall', '$169.4M', '$170.0M', '−0.35%', '✅ Within tolerance'],
-              ['Net Cashflow', '≈ $0', '≈ $0', '—', '✅ Balanced'],
-            ]}
-          />
-          <SubSection title="Main profit variance drivers">
-            <Table
-              headers={['Driver', 'Direction', 'Impact on profit']}
-              rows={[
-                ['Senior fees (peak-debt line fee vs Excel effective base)', 'App over by $5.0M', '−$5.0M'],
-                ['PM fees (narrow base vs GST+finance inclusive base)', 'App under by $4.9M', '+$4.9M'],
-                ['Senior interest (on-demand cycling)', 'App over by $0.4M', '−$0.4M'],
-                ['GST on revenue (margin scheme minor diff)', 'App over by $2.4M', '−$2.4M'],
-                ['Unexplained residual (settlement timing / rounding)', '—', '+$2.2M'],
-                ['Net explained gap', '—', '−$0.7M (−0.41%)'],
-              ]}
-            />
-          </SubSection>
-          <InfoBox>
-            The Checks tab provides live reconciliation of net cashflow balance, GRV totals, debt balances and cost matching against the current calculation run.
-          </InfoBox>
-        </Section>
       </main>
     </div>
   );
