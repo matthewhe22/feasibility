@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   createProject,
   saveProject,
+  renameProject,
   loadProject,
   listProjects,
   deleteProject,
@@ -54,7 +55,10 @@ export function ProjectManager({ onClose, onLoad }: Props) {
     setBusy(true);
     try {
       if (currentId !== null) {
-        await saveProject(currentId, admin, inputs, dashboardData);
+        await Promise.all([
+          saveProject(currentId, admin, inputs, dashboardData),
+          renameProject(currentId, saveName.trim(), saveDesc.trim()),
+        ]);
         setMsg('Project updated.');
       } else {
         const id = await createProject(saveName.trim(), saveDesc.trim(), admin, inputs, dashboardData);
