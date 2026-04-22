@@ -97,6 +97,39 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
     ],
   },
   {
+    header: 'ADDITIONAL LOAN #1',
+    headerBg: 'bg-indigo-700 text-white',
+    rows: [
+      { label: 'Addl #1 Drawdown',  getValue: c => c.addl1Drawdown },
+      { label: 'Addl #1 Repayment', getValue: c => c.addl1Repayment },
+      { label: 'Addl #1 Interest',  getValue: c => c.addl1Interest },
+      { label: 'Addl #1 Fees',      getValue: c => c.addl1Fees },
+      { label: 'Addl #1 Balance',   getValue: c => c.addl1Balance, bold: true, bg: 'bg-indigo-50' },
+    ],
+  },
+  {
+    header: 'ADDITIONAL LOAN #2',
+    headerBg: 'bg-indigo-600 text-white',
+    rows: [
+      { label: 'Addl #2 Drawdown',  getValue: c => c.addl2Drawdown },
+      { label: 'Addl #2 Repayment', getValue: c => c.addl2Repayment },
+      { label: 'Addl #2 Interest',  getValue: c => c.addl2Interest },
+      { label: 'Addl #2 Fees',      getValue: c => c.addl2Fees },
+      { label: 'Addl #2 Balance',   getValue: c => c.addl2Balance, bold: true, bg: 'bg-indigo-50' },
+    ],
+  },
+  {
+    header: 'ADDITIONAL LOAN #3',
+    headerBg: 'bg-indigo-500 text-white',
+    rows: [
+      { label: 'Addl #3 Drawdown',  getValue: c => c.addl3Drawdown },
+      { label: 'Addl #3 Repayment', getValue: c => c.addl3Repayment },
+      { label: 'Addl #3 Interest',  getValue: c => c.addl3Interest },
+      { label: 'Addl #3 Fees',      getValue: c => c.addl3Fees },
+      { label: 'Addl #3 Balance',   getValue: c => c.addl3Balance, bold: true, bg: 'bg-indigo-50' },
+    ],
+  },
+  {
     header: 'LAND LOAN',
     headerBg: 'bg-orange-700 text-white',
     rows: [

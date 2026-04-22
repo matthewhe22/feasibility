@@ -226,6 +226,18 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     mezzRepayment: funding.mezzRepayments[i],
     mezzInterest: funding.mezzInterest[i],
     mezzFees: funding.mezzFees[i],
+    addl1Drawdown: funding.addl1Drawdowns[i],
+    addl1Repayment: funding.addl1Repayments[i],
+    addl1Interest: funding.addl1Interest[i],
+    addl1Fees: funding.addl1Fees[i],
+    addl2Drawdown: funding.addl2Drawdowns[i],
+    addl2Repayment: funding.addl2Repayments[i],
+    addl2Interest: funding.addl2Interest[i],
+    addl2Fees: funding.addl2Fees[i],
+    addl3Drawdown: funding.addl3Drawdowns[i],
+    addl3Repayment: funding.addl3Repayments[i],
+    addl3Interest: funding.addl3Interest[i],
+    addl3Fees: funding.addl3Fees[i],
     equityInjection: funding.equityInjections[i],
     equityRepatriation: funding.equityRepatriations[i],
     profitDistribution: funding.profitDistributions[i],
@@ -234,6 +246,9 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     senior2Balance: funding.senior2Balance[i],
     senior3Balance: funding.senior3Balance[i],
     mezzBalance: funding.mezzBalance[i],
+    addl1Balance: funding.addl1Balance[i],
+    addl2Balance: funding.addl2Balance[i],
+    addl3Balance: funding.addl3Balance[i],
     equityBalance: 0,
     netCashflow: 0,
     cumulativeCashflow: 0,
@@ -243,10 +258,13 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // and are NOT cash outflows in the period they accrue.  They inflate the balance
   // which is then swept out through repayments when revenue arrives, so they must
   // be excluded from the net cashflow formula to preserve net = 0 each period.
-  const seniorCapitalised  = inputs.seniorFacility?.isCapitalised  ?? false;
-  const senior2Capitalised = inputs.seniorFacility2?.isCapitalised ?? false;
-  const senior3Capitalised = inputs.seniorFacility3?.isCapitalised ?? false;
-  const mezzCapitalised    = inputs.mezzanine?.isCapitalised       ?? false;
+  const seniorCapitalised  = inputs.seniorFacility?.isCapitalised   ?? false;
+  const senior2Capitalised = inputs.seniorFacility2?.isCapitalised  ?? false;
+  const senior3Capitalised = inputs.seniorFacility3?.isCapitalised  ?? false;
+  const mezzCapitalised    = inputs.mezzanine?.isCapitalised        ?? false;
+  const addl1Capitalised   = inputs.additionalLoan1?.isCapitalised  ?? false;
+  const addl2Capitalised   = inputs.additionalLoan2?.isCapitalised  ?? false;
+  const addl3Capitalised   = inputs.additionalLoan3?.isCapitalised  ?? false;
 
   // Calculate net cashflow — includes all cash financing flows so that it represents
   // the true change in the project bank account each period.
@@ -261,7 +279,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       + cf.itcRecovery
       // Financing inflows (drawdowns + equity injections)
       + cf.landLoanDrawdown + cf.seniorDrawdown + cf.senior2Drawdown + cf.senior3Drawdown
-      + cf.mezzDrawdown + cf.equityInjection
+      + cf.mezzDrawdown + cf.addl1Drawdown + cf.addl2Drawdown + cf.addl3Drawdown
+      + cf.equityInjection
       // Operating costs (base costs + GST paid to vendors + GST remitted to ATO)
       - cf.landCosts - cf.acquisitionCosts - cf.developmentCosts
       - cf.constructionCosts - cf.contingency - cf.marketingCosts
@@ -275,9 +294,13 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       - (senior2Capitalised ? 0 : cf.senior2Interest + cf.senior2Fees)
       - (senior3Capitalised ? 0 : cf.senior3Interest + cf.senior3Fees)
       - (mezzCapitalised    ? 0 : cf.mezzInterest    + cf.mezzFees)
+      - (addl1Capitalised   ? 0 : cf.addl1Interest  + cf.addl1Fees)
+      - (addl2Capitalised   ? 0 : cf.addl2Interest  + cf.addl2Fees)
+      - (addl3Capitalised   ? 0 : cf.addl3Interest  + cf.addl3Fees)
       // Financing outflows (principal repayments + equity returns)
       - cf.landLoanRepayment - cf.seniorRepayment - cf.senior2Repayment - cf.senior3Repayment
-      - cf.mezzRepayment - cf.equityRepatriation - cf.profitDistribution;
+      - cf.mezzRepayment - cf.addl1Repayment - cf.addl2Repayment - cf.addl3Repayment
+      - cf.equityRepatriation - cf.profitDistribution;
     cumCF += cf.netCashflow;
     cf.cumulativeCashflow = cumCF;
   }
@@ -309,6 +332,9 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
                               + funding.totalSenior3Interest + funding.totalSenior3Fees;
   const totalLandLoanFinCosts = funding.totalLandLoanInterest + funding.totalLandLoanFees;
   const totalMezzFinCosts     = funding.totalMezzInterest + funding.totalMezzFees;
+  const totalAddlFinCosts     = funding.totalAddl1Interest + funding.totalAddl1Fees
+                              + funding.totalAddl2Interest + funding.totalAddl2Fees
+                              + funding.totalAddl3Interest + funding.totalAddl3Fees;
 
   // Standard costs = dev costs + other std
   const standardCosts = totalDevCosts + totalOtherStd;
@@ -316,7 +342,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // totalCost excludes GST on costs (recovered as ITC) and excludes GST on revenue
   // (deducted separately in totalProfit below, matching Excel's approach).
   const totalCost = totalLand + totalStampDuty + totalBuildCosts + totalContingency +
-    totalSeniorFinCosts + totalLandLoanFinCosts + totalMezzFinCosts + totalOtherFin +
+    totalSeniorFinCosts + totalLandLoanFinCosts + totalMezzFinCosts + totalAddlFinCosts + totalOtherFin +
     standardCosts + totalMarketing + commissions.total + totalPMFees;
 
   const totalRentalIncome = sum(rentalInc);
@@ -376,27 +402,22 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const equityCFs = cashflows.map(cf => -cf.equityInjection + cf.equityRepatriation + cf.profitDistribution);
   const irr = calculateIRR(equityCFs, 0.015);
 
-  // Per-entity IRR: split each period's injection/repatriation/profit by contribution/share
-  const jvContribPct  = inputs.equityJV?.equityContribution  ?? 0;
-  const jvProfitPct   = inputs.equityJV?.profitShare         ?? 0;
-  const devContribPct = inputs.equityKokoda?.equityContribution ?? 1;
-  const devProfitPct  = inputs.equityKokoda?.profitShare        ?? 1;
-
-  const jvIrr = jvContribPct > 0 ? calculateIRR(
-    cashflows.map(cf =>
-      -cf.equityInjection * jvContribPct
-      + cf.equityRepatriation * jvContribPct
-      + cf.profitDistribution * jvProfitPct
+  // Per-entity IRR using actual waterfall cashflows (not proportional estimates)
+  const jvIrr = funding.totalJVEquityInjected > 0 ? calculateIRR(
+    cashflows.map((_, i) =>
+      -funding.equityJVInjections[i]
+      + funding.equityJVRepatriations[i]
+      + funding.jvProfitDistributions[i]
     ), 0.015,
   ) : 0;
 
-  const devIrr = devContribPct > 0 ? calculateIRR(
-    cashflows.map(cf =>
-      -cf.equityInjection * devContribPct
-      + cf.equityRepatriation * devContribPct
-      + cf.profitDistribution * devProfitPct
+  const devIrr = (funding.totalEquityInjected - funding.totalJVEquityInjected) > 0 ? calculateIRR(
+    cashflows.map((_, i) =>
+      -(funding.equityInjections[i]    - funding.equityJVInjections[i])
+      + (funding.equityRepatriations[i] - funding.equityJVRepatriations[i])
+      + (funding.profitDistributions[i] - funding.jvProfitDistributions[i])
     ), 0.015,
-  ) : 0;
+  ) : irr;
 
   // Key dates
   const constructionStart = inputs.constructionCosts[0]?.monthStart || 33;
@@ -565,33 +586,33 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       },
       jvPartner: {
         entity: 'JV Partner',
-        fundingContribPercent: inputs.equityJV?.equityContribution ?? 0,
-        totalEquityContributed: equityContrib * (inputs.equityJV?.equityContribution ?? 0),
+        fundingContribPercent: equityContrib > 0 ? funding.totalJVEquityInjected / equityContrib : 0,
+        totalEquityContributed: funding.totalJVEquityInjected,
         irr: jvIrr,
         equityRepatriation1st: 0,
-        equityRepatriation2nd: equityContrib * (inputs.equityJV?.equityContribution ?? 0),
-        totalEquityRepatriation: equityContrib * (inputs.equityJV?.equityContribution ?? 0),
+        equityRepatriation2nd: sum(funding.equityJVRepatriations),
+        totalEquityRepatriation: sum(funding.equityJVRepatriations),
         establishmentFee: 0,
         couponInterest: 0,
         couponInterestPercent: inputs.equityJV?.interestRate ?? 0,
-        profitShareBalance: totalProfit * (inputs.equityJV?.profitShare ?? 0),
+        profitShareBalance: sum(funding.jvProfitDistributions),
         profitSharePercent: inputs.equityJV?.profitShare ?? 0,
-        totalProfitShare: totalProfit * (inputs.equityJV?.profitShare ?? 0),
+        totalProfitShare: sum(funding.jvProfitDistributions),
       },
       developer: {
         entity: 'Developer',
-        fundingContribPercent: inputs.equityKokoda?.equityContribution ?? 0,
-        totalEquityContributed: equityContrib * (inputs.equityKokoda?.equityContribution ?? 0),
+        fundingContribPercent: equityContrib > 0 ? (equityContrib - funding.totalJVEquityInjected) / equityContrib : 1,
+        totalEquityContributed: equityContrib - funding.totalJVEquityInjected,
         irr: devIrr,
         equityRepatriation1st: 0,
-        equityRepatriation2nd: equityContrib * (inputs.equityKokoda?.equityContribution ?? 0),
-        totalEquityRepatriation: equityContrib * (inputs.equityKokoda?.equityContribution ?? 0),
+        equityRepatriation2nd: sum(funding.equityRepatriations) - sum(funding.equityJVRepatriations),
+        totalEquityRepatriation: sum(funding.equityRepatriations) - sum(funding.equityJVRepatriations),
         establishmentFee: 0,
         couponInterest: loanCouponInterest,
         couponInterestPercent: inputs.equityKokoda?.interestRate ?? 0,
-        profitShareBalance: totalProfit * (inputs.equityKokoda?.profitShare ?? 0),
+        profitShareBalance: sum(funding.profitDistributions) - sum(funding.jvProfitDistributions),
         profitSharePercent: inputs.equityKokoda?.profitShare ?? 0,
-        totalProfitShare: totalProfit * (inputs.equityKokoda?.profitShare ?? 0),
+        totalProfitShare: sum(funding.profitDistributions) - sum(funding.jvProfitDistributions),
       },
     },
     otherIndicators: {

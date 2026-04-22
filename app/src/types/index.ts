@@ -288,6 +288,18 @@ export interface MonthlyCashflow {
   mezzRepayment: number;
   mezzInterest: number;
   mezzFees: number;
+  addl1Drawdown: number;
+  addl1Repayment: number;
+  addl1Interest: number;
+  addl1Fees: number;
+  addl2Drawdown: number;
+  addl2Repayment: number;
+  addl2Interest: number;
+  addl2Fees: number;
+  addl3Drawdown: number;
+  addl3Repayment: number;
+  addl3Interest: number;
+  addl3Fees: number;
   equityInjection: number;
   equityRepatriation: number;
   profitDistribution: number;
@@ -297,6 +309,9 @@ export interface MonthlyCashflow {
   senior2Balance: number;
   senior3Balance: number;
   mezzBalance: number;
+  addl1Balance: number;
+  addl2Balance: number;
+  addl3Balance: number;
   equityBalance: number;
   netCashflow: number;
   cumulativeCashflow: number;
