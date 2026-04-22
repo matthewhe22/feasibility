@@ -372,9 +372,31 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     : 0;
   const roi = totalCost > 0 ? totalProfit / totalCost : 0;
 
-  // IRR - monthly equity cashflows
+  // IRR - total equity cashflows (used for kpis and total equityReturns row)
   const equityCFs = cashflows.map(cf => -cf.equityInjection + cf.equityRepatriation + cf.profitDistribution);
   const irr = calculateIRR(equityCFs, 0.015);
+
+  // Per-entity IRR: split each period's injection/repatriation/profit by contribution/share
+  const jvContribPct  = inputs.equityJV?.equityContribution  ?? 0;
+  const jvProfitPct   = inputs.equityJV?.profitShare         ?? 0;
+  const devContribPct = inputs.equityKokoda?.equityContribution ?? 1;
+  const devProfitPct  = inputs.equityKokoda?.profitShare        ?? 1;
+
+  const jvIrr = jvContribPct > 0 ? calculateIRR(
+    cashflows.map(cf =>
+      -cf.equityInjection * jvContribPct
+      + cf.equityRepatriation * jvContribPct
+      + cf.profitDistribution * jvProfitPct
+    ), 0.015,
+  ) : 0;
+
+  const devIrr = devContribPct > 0 ? calculateIRR(
+    cashflows.map(cf =>
+      -cf.equityInjection * devContribPct
+      + cf.equityRepatriation * devContribPct
+      + cf.profitDistribution * devProfitPct
+    ), 0.015,
+  ) : 0;
 
   // Key dates
   const constructionStart = inputs.constructionCosts[0]?.monthStart || 33;
@@ -545,7 +567,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
         entity: 'JV Partner',
         fundingContribPercent: inputs.equityJV?.equityContribution ?? 0,
         totalEquityContributed: equityContrib * (inputs.equityJV?.equityContribution ?? 0),
-        irr: 0,
+        irr: jvIrr,
         equityRepatriation1st: 0,
         equityRepatriation2nd: equityContrib * (inputs.equityJV?.equityContribution ?? 0),
         totalEquityRepatriation: equityContrib * (inputs.equityJV?.equityContribution ?? 0),
@@ -560,7 +582,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
         entity: 'Developer',
         fundingContribPercent: inputs.equityKokoda?.equityContribution ?? 0,
         totalEquityContributed: equityContrib * (inputs.equityKokoda?.equityContribution ?? 0),
-        irr,
+        irr: devIrr,
         equityRepatriation1st: 0,
         equityRepatriation2nd: equityContrib * (inputs.equityKokoda?.equityContribution ?? 0),
         totalEquityRepatriation: equityContrib * (inputs.equityKokoda?.equityContribution ?? 0),

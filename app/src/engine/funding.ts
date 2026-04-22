@@ -300,8 +300,9 @@ function runFundingWaterfall(
   const equityFixedKokoda = inputs.equityKokoda.fixedAmount;
   const equityFixedJV     = inputs.equityJV.fixedAmount;
   const equityPctKokoda   = inputs.equityKokoda.percentage;
+  const equityPctJV       = inputs.equityJV.percentage;
   const totalCostsExcFin  = sum(monthlyCostsExcFinance);
-  const equityFromPct     = totalCostsExcFin * equityPctKokoda;
+  const equityFromPct     = totalCostsExcFin * (equityPctKokoda + equityPctJV);
   const equityCap = (equityFixedKokoda + equityFixedJV) > 0
     ? (equityFixedKokoda + equityFixedJV)
     : equityFromPct;
