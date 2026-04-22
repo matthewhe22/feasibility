@@ -110,4 +110,7 @@ async function main() {
   console.log(`  IRR:          ${(dashboardData.kpis.irr * 100).toFixed(2)}%`);
 }
 
-main().catch(console.error);
+// Only auto-run when executed directly in Node.js, not when imported in the browser
+if (typeof window === 'undefined') {
+  main().catch(console.error);
+}

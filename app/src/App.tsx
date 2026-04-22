@@ -4,7 +4,8 @@ import { Analytics } from '@vercel/analytics/react';
 declare const __BUILD_TIME__: string;
 import { useStore } from './store/useStore';
 import { runCalculations } from './engine';
-import { saveProject, listProjects } from './db/projectDb';
+import { createProject, saveProject, listProjects } from './db/projectDb';
+import { projectTestAdmin, projectTestInputs } from './utils/createTestProject';
 import { MainInputTab } from './components/inputs/MainInputTab';
 import { InternalDashboard } from './components/dashboards/InternalDashboard';
 import { ExternalDashboard } from './components/dashboards/ExternalDashboard';
@@ -99,6 +100,24 @@ function App() {
     (async () => {
       try {
         const projects = await listProjects();
+
+        // Seed "Project Test" (KK Feaso Model v43 defaults) if not yet in DB
+        const hasTestProject = projects.some(p => p.name === 'Project Test');
+        if (!hasTestProject) {
+          try {
+            const testResult = runCalculations(projectTestAdmin, projectTestInputs);
+            await createProject(
+              'Project Test',
+              'Full sample model from KK Feaso Model Draft v43 — all inputs loaded for reconciliation.',
+              projectTestAdmin,
+              projectTestInputs,
+              testResult,
+            );
+          } catch {
+            // Seeding failed (e.g. DB unavailable) — not critical, continue
+          }
+        }
+
         const demo = projects.find(p => p.name === 'Project Demo 2');
         if (!cancelled && demo?.id != null) {
           setAdmin(demo.admin);
