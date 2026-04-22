@@ -88,6 +88,25 @@ function App() {
   };
 
   useEffect(() => {
+    // Always seed "Project Test" on startup (fire-and-forget; skipped if already exists)
+    (async () => {
+      try {
+        const projects = await listProjects();
+        if (!projects.some(p => p.name === 'Project Test')) {
+          const testResult = runCalculations(projectTestAdmin, projectTestInputs);
+          await createProject(
+            'Project Test',
+            'Full sample model from KK Feaso Model Draft v43 — all inputs loaded for reconciliation.',
+            projectTestAdmin,
+            projectTestInputs,
+            testResult,
+          );
+        }
+      } catch {
+        // Seeding failure is non-critical
+      }
+    })();
+
     // On first load with no active project, try to restore "Project Demo 2"
     // from the database so the user's saved defaults are shown automatically.
     if (currentProjectId !== null) {
@@ -100,23 +119,6 @@ function App() {
     (async () => {
       try {
         const projects = await listProjects();
-
-        // Seed "Project Test" (KK Feaso Model v43 defaults) if not yet in DB
-        const hasTestProject = projects.some(p => p.name === 'Project Test');
-        if (!hasTestProject) {
-          try {
-            const testResult = runCalculations(projectTestAdmin, projectTestInputs);
-            await createProject(
-              'Project Test',
-              'Full sample model from KK Feaso Model Draft v43 — all inputs loaded for reconciliation.',
-              projectTestAdmin,
-              projectTestInputs,
-              testResult,
-            );
-          } catch {
-            // Seeding failed (e.g. DB unavailable) — not critical, continue
-          }
-        }
 
         const demo = projects.find(p => p.name === 'Project Demo 2');
         if (!cancelled && demo?.id != null) {
