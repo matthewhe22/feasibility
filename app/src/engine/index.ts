@@ -160,9 +160,14 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     gstOnCosts[i] += backEndCommByPeriod[i] * gstRate;
   }
 
-  // GST on revenue — margin scheme: deduct the land cost attributable to non-GST
-  // revenue items from the residential GST base.  Deduction = landPurchasePrice ×
-  // (nonGSTGRV / totalGRV), distributed proportionally across GST-inclusive items.
+  // GST on revenue — Division 75 GSTA margin scheme.
+  // The margin = sale price − acquisition cost (GST-exclusive).  GST = margin × 1/11.
+  // Land cost is apportioned to taxable vs input-taxed supplies by their respective
+  // revenue proportions (GSTR 2006/1).  Deduction = landPrice × (nonGSTGRV / totalGRV);
+  // the residual land cost attributable to GST-taxable supplies reduces the margin.
+  // Items with gstIncluded: false are input-taxed or going-concern supplies (no GST collected).
+  // Land purchase cost is treated as GST-exclusive (addGSTOnLandPrice: false) — the
+  // margin scheme means no ITC is claimable on the land acquisition.
   const totalGRVAllItems = inputs.grvItems.reduce((s, g) => s + g.currentSalePrice, 0);
   const totalGSTIncludedGRV = inputs.grvItems
     .filter(g => g.gstIncluded && g.currentSalePrice > 0)
@@ -199,18 +204,21 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   }
 
   // ===== 5. FUNDING & DEBT SOLVING =====
-  // Include rental and other income in the waterfall so these cash flows are
-  // swept to debt repayment / profit distribution rather than left as a
-  // positive residual in the cumulative cashflow.
-  // Also add ITC recovery (ATO refunds GST paid on costs each period) so the
-  // waterfall treats costs on an ex-GST basis, matching the formula profit calc.
-  const totalMonthlyRevenue = settlements.map((s, i) => s + rentalInc[i] + otherInc[i] + gstOnCosts[i]);
+  // ITC recovery: ATO refunds GST paid on costs each BAS cycle.
+  // itcRecoveryLagMonths=0 (default) matches Excel same-period treatment.
+  // Set to 1–3 for realistic quarterly BAS lag in lender-facing models.
+  const itcLag = admin.itcRecoveryLagMonths ?? 0;
+  const totalMonthlyRevenue = settlements.map((s, i) =>
+    s + rentalInc[i] + otherInc[i] + (i >= itcLag ? gstOnCosts[i - itcLag] : 0)
+  );
+
+  const equityDrawdownMode = admin.equityDrawdownMode ?? 'equity-first';
 
   // Two-pass PM fee: preliminary solve estimates finance costs so they can be
   // included in the PM fee base (matching Excel's GST+finance inclusive base).
   const prelimFunding = solveFunding(
     periods, monthlyCostsExcFinance, totalMonthlyRevenue, monthlyGSTNet, gstOnRevenue,
-    inputs, admin.daysPerYear, admin.tolerance,
+    inputs, admin.daysPerYear, admin.tolerance, 50, equityDrawdownMode,
   );
   const prelimFinCosts =
     prelimFunding.totalSeniorInterest  + prelimFunding.totalSeniorFees +
@@ -235,7 +243,9 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     const deltaGST = pmFeeHasGST ? deltaPM * gstRate : 0;
     gstOnCosts[i] += deltaGST;
     monthlyCostsExcFinance[i] += deltaPM + deltaGST;
-    totalMonthlyRevenue[i] += deltaGST; // ITC recovery tracks GST on costs
+    // Apply ITC lag: PM fee GST recovery is shifted by lag months
+    const itcPeriod = i + itcLag;
+    if (itcPeriod < n) totalMonthlyRevenue[itcPeriod] += deltaGST;
   }
 
   const funding = solveFunding(
@@ -247,6 +257,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     inputs,
     admin.daysPerYear,
     admin.tolerance,
+    50,
+    equityDrawdownMode,
   );
 
   // ===== 6. BUILD CASHFLOWS =====

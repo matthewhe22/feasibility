@@ -470,7 +470,7 @@ function GRVTable({ items, onChange }: {
             <th className="px-2 py-1 text-right w-16">Span</th>
             <th className="px-2 py-1 text-right w-16">Settle</th>
             <th className="px-2 py-1 text-right w-16">Span</th>
-            <th className="px-2 py-1 text-center w-14">GST</th>
+            <th className="px-2 py-1 text-center w-20 cursor-help" title="GST Included in sale price? Check for GST-taxable supplies (residential, new commercial property). Uncheck for input-taxed or GST-free supplies (going concern, residential rental). Determines whether the margin scheme deduction applies.">GST Inc.</th>
           </tr>
         </thead>
         <tbody>
@@ -1045,6 +1045,26 @@ export function MainInputTab() {
               onChange={v => setInputs({ preliminary: { ...inputs.preliminary, projectSpanMonths: v } })} />
             <PercentInput label="GST Rate" value={inputs.landPurchase.gstRate}
               onChange={v => setInputs({ landPurchase: { ...inputs.landPurchase, gstRate: v } })} />
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-gray-600 w-40 shrink-0" title="Months between paying GST on costs and receiving the ATO ITC refund via BAS. 0 = same-period (Excel default). Set 1–3 for realistic quarterly BAS lag.">ITC Recovery Lag (months)</span>
+              <input type="number" min={0} max={6}
+                value={admin.itcRecoveryLagMonths ?? 0}
+                onChange={e => setAdmin({ itcRecoveryLagMonths: parseInt(e.target.value) || 0 })}
+                className="w-20 text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
+              />
+              <span className="text-xs text-gray-400">0 = same-period (Excel match)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-gray-600 w-40 shrink-0" title="Equity-first: all equity drawn before any senior debt. Pro-rata: equity and senior drawn simultaneously at a fixed ratio each period.">Equity Drawdown Mode</span>
+              <select
+                value={admin.equityDrawdownMode ?? 'equity-first'}
+                onChange={e => setAdmin({ equityDrawdownMode: e.target.value as 'equity-first' | 'pro-rata' })}
+                className="text-xs bg-yellow-50 border border-gray-300 rounded px-2 py-1"
+              >
+                <option value="equity-first">Equity-First (default)</option>
+                <option value="pro-rata">Pro-Rata (equity:senior concurrent)</option>
+              </select>
+            </div>
           </div>
         </div>
       )}
