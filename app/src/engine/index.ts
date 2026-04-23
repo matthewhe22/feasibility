@@ -159,15 +159,27 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     gstOnCosts[i] += backEndCommByPeriod[i] * gstRate;
   }
 
-  // GST on revenue (residential only)
+  // GST on revenue — margin scheme: deduct the land cost attributable to non-GST
+  // revenue items from the residential GST base.  Deduction = landPurchasePrice ×
+  // (nonGSTGRV / totalGRV), distributed proportionally across GST-inclusive items.
+  const totalGRVAllItems = inputs.grvItems.reduce((s, g) => s + g.currentSalePrice, 0);
+  const totalGSTIncludedGRV = inputs.grvItems
+    .filter(g => g.gstIncluded && g.currentSalePrice > 0)
+    .reduce((s, g) => s + g.currentSalePrice, 0);
+  const nonGSTGRV = totalGRVAllItems - totalGSTIncludedGRV;
+  const marginSchemeDeduction = totalGRVAllItems > 0
+    ? inputs.landPurchase.landPurchasePrice * nonGSTGRV / totalGRVAllItems
+    : 0;
+  const marginSchemeFactor = totalGSTIncludedGRV > 0
+    ? 1 - marginSchemeDeduction / totalGSTIncludedGRV
+    : 1;
+
   for (const item of inputs.grvItems) {
     if (item.gstIncluded && item.currentSalePrice > 0) {
-      const gstAmount = item.currentSalePrice * gstRate / (1 + gstRate);
+      const gstAmount = item.currentSalePrice * gstRate / (1 + gstRate) * marginSchemeFactor;
       const settleSpread = spreadSettlements([item], periods);
       for (let i = 0; i < n; i++) {
-        if (item.currentSalePrice > 0) {
-          gstOnRevenue[i] += settleSpread[i] / item.currentSalePrice * gstAmount;
-        }
+        gstOnRevenue[i] += settleSpread[i] / item.currentSalePrice * gstAmount;
       }
     }
   }
