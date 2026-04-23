@@ -232,7 +232,7 @@ export interface MainInputs {
   grvItems: RevenueLineItem[];
   rentalIncome: RentalIncomeItem[];
   otherIncome: RentalIncomeItem[];
-  equityKokoda: EquityConfig;
+  equityDeveloper: EquityConfig;
   equityJV: EquityConfig;
   equityPreferred: EquityConfig;
   equityAdditional: EquityConfig;

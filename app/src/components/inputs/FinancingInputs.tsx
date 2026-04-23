@@ -149,9 +149,9 @@ export function FinancingInputs() {
           <div>
             <h4 className="text-sm font-bold text-gray-700 mb-2">4.1 Equity</h4>
             <EquitySection
-              title={inputs.equityKokoda.name}
-              config={inputs.equityKokoda}
-              onChange={(c) => setInputs({ equityKokoda: c })}
+              title={inputs.equityDeveloper.name}
+              config={inputs.equityDeveloper}
+              onChange={(c) => setInputs({ equityDeveloper: c })}
             />
             <EquitySection
               title={inputs.equityJV.name}

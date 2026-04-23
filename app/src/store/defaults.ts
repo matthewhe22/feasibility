@@ -199,7 +199,7 @@ export const defaultOtherIncome: RentalIncomeItem[] = [
 ];
 
 // ===== EQUITY =====
-export const defaultEquityKokoda: EquityConfig = {
+export const defaultEquityDeveloper: EquityConfig = {
   name: 'Developer',
   fixedAmount: 130419982,
   percentage: 0.1,

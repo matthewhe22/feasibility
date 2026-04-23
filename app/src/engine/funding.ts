@@ -38,7 +38,7 @@ export function computeDrawdownSequence(inputs: MainInputs): DrawdownSequenceEnt
   const sf2  = inputs.seniorFacility2;
   const sf3  = inputs.seniorFacility3;
   const mz   = inputs.mezzanine;
-  const eq   = inputs.equityKokoda;
+  const eq   = inputs.equityDeveloper;
   const eqJV = inputs.equityJV;
   const a1   = inputs.additionalLoan1;
   const a2   = inputs.additionalLoan2;
@@ -345,9 +345,9 @@ function runFundingWaterfall(
 
   // ===== Equity caps (per entity) =====
   const totalCostsExcFin  = sum(monthlyCostsExcFinance);
-  const equityFixedKokoda = inputs.equityKokoda.fixedAmount;
-  const equityPctKokoda   = inputs.equityKokoda.percentage;
-  const kokodaCap = equityFixedKokoda > 0 ? equityFixedKokoda : totalCostsExcFin * equityPctKokoda;
+  const equityFixedDeveloper = inputs.equityDeveloper.fixedAmount;
+  const equityPctDeveloper   = inputs.equityDeveloper.percentage;
+  const developerCap = equityFixedDeveloper > 0 ? equityFixedDeveloper : totalCostsExcFin * equityPctDeveloper;
 
   const isJVActive = inputs.equityJV && (inputs.equityJV.fixedAmount > 0 || inputs.equityJV.equityContribution > 0);
   const equityFixedJV = inputs.equityJV?.fixedAmount ?? 0;
@@ -355,7 +355,7 @@ function runFundingWaterfall(
   const jvCap = isJVActive ? (equityFixedJV > 0 ? equityFixedJV : totalCostsExcFin * equityPctJV) : 0;
 
   // Total cap (used for excess-equity repatriation at senior start)
-  const totalEquityCap = kokodaCap + jvCap;
+  const totalEquityCap = developerCap + jvCap;
 
   // ===== Additional loan limits =====
   const hasAddl1 = addl1.facilityLimit > 0 && addl1.startMonth > 0;
@@ -785,7 +785,7 @@ function runFundingWaterfall(
         if (draw > 0) {
           snrDrawdowns[i]    += draw;
           snrRunningBalance  += draw;
-          // Split repatriation pro-rata between JV and Kokoda
+          // Split repatriation pro-rata between JV and Developer
           const jvFrac = cumulativeEquity > 0 ? jvCumulative / cumulativeEquity : 0;
           const jvRep  = draw * jvFrac;
           jvRepatriations[i] += jvRep;
@@ -804,9 +804,9 @@ function runFundingWaterfall(
     // ── 9. Gap fill ────────────────────────────────────────────────────────────
     if (bankBalance < 0) {
       if (equityDrawdownMode === 'pro-rata' && seniorDrawActive) {
-        // Pro-rata: split the gap proportionally between Kokoda equity and senior each period
+        // Pro-rata: split the gap proportionally between Developer equity and senior each period
         const gap = -bankBalance;
-        const eqAvail  = Math.max(0, kokodaCap - (cumulativeEquity - jvCumulative));
+        const eqAvail  = Math.max(0, developerCap - (cumulativeEquity - jvCumulative));
         const snrAvail = Math.max(0, seniorLimit - snrRunningBalance);
         const totalAvail = eqAvail + snrAvail;
         if (totalAvail > 0) {
@@ -883,7 +883,7 @@ function runFundingWaterfall(
               bankBalance       += draw;
             }
           } else if (entry.type === 'equity') {
-            const avail = Math.max(0, kokodaCap - (cumulativeEquity - jvCumulative));
+            const avail = Math.max(0, developerCap - (cumulativeEquity - jvCumulative));
             if (avail > 0) {
               const draw       = Math.min(-bankBalance, avail);
               eqInjections[i] += draw;
@@ -928,14 +928,14 @@ function runFundingWaterfall(
         }
       }
 
-      // Equity backstop — developer (Kokoda) is always the equity of last resort
+      // Equity backstop — developer (Developer) is always the equity of last resort
       if (bankBalance < 0) {
         const backstop = -bankBalance;
-        const kokodaUsed = cumulativeEquity - jvCumulative;
-        const kokodaRemaining = Math.max(0, kokodaCap - kokodaUsed);
-        if (backstop > kokodaRemaining + 1) {
+        const developerUsed = cumulativeEquity - jvCumulative;
+        const developerRemaining = Math.max(0, developerCap - developerUsed);
+        if (backstop > developerRemaining + 1) {
           _fundingWarnings.push(
-            `Period ${i + 1}: equity backstop $${Math.round(backstop).toLocaleString()} exceeds remaining Kokoda cap $${Math.round(kokodaRemaining).toLocaleString()} — project is underfunded`
+            `Period ${i + 1}: equity backstop $${Math.round(backstop).toLocaleString()} exceeds remaining Developer cap $${Math.round(developerRemaining).toLocaleString()} — project is underfunded`
           );
         }
         eqInjections[i] += backstop;
@@ -994,7 +994,7 @@ function runFundingWaterfall(
           heldBankBalance += bankBalance;
           bankBalance      = 0;
         } else {
-          // Equity repatriation — pro-rata between JV and Kokoda based on outstanding
+          // Equity repatriation — pro-rata between JV and Developer based on outstanding
           const jvOutstanding     = Math.max(0, jvCumulative - totalJVRepatriated);
           const totalOutstanding  = Math.max(0, cumulativeEquity - totalEqRepatriated);
           if (totalOutstanding > 0) {
