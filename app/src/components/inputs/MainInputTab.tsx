@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useStore } from '../../store/useStore';
+import { saveBrandingSettings } from '../../db/projectDb';
 import { CurrencyInput, PercentInput, NumberInput, TextInput, SectionHeader } from '../common/FormFields';
 import { FinancingInputs } from './FinancingInputs';
 import { formatCurrency, excelDateToDate, addMonths, endOfMonth } from '../../utils';
@@ -1452,6 +1453,19 @@ export function MainInputTab() {
 // ── Branding Section ──────────────────────────────────────────────────────────
 function BrandingSection() {
   const { admin, setAdmin } = useStore();
+  const [saving, setSaving] = useState(false);
+
+  const applyBranding = (patch: Partial<typeof admin>) => {
+    const next = { ...admin, ...patch };
+    setAdmin(patch);
+    setSaving(true);
+    saveBrandingSettings({
+      appName: next.appName,
+      logoDataUrl: next.logoDataUrl,
+      faviconDataUrl: next.faviconDataUrl,
+      appBgColor: next.appBgColor,
+    }).finally(() => setSaving(false));
+  };
 
   const handleFileUpload = (
     e: React.ChangeEvent<HTMLInputElement>,
@@ -1462,7 +1476,7 @@ function BrandingSection() {
     const reader = new FileReader();
     reader.onload = ev => {
       const dataUrl = ev.target?.result as string;
-      setAdmin({ [field]: dataUrl });
+      applyBranding({ [field]: dataUrl });
     };
     reader.readAsDataURL(file);
     e.target.value = '';
@@ -1473,15 +1487,20 @@ function BrandingSection() {
   return (
     <div>
       <SectionHeader number="6" title="Branding & Appearance">
+        <span className={`text-xs mr-3 transition-opacity ${saving ? 'opacity-100 text-blue-600' : 'opacity-0'}`}>Saving…</span>
         <button
           onClick={() => {
             if (!confirm('Reset all branding to defaults?')) return;
-            setAdmin({ appName: undefined, logoDataUrl: undefined, faviconDataUrl: undefined, appBgColor: undefined });
+            applyBranding({ appName: undefined, logoDataUrl: undefined, faviconDataUrl: undefined, appBgColor: undefined });
           }}
           className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
         >Reset to Defaults</button>
       </SectionHeader>
       <div className="bg-white border border-t-0 border-gray-200 rounded-b p-4 space-y-5">
+
+        <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+          Branding is saved globally to the database — changes are visible from any device immediately.
+        </p>
 
         {/* App name */}
         <div>
@@ -1490,7 +1509,7 @@ function BrandingSection() {
             type="text"
             value={admin.appName ?? ''}
             placeholder="Project Development Feasibility Model"
-            onChange={e => setAdmin({ appName: e.target.value || undefined })}
+            onChange={e => applyBranding({ appName: e.target.value || undefined })}
             className="w-full max-w-sm text-sm bg-yellow-50 border border-gray-300 rounded px-2 py-1.5"
           />
           <p className="text-xs text-gray-400 mt-1">Shown in the header and browser tab. Leave blank for the default title.</p>
@@ -1503,18 +1522,18 @@ function BrandingSection() {
             <input
               type="color"
               value={admin.appBgColor ?? DEFAULT_BG}
-              onChange={e => setAdmin({ appBgColor: e.target.value })}
+              onChange={e => applyBranding({ appBgColor: e.target.value })}
               className="h-9 w-16 rounded border border-gray-300 cursor-pointer"
             />
             <input
               type="text"
               value={admin.appBgColor ?? DEFAULT_BG}
               placeholder={DEFAULT_BG}
-              onChange={e => setAdmin({ appBgColor: e.target.value || undefined })}
+              onChange={e => applyBranding({ appBgColor: e.target.value || undefined })}
               className="w-28 text-sm bg-yellow-50 border border-gray-300 rounded px-2 py-1.5 font-mono"
             />
             <button
-              onClick={() => setAdmin({ appBgColor: undefined })}
+              onClick={() => applyBranding({ appBgColor: undefined })}
               className="text-xs text-gray-500 underline"
             >Reset</button>
           </div>
@@ -1528,7 +1547,7 @@ function BrandingSection() {
               <div className="flex flex-col items-center gap-1">
                 <img src={admin.logoDataUrl} alt="Logo preview" className="h-16 w-auto object-contain border border-gray-200 rounded p-1 bg-gray-800" />
                 <button
-                  onClick={() => setAdmin({ logoDataUrl: undefined })}
+                  onClick={() => applyBranding({ logoDataUrl: undefined })}
                   className="text-xs text-red-500 underline"
                 >Remove</button>
               </div>
@@ -1560,7 +1579,7 @@ function BrandingSection() {
               <div className="flex flex-col items-center gap-1">
                 <img src={admin.faviconDataUrl} alt="Favicon preview" className="h-10 w-10 object-contain border border-gray-200 rounded p-1" />
                 <button
-                  onClick={() => setAdmin({ faviconDataUrl: undefined })}
+                  onClick={() => applyBranding({ faviconDataUrl: undefined })}
                   className="text-xs text-red-500 underline"
                 >Remove</button>
               </div>

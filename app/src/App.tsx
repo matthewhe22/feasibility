@@ -4,7 +4,7 @@ import { Analytics } from '@vercel/analytics/react';
 declare const __BUILD_TIME__: string;
 import { useStore } from './store/useStore';
 import { runCalculations } from './engine';
-import { createProject, saveProject, listProjects } from './db/projectDb';
+import { createProject, saveProject, listProjects, loadBrandingSettings } from './db/projectDb';
 import { projectTestAdmin, projectTestInputs } from './utils/createTestProject';
 import { MainInputTab } from './components/inputs/MainInputTab';
 import { InternalDashboard } from './components/dashboards/InternalDashboard';
@@ -90,6 +90,11 @@ function App() {
   };
 
   useEffect(() => {
+    // Load global branding from DB first so it appears before any project loads
+    loadBrandingSettings().then(b => {
+      if (b) setAdmin(b);
+    }).catch(() => {/* non-critical */});
+
     // Always seed "Project Test" on startup (fire-and-forget; skipped if already exists)
     (async () => {
       try {

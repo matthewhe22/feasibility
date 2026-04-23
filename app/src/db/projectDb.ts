@@ -28,6 +28,20 @@ export interface ProjectRecord {
   dashboardData: DashboardData | null;
 }
 
+// ── Global branding ─────────────────────────────────────────────────────────
+// Branding settings are stored as a sentinel row in the projects table so that
+// they survive across devices without requiring a schema change.  The sentinel
+// row is invisible to the rest of the app (filtered out of listProjects).
+
+export interface BrandingSettings {
+  appName?: string;
+  logoDataUrl?: string;
+  faviconDataUrl?: string;
+  appBgColor?: string;
+}
+
+const BRANDING_SENTINEL = '__global_branding__';
+
 // ── IndexedDB (Dexie) — local fallback ─────────────────────────────────────
 
 class FeasibilityDatabase extends Dexie {
@@ -144,11 +158,71 @@ export async function listProjects(): Promise<ProjectRecord[]> {
     const { data, error } = await supabase
       .from('projects')
       .select('*')
+      .neq('name', BRANDING_SENTINEL)
       .order('updated_at', { ascending: false });
     if (error) throw new Error(error.message);
     return (data as SupabaseRow[]).map(rowToRecord);
   }
-  return db.projects.orderBy('updatedAt').reverse().toArray();
+  const all = await db.projects.orderBy('updatedAt').reverse().toArray();
+  return all.filter(p => p.name !== BRANDING_SENTINEL);
+}
+
+/** Load app-wide branding settings from the DB (cross-device). */
+export async function loadBrandingSettings(): Promise<BrandingSettings | null> {
+  try {
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('admin')
+        .eq('name', BRANDING_SENTINEL)
+        .maybeSingle();
+      if (error || !data) return null;
+      const { appName, logoDataUrl, faviconDataUrl, appBgColor } = (data as { admin: AdminConfig }).admin;
+      return { appName, logoDataUrl, faviconDataUrl, appBgColor };
+    }
+    const row = await db.projects.where('name').equals(BRANDING_SENTINEL).first();
+    if (!row) return null;
+    const { appName, logoDataUrl, faviconDataUrl, appBgColor } = row.admin;
+    return { appName, logoDataUrl, faviconDataUrl, appBgColor };
+  } catch {
+    return null;
+  }
+}
+
+/** Persist app-wide branding settings to the DB (cross-device). */
+export async function saveBrandingSettings(b: BrandingSettings): Promise<void> {
+  // We store branding inside the `admin` field of the sentinel record.
+  // All other admin/inputs fields are set to minimal placeholders.
+  const brandingAdmin = { appName: b.appName, logoDataUrl: b.logoDataUrl, faviconDataUrl: b.faviconDataUrl, appBgColor: b.appBgColor } as AdminConfig;
+  try {
+    if (supabase) {
+      const { data: existing } = await supabase
+        .from('projects')
+        .select('id')
+        .eq('name', BRANDING_SENTINEL)
+        .maybeSingle();
+      if (existing) {
+        await supabase
+          .from('projects')
+          .update({ admin: brandingAdmin, updated_at: new Date().toISOString() })
+          .eq('name', BRANDING_SENTINEL);
+      } else {
+        await supabase
+          .from('projects')
+          .insert({ name: BRANDING_SENTINEL, description: '', admin: brandingAdmin, inputs: {} as MainInputs });
+      }
+      return;
+    }
+    const existing = await db.projects.where('name').equals(BRANDING_SENTINEL).first();
+    const now = new Date();
+    if (existing?.id != null) {
+      await db.projects.update(existing.id, { admin: brandingAdmin, updatedAt: now });
+    } else {
+      await db.projects.add({ name: BRANDING_SENTINEL, description: '', createdAt: now, updatedAt: now, admin: brandingAdmin, inputs: {} as MainInputs, dashboardData: null });
+    }
+  } catch (e) {
+    console.warn('saveBrandingSettings failed:', e);
+  }
 }
 
 /** Permanently delete a project. */
