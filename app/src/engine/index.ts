@@ -111,11 +111,11 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const pmFeeRate = (inputs.pmFees.length > 0 && inputs.pmFees[0].units > 0)
     ? inputs.pmFees[0].units
     : 0.02;
-  const dynamicPMFeeTotal = pmFeeRate * totalCostsExcPM;
-  const pmFeesWithTotal = inputs.pmFees.map((f, idx) =>
+  let dynamicPMFeeTotal = pmFeeRate * totalCostsExcPM;
+  let pmFeesWithTotal = inputs.pmFees.map((f, idx) =>
     idx === 0 ? { ...f, totalCosts: dynamicPMFeeTotal } : f
   );
-  const pmFees = spreadCosts(pmFeesWithTotal, periods, admin.manualSCurves, buildSCurves);
+  let pmFees = spreadCosts(pmFeesWithTotal, periods, admin.manualSCurves, buildSCurves);
 
   // ===== 2. SPREAD REVENUE =====
   const settlements = spreadSettlements(inputs.grvItems, periods);
@@ -192,6 +192,39 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // Also add ITC recovery (ATO refunds GST paid on costs each period) so the
   // waterfall treats costs on an ex-GST basis, matching the formula profit calc.
   const totalMonthlyRevenue = settlements.map((s, i) => s + rentalInc[i] + otherInc[i] + gstOnCosts[i]);
+
+  // Two-pass PM fee: preliminary solve estimates finance costs so they can be
+  // included in the PM fee base (matching Excel's GST+finance inclusive base).
+  const prelimFunding = solveFunding(
+    periods, monthlyCostsExcFinance, totalMonthlyRevenue, monthlyGSTNet, gstOnRevenue,
+    inputs, admin.daysPerYear, admin.tolerance,
+  );
+  const prelimFinCosts =
+    prelimFunding.totalSeniorInterest  + prelimFunding.totalSeniorFees +
+    prelimFunding.totalSenior2Interest + prelimFunding.totalSenior2Fees +
+    prelimFunding.totalSenior3Interest + prelimFunding.totalSenior3Fees +
+    prelimFunding.totalLandLoanInterest + prelimFunding.totalLandLoanFees +
+    prelimFunding.totalMezzInterest    + prelimFunding.totalMezzFees +
+    prelimFunding.totalAddl1Interest   + prelimFunding.totalAddl1Fees +
+    prelimFunding.totalAddl2Interest   + prelimFunding.totalAddl2Fees +
+    prelimFunding.totalAddl3Interest   + prelimFunding.totalAddl3Fees;
+
+  const oldPmFees = [...pmFees];
+  dynamicPMFeeTotal = pmFeeRate * (totalCostsExcPM + prelimFinCosts);
+  pmFeesWithTotal = inputs.pmFees.map((f, idx) =>
+    idx === 0 ? { ...f, totalCosts: dynamicPMFeeTotal } : f
+  );
+  pmFees = spreadCosts(pmFeesWithTotal, periods, admin.manualSCurves, buildSCurves);
+
+  const pmFeeHasGST = inputs.pmFees.length === 0 || inputs.pmFees[0].addGST !== false;
+  for (let i = 0; i < n; i++) {
+    const deltaPM = pmFees[i] - oldPmFees[i];
+    const deltaGST = pmFeeHasGST ? deltaPM * gstRate : 0;
+    gstOnCosts[i] += deltaGST;
+    monthlyCostsExcFinance[i] += deltaPM + deltaGST;
+    totalMonthlyRevenue[i] += deltaGST; // ITC recovery tracks GST on costs
+  }
+
   const funding = solveFunding(
     periods,
     monthlyCostsExcFinance,
