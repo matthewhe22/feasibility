@@ -328,6 +328,11 @@ export interface FeasibilitySummary {
   seniorFinanceCosts: number;
   mezzFinanceCosts: number;
   otherFinancingCosts: number;
+  /** Development costs only (codes 2001-2099), excludes other standard costs */
+  developmentCosts: number;
+  /** Other standard costs only (codes 5001-5020) */
+  otherStandardCosts: number;
+  /** Total = developmentCosts + otherStandardCosts */
   standardCosts: number;
   /** GST paid to vendors on costs (input tax credits claimable via BAS) */
   gst: number;

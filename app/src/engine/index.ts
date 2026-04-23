@@ -533,6 +533,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       seniorFinanceCosts: totalSeniorFinCosts + totalLandLoanFinCosts,
       mezzFinanceCosts: totalMezzFinCosts,
       otherFinancingCosts: totalOtherFin,
+      developmentCosts: totalDevCosts,
+      otherStandardCosts: totalOtherStd,
       standardCosts,
       gst: totalGSTOnCosts,
       gstOnRevenue: totalGSTOnRevenue,
