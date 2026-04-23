@@ -8,7 +8,7 @@ import {
   defaultLandPaymentStages, defaultAcquisitionCosts, defaultDevelopmentCosts,
   defaultConstructionCosts, defaultMarketingCosts, defaultOtherStandardCosts,
   defaultPMFees, defaultSellingCosts, defaultGRVItems, defaultRentalIncome,
-  defaultOtherIncome, defaultEquityKokoda, defaultEquityJV, defaultEquityPreferred,
+  defaultOtherIncome, defaultEquityDeveloper, defaultEquityJV, defaultEquityPreferred,
   defaultEquityAdditional, defaultLandLoan, defaultMezzanine, defaultSeniorFacility,
   defaultSeniorFacility2, defaultSeniorFacility3, defaultResidualStock,
   defaultAdditionalLoan, defaultOtherFinancingCosts,
@@ -75,7 +75,7 @@ const inputs: MainInputs = {
   grvItems: defaultGRVItems,
   rentalIncome: defaultRentalIncome,
   otherIncome: defaultOtherIncome,
-  equityKokoda: defaultEquityKokoda,
+  equityDeveloper: defaultEquityDeveloper,
   equityJV: defaultEquityJV,
   equityPreferred: defaultEquityPreferred,
   equityAdditional: defaultEquityAdditional,
@@ -105,7 +105,7 @@ const totalLandFees = wf.reduce((s, cf) => s + cf.landLoanFees, 0);
 const totalEquityInj = wf.reduce((s, cf) => s + cf.equityInjection, 0);
 const totalSnrDrawdown = wf.reduce((s, cf) => s + cf.seniorDrawdown, 0);
 const totalSnrRepayment = wf.reduce((s, cf) => s + cf.seniorRepayment, 0);
-const maxMonthlyInterest = Math.max(...wf.map(cf => cf.seniorInterest + cf.seniorFees + cf.landLoanInterest));
+const maxMonthlyInterest = Math.max(...wf.map(cf => cf.seniorInterest + cf.landLoanInterest));
 const netCFTotal = wf.reduce((s, cf) => s + cf.netCashflow, 0);
 
 const pct = (a: number, b: number) => {
@@ -126,7 +126,8 @@ const t1 = [
   ['Stamp Duty / Acquisition Costs',    f.stampDuty,          8244994],
   ['Construction Costs (ex-GST)',       f.buildCosts - f.contingency, 585805180],
   ['Contingency (ex-GST)',              f.contingency,        14580355],
-  ['Development Costs (ex-GST)',        f.standardCosts - (f.standardCosts - (f.totalCost - f.land - f.stampDuty - (f.buildCosts) - f.seniorFinanceCosts - f.mezzFinanceCosts - f.otherFinancingCosts - f.marketingAndAdvertising - f.salesCommissions - f.pmFee)), 50546749],
+  ['Development Costs (ex-GST)',        f.developmentCosts,  50546749],
+  ['Other Standard Costs (ex-GST)',     f.otherStandardCosts, 8692172],
   ['Marketing & Advertising (ex-GST)', f.marketingAndAdvertising, 6181818],
   ['PM Fees (ex-GST)',                  f.pmFee,              23200301],
   ['Sales Commissions (ex-GST)',        f.salesCommissions,   44315558],

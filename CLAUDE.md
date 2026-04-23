@@ -23,7 +23,7 @@ Web application replicating the KK Feaso Model Draft v43 Excel feasibility model
 - **Funding Calcs** (423 rows): Funding waterfall, debt control accounts, interest calculations, exit waterfall, debt solving (circular reference resolution)
 - **Funding Table** (87 rows): GST inc/exc conversion
 - **!!! - Cashflow** (238 rows x 104 cols): Detailed monthly cashflow
-- **KK Cashflow** (104 rows x 129 cols): Kokoda-specific cashflow
+- **KK Cashflow** (104 rows x 129 cols): Developer-specific cashflow
 - **Taxes & Duties** (46 rows): GST and stamp duty calculations
 - **Scenario Manager** (64 rows): Scenario comparison
 - **Checks** (31 rows): Model integrity checks

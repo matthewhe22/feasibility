@@ -1,6 +1,11 @@
 import type { Period, MainInputs, DebtFacility } from '../types';
 import { sum } from '../utils';
 
+// Collect warnings for equity backstop overruns — reset per engine run
+const _fundingWarnings: string[] = [];
+export function clearFundingWarnings(): void { _fundingWarnings.length = 0; }
+export function getFundingWarnings(): string[] { return [..._fundingWarnings]; }
+
 // Zero-value facility used as a safe fallback when an optional facility is missing
 // (e.g. when loading a project saved before Senior Facility #2/#3 were added).
 const EMPTY_FACILITY: DebtFacility = {
@@ -33,7 +38,7 @@ export function computeDrawdownSequence(inputs: MainInputs): DrawdownSequenceEnt
   const sf2  = inputs.seniorFacility2;
   const sf3  = inputs.seniorFacility3;
   const mz   = inputs.mezzanine;
-  const eq   = inputs.equityKokoda;
+  const eq   = inputs.equityDeveloper;
   const eqJV = inputs.equityJV;
   const a1   = inputs.additionalLoan1;
   const a2   = inputs.additionalLoan2;
@@ -159,6 +164,7 @@ export function solveFunding(
   daysPerYear: number,
   tolerance: number,
   maxIterations = 50,
+  equityDrawdownMode: 'equity-first' | 'pro-rata' = 'equity-first',
 ): FundingResult {
   const n = periods.length;
 
@@ -182,6 +188,7 @@ export function solveFunding(
       periods, monthlyCostsExcFinance, monthlyRevenue, _monthlyGSTNet, gstOnRevenue,
       inputs, tdc, daysPerYear,
       prevPeakSnrBalance, prevPeakSnr2Balance, prevPeakSnr3Balance,
+      equityDrawdownMode,
     );
 
     const newSeniorFinCosts = result.totalSeniorInterest + result.totalSeniorFees
@@ -293,6 +300,7 @@ function runFundingWaterfall(
   peakSnrBalancePrev = 0,
   peakSnr2BalancePrev = 0,
   peakSnr3BalancePrev = 0,
+  equityDrawdownMode: 'equity-first' | 'pro-rata' = 'equity-first',
 ): FundingResult {
   const n = periods.length;
   const landLoan = inputs.landLoan        ?? EMPTY_FACILITY;
@@ -337,9 +345,9 @@ function runFundingWaterfall(
 
   // ===== Equity caps (per entity) =====
   const totalCostsExcFin  = sum(monthlyCostsExcFinance);
-  const equityFixedKokoda = inputs.equityKokoda.fixedAmount;
-  const equityPctKokoda   = inputs.equityKokoda.percentage;
-  const kokodaCap = equityFixedKokoda > 0 ? equityFixedKokoda : totalCostsExcFin * equityPctKokoda;
+  const equityFixedDeveloper = inputs.equityDeveloper.fixedAmount;
+  const equityPctDeveloper   = inputs.equityDeveloper.percentage;
+  const developerCap = equityFixedDeveloper > 0 ? equityFixedDeveloper : totalCostsExcFin * equityPctDeveloper;
 
   const isJVActive = inputs.equityJV && (inputs.equityJV.fixedAmount > 0 || inputs.equityJV.equityContribution > 0);
   const equityFixedJV = inputs.equityJV?.fixedAmount ?? 0;
@@ -347,7 +355,7 @@ function runFundingWaterfall(
   const jvCap = isJVActive ? (equityFixedJV > 0 ? equityFixedJV : totalCostsExcFin * equityPctJV) : 0;
 
   // Total cap (used for excess-equity repatriation at senior start)
-  const totalEquityCap = kokodaCap + jvCap;
+  const totalEquityCap = developerCap + jvCap;
 
   // ===== Additional loan limits =====
   const hasAddl1 = addl1.facilityLimit > 0 && addl1.startMonth > 0;
@@ -438,7 +446,12 @@ function runFundingWaterfall(
   const addl3Interest   = new Array(n).fill(0);
   const addl3Fees       = new Array(n).fill(0);
 
+  // Equity/profit distributions are gated: no distributions before equityDistStartMonth.
+  // Surplus cash accumulates in the project bank account and carries forward.
+  const eqDistStartIdx = (inputs.preliminary.equityDistStartMonth ?? 0) - 1;
+
   // ===== Running state =====
+  let heldBankBalance     = 0; // surplus cash held when distributions are gated
   let llRunningBalance    = 0;
   let snrRunningBalance   = 0;
   let snr2RunningBalance  = 0;
@@ -501,9 +514,14 @@ function runFundingWaterfall(
     const snr3OpenBalance = snr3RunningBalance;
     const mzOpenBalance   = mzRunningBalance;
 
-    let bankBalance = 0;
+    // Carry forward any surplus held from prior periods (distributions gated)
+    let bankBalance = heldBankBalance;
+    heldBankBalance = 0;
 
     // ── 2. Land loan lump-sum draw + establishment fee ─────────────────────────
+    // Debt facility fees (establishment, line fees) are modelled as GST-free.
+    // This assumes the lender is an exempt financial institution (GSTA s.40-60).
+    // For non-bank facilities, verify whether fees are GST-inclusive in the term sheet.
     if (i === llStartIdx && landLoan.facilityLimit > 0) {
       llDrawdowns[i]     = landLoan.facilityLimit;
       llRunningBalance  += landLoan.facilityLimit;
@@ -557,6 +575,7 @@ function runFundingWaterfall(
       totalSeniorInterest += snrInt;
       if (senior.isCapitalised) {
         snrRunningBalance += snrInt;
+        snrDrawdowns[i]   += snrInt;
       } else {
         bankBalance -= snrInt;
       }
@@ -575,6 +594,7 @@ function runFundingWaterfall(
         totalSeniorFees  += periodFees;
         if (senior.isCapitalised) {
           snrRunningBalance += periodFees;
+          snrDrawdowns[i]   += periodFees;
         } else {
           bankBalance -= periodFees;
         }
@@ -588,6 +608,7 @@ function runFundingWaterfall(
       totalSenior2Interest += snr2Int;
       if (senior2.isCapitalised) {
         snr2RunningBalance += snr2Int;
+        snr2Drawdowns[i]   += snr2Int;
       } else {
         bankBalance -= snr2Int;
       }
@@ -603,6 +624,7 @@ function runFundingWaterfall(
         totalSenior2Fees += periodFees;
         if (senior2.isCapitalised) {
           snr2RunningBalance += periodFees;
+          snr2Drawdowns[i]   += periodFees;
         } else {
           bankBalance -= periodFees;
         }
@@ -616,6 +638,7 @@ function runFundingWaterfall(
       totalSenior3Interest += snr3Int;
       if (senior3.isCapitalised) {
         snr3RunningBalance += snr3Int;
+        snr3Drawdowns[i]   += snr3Int;
       } else {
         bankBalance -= snr3Int;
       }
@@ -631,6 +654,7 @@ function runFundingWaterfall(
         totalSenior3Fees += periodFees;
         if (senior3.isCapitalised) {
           snr3RunningBalance += periodFees;
+          snr3Drawdowns[i]   += periodFees;
         } else {
           bankBalance -= periodFees;
         }
@@ -644,6 +668,7 @@ function runFundingWaterfall(
       totalMezzInterest += mzInt;
       if (mezz.isCapitalised) {
         mzRunningBalance += mzInt;
+        mzDrawdowns[i]   += mzInt;
       } else {
         bankBalance -= mzInt;
       }
@@ -654,6 +679,7 @@ function runFundingWaterfall(
         totalMezzFees   += mzLineFee;
         if (mezz.isCapitalised) {
           mzRunningBalance += mzLineFee;
+          mzDrawdowns[i]   += mzLineFee;
         } else {
           bankBalance -= mzLineFee;
         }
@@ -666,6 +692,7 @@ function runFundingWaterfall(
         totalMezzFees += mzEstFee;
         if (mezz.isCapitalised) {
           mzRunningBalance += mzEstFee;
+          mzDrawdowns[i]   += mzEstFee;
         } else {
           bankBalance -= mzEstFee;
         }
@@ -678,20 +705,20 @@ function runFundingWaterfall(
         const a1Int = periodInterest(addl1RunningBalance, addl1AllInRate, days, daysPerYear);
         addl1Interest[i]   += a1Int;
         totalAddl1Interest += a1Int;
-        if (addl1.isCapitalised) { addl1RunningBalance += a1Int; } else { bankBalance -= a1Int; }
+        if (addl1.isCapitalised) { addl1RunningBalance += a1Int; addl1Drawdowns[i] += a1Int; } else { bankBalance -= a1Int; }
       }
       if (i <= addl1EndIdx) {
         const a1Fee = periodInterest(addl1Limit, addl1.lineFeePercent, days, daysPerYear);
         if (a1Fee > 0) {
           addl1Fees[i]   += a1Fee; totalAddl1Fees += a1Fee;
-          if (addl1.isCapitalised) { addl1RunningBalance += a1Fee; } else { bankBalance -= a1Fee; }
+          if (addl1.isCapitalised) { addl1RunningBalance += a1Fee; addl1Drawdowns[i] += a1Fee; } else { bankBalance -= a1Fee; }
         }
       }
       if (i === addl1StartIdx) {
         const a1Est = addl1Limit * addl1.establishmentFeePercent;
         if (a1Est > 0) {
           addl1Fees[i]   += a1Est; totalAddl1Fees += a1Est;
-          if (addl1.isCapitalised) { addl1RunningBalance += a1Est; } else { bankBalance -= a1Est; }
+          if (addl1.isCapitalised) { addl1RunningBalance += a1Est; addl1Drawdowns[i] += a1Est; } else { bankBalance -= a1Est; }
         }
       }
     }
@@ -702,20 +729,20 @@ function runFundingWaterfall(
         const a2Int = periodInterest(addl2RunningBalance, addl2AllInRate, days, daysPerYear);
         addl2Interest[i]   += a2Int;
         totalAddl2Interest += a2Int;
-        if (addl2.isCapitalised) { addl2RunningBalance += a2Int; } else { bankBalance -= a2Int; }
+        if (addl2.isCapitalised) { addl2RunningBalance += a2Int; addl2Drawdowns[i] += a2Int; } else { bankBalance -= a2Int; }
       }
       if (i <= addl2EndIdx) {
         const a2Fee = periodInterest(addl2Limit, addl2.lineFeePercent, days, daysPerYear);
         if (a2Fee > 0) {
           addl2Fees[i]   += a2Fee; totalAddl2Fees += a2Fee;
-          if (addl2.isCapitalised) { addl2RunningBalance += a2Fee; } else { bankBalance -= a2Fee; }
+          if (addl2.isCapitalised) { addl2RunningBalance += a2Fee; addl2Drawdowns[i] += a2Fee; } else { bankBalance -= a2Fee; }
         }
       }
       if (i === addl2StartIdx) {
         const a2Est = addl2Limit * addl2.establishmentFeePercent;
         if (a2Est > 0) {
           addl2Fees[i]   += a2Est; totalAddl2Fees += a2Est;
-          if (addl2.isCapitalised) { addl2RunningBalance += a2Est; } else { bankBalance -= a2Est; }
+          if (addl2.isCapitalised) { addl2RunningBalance += a2Est; addl2Drawdowns[i] += a2Est; } else { bankBalance -= a2Est; }
         }
       }
     }
@@ -726,20 +753,20 @@ function runFundingWaterfall(
         const a3Int = periodInterest(addl3RunningBalance, addl3AllInRate, days, daysPerYear);
         addl3Interest[i]   += a3Int;
         totalAddl3Interest += a3Int;
-        if (addl3.isCapitalised) { addl3RunningBalance += a3Int; } else { bankBalance -= a3Int; }
+        if (addl3.isCapitalised) { addl3RunningBalance += a3Int; addl3Drawdowns[i] += a3Int; } else { bankBalance -= a3Int; }
       }
       if (i <= addl3EndIdx) {
         const a3Fee = periodInterest(addl3Limit, addl3.lineFeePercent, days, daysPerYear);
         if (a3Fee > 0) {
           addl3Fees[i]   += a3Fee; totalAddl3Fees += a3Fee;
-          if (addl3.isCapitalised) { addl3RunningBalance += a3Fee; } else { bankBalance -= a3Fee; }
+          if (addl3.isCapitalised) { addl3RunningBalance += a3Fee; addl3Drawdowns[i] += a3Fee; } else { bankBalance -= a3Fee; }
         }
       }
       if (i === addl3StartIdx) {
         const a3Est = addl3Limit * addl3.establishmentFeePercent;
         if (a3Est > 0) {
           addl3Fees[i]   += a3Est; totalAddl3Fees += a3Est;
-          if (addl3.isCapitalised) { addl3RunningBalance += a3Est; } else { bankBalance -= a3Est; }
+          if (addl3.isCapitalised) { addl3RunningBalance += a3Est; addl3Drawdowns[i] += a3Est; } else { bankBalance -= a3Est; }
         }
       }
     }
@@ -758,7 +785,7 @@ function runFundingWaterfall(
         if (draw > 0) {
           snrDrawdowns[i]    += draw;
           snrRunningBalance  += draw;
-          // Split repatriation pro-rata between JV and Kokoda
+          // Split repatriation pro-rata between JV and Developer
           const jvFrac = cumulativeEquity > 0 ? jvCumulative / cumulativeEquity : 0;
           const jvRep  = draw * jvFrac;
           jvRepatriations[i] += jvRep;
@@ -776,90 +803,141 @@ function runFundingWaterfall(
 
     // ── 9. Gap fill ────────────────────────────────────────────────────────────
     if (bankBalance < 0) {
-      for (const entry of drawdownSequence) {
-        if (bankBalance >= 0) break;
+      if (equityDrawdownMode === 'pro-rata' && seniorDrawActive) {
+        // Pro-rata: split the gap proportionally between Developer equity and senior each period
+        const gap = -bankBalance;
+        const eqAvail  = Math.max(0, developerCap - (cumulativeEquity - jvCumulative));
+        const snrAvail = Math.max(0, seniorLimit - snrRunningBalance);
+        const totalAvail = eqAvail + snrAvail;
+        if (totalAvail > 0) {
+          const eqDraw  = Math.min(gap * (eqAvail  / totalAvail), eqAvail);
+          const snrDraw = Math.min(gap * (snrAvail / totalAvail), snrAvail);
+          if (eqDraw > 0) {
+            eqInjections[i] += eqDraw;
+            cumulativeEquity += eqDraw;
+            bankBalance      += eqDraw;
+          }
+          if (snrDraw > 0) {
+            snrDrawdowns[i]   += snrDraw;
+            snrRunningBalance += snrDraw;
+            bankBalance       += snrDraw;
+          }
+        }
+        // JV equity and other facilities still fill in priority order after pro-rata
+        for (const entry of drawdownSequence) {
+          if (bankBalance >= 0) break;
+          if (entry.type === 'equityJV' && isJVActive) {
+            const avail = Math.max(0, jvCap - jvCumulative);
+            if (avail > 0) {
+              const draw = Math.min(-bankBalance, avail);
+              jvInjections[i] += draw; eqInjections[i] += draw;
+              jvCumulative += draw; cumulativeEquity += draw; bankBalance += draw;
+            }
+          } else if (entry.type === 'additional1' && hasAddl1 && i >= addl1StartIdx && i <= addl1EndIdx) {
+            const avail = Math.max(0, addl1Limit - addl1RunningBalance);
+            if (avail > 0) { const draw = Math.min(-bankBalance, avail); addl1Drawdowns[i] += draw; addl1RunningBalance += draw; bankBalance += draw; }
+          } else if (entry.type === 'additional2' && hasAddl2 && i >= addl2StartIdx && i <= addl2EndIdx) {
+            const avail = Math.max(0, addl2Limit - addl2RunningBalance);
+            if (avail > 0) { const draw = Math.min(-bankBalance, avail); addl2Drawdowns[i] += draw; addl2RunningBalance += draw; bankBalance += draw; }
+          } else if (entry.type === 'additional3' && hasAddl3 && i >= addl3StartIdx && i <= addl3EndIdx) {
+            const avail = Math.max(0, addl3Limit - addl3RunningBalance);
+            if (avail > 0) { const draw = Math.min(-bankBalance, avail); addl3Drawdowns[i] += draw; addl3RunningBalance += draw; bankBalance += draw; }
+          }
+        }
+      } else {
+        // Equity-first (default): draw in strict priority order
+        for (const entry of drawdownSequence) {
+          if (bankBalance >= 0) break;
 
-        if (entry.type === 'senior' && seniorDrawActive) {
-          const avail = Math.max(0, seniorLimit - snrRunningBalance);
-          if (avail > 0) {
-            const draw         = Math.min(-bankBalance, avail);
-            snrDrawdowns[i]   += draw;
-            snrRunningBalance += draw;
-            bankBalance       += draw;
-          }
-        } else if (entry.type === 'senior2' && senior2DrawActive) {
-          const avail = Math.max(0, senior2Limit - snr2RunningBalance);
-          if (avail > 0) {
-            const draw          = Math.min(-bankBalance, avail);
-            snr2Drawdowns[i]   += draw;
-            snr2RunningBalance += draw;
-            bankBalance        += draw;
-          }
-        } else if (entry.type === 'senior3' && senior3DrawActive) {
-          const avail = Math.max(0, senior3Limit - snr3RunningBalance);
-          if (avail > 0) {
-            const draw          = Math.min(-bankBalance, avail);
-            snr3Drawdowns[i]   += draw;
-            snr3RunningBalance += draw;
-            bankBalance        += draw;
-          }
-        } else if (entry.type === 'mezz' && hasMezz && i >= mezzStartIdx) {
-          const avail = Math.max(0, mezzLimit - totalMezzDrawn);
-          if (avail > 0) {
-            const draw         = Math.min(-bankBalance, avail);
-            mzDrawdowns[i]    += draw;
-            mzRunningBalance  += draw;
-            totalMezzDrawn    += draw;
-            bankBalance       += draw;
-          }
-        } else if (entry.type === 'equity') {
-          const avail = Math.max(0, kokodaCap - (cumulativeEquity - jvCumulative));
-          if (avail > 0) {
-            const draw       = Math.min(-bankBalance, avail);
-            eqInjections[i] += draw;
-            cumulativeEquity += draw;
-            bankBalance      += draw;
-          }
-        } else if (entry.type === 'equityJV' && isJVActive) {
-          const avail = Math.max(0, jvCap - jvCumulative);
-          if (avail > 0) {
-            const draw         = Math.min(-bankBalance, avail);
-            jvInjections[i]   += draw;
-            eqInjections[i]   += draw;
-            jvCumulative      += draw;
-            cumulativeEquity  += draw;
-            bankBalance       += draw;
-          }
-        } else if (entry.type === 'additional1' && hasAddl1 && i >= addl1StartIdx && i <= addl1EndIdx) {
-          const avail = Math.max(0, addl1Limit - addl1RunningBalance);
-          if (avail > 0) {
-            const draw          = Math.min(-bankBalance, avail);
-            addl1Drawdowns[i]  += draw;
-            addl1RunningBalance += draw;
-            bankBalance        += draw;
-          }
-        } else if (entry.type === 'additional2' && hasAddl2 && i >= addl2StartIdx && i <= addl2EndIdx) {
-          const avail = Math.max(0, addl2Limit - addl2RunningBalance);
-          if (avail > 0) {
-            const draw          = Math.min(-bankBalance, avail);
-            addl2Drawdowns[i]  += draw;
-            addl2RunningBalance += draw;
-            bankBalance        += draw;
-          }
-        } else if (entry.type === 'additional3' && hasAddl3 && i >= addl3StartIdx && i <= addl3EndIdx) {
-          const avail = Math.max(0, addl3Limit - addl3RunningBalance);
-          if (avail > 0) {
-            const draw          = Math.min(-bankBalance, avail);
-            addl3Drawdowns[i]  += draw;
-            addl3RunningBalance += draw;
-            bankBalance        += draw;
+          if (entry.type === 'senior' && seniorDrawActive) {
+            const avail = Math.max(0, seniorLimit - snrRunningBalance);
+            if (avail > 0) {
+              const draw         = Math.min(-bankBalance, avail);
+              snrDrawdowns[i]   += draw;
+              snrRunningBalance += draw;
+              bankBalance       += draw;
+            }
+          } else if (entry.type === 'senior2' && senior2DrawActive) {
+            const avail = Math.max(0, senior2Limit - snr2RunningBalance);
+            if (avail > 0) {
+              const draw          = Math.min(-bankBalance, avail);
+              snr2Drawdowns[i]   += draw;
+              snr2RunningBalance += draw;
+              bankBalance        += draw;
+            }
+          } else if (entry.type === 'senior3' && senior3DrawActive) {
+            const avail = Math.max(0, senior3Limit - snr3RunningBalance);
+            if (avail > 0) {
+              const draw          = Math.min(-bankBalance, avail);
+              snr3Drawdowns[i]   += draw;
+              snr3RunningBalance += draw;
+              bankBalance        += draw;
+            }
+          } else if (entry.type === 'mezz' && hasMezz && i >= mezzStartIdx) {
+            const avail = Math.max(0, mezzLimit - totalMezzDrawn);
+            if (avail > 0) {
+              const draw         = Math.min(-bankBalance, avail);
+              mzDrawdowns[i]    += draw;
+              mzRunningBalance  += draw;
+              totalMezzDrawn    += draw;
+              bankBalance       += draw;
+            }
+          } else if (entry.type === 'equity') {
+            const avail = Math.max(0, developerCap - (cumulativeEquity - jvCumulative));
+            if (avail > 0) {
+              const draw       = Math.min(-bankBalance, avail);
+              eqInjections[i] += draw;
+              cumulativeEquity += draw;
+              bankBalance      += draw;
+            }
+          } else if (entry.type === 'equityJV' && isJVActive) {
+            const avail = Math.max(0, jvCap - jvCumulative);
+            if (avail > 0) {
+              const draw         = Math.min(-bankBalance, avail);
+              jvInjections[i]   += draw;
+              eqInjections[i]   += draw;
+              jvCumulative      += draw;
+              cumulativeEquity  += draw;
+              bankBalance       += draw;
+            }
+          } else if (entry.type === 'additional1' && hasAddl1 && i >= addl1StartIdx && i <= addl1EndIdx) {
+            const avail = Math.max(0, addl1Limit - addl1RunningBalance);
+            if (avail > 0) {
+              const draw          = Math.min(-bankBalance, avail);
+              addl1Drawdowns[i]  += draw;
+              addl1RunningBalance += draw;
+              bankBalance        += draw;
+            }
+          } else if (entry.type === 'additional2' && hasAddl2 && i >= addl2StartIdx && i <= addl2EndIdx) {
+            const avail = Math.max(0, addl2Limit - addl2RunningBalance);
+            if (avail > 0) {
+              const draw          = Math.min(-bankBalance, avail);
+              addl2Drawdowns[i]  += draw;
+              addl2RunningBalance += draw;
+              bankBalance        += draw;
+            }
+          } else if (entry.type === 'additional3' && hasAddl3 && i >= addl3StartIdx && i <= addl3EndIdx) {
+            const avail = Math.max(0, addl3Limit - addl3RunningBalance);
+            if (avail > 0) {
+              const draw          = Math.min(-bankBalance, avail);
+              addl3Drawdowns[i]  += draw;
+              addl3RunningBalance += draw;
+              bankBalance        += draw;
+            }
           }
         }
       }
 
-      // Equity backstop — developer (Kokoda) is always the equity of last resort
+      // Equity backstop — developer (Developer) is always the equity of last resort
       if (bankBalance < 0) {
-        const backstop   = -bankBalance;
+        const backstop = -bankBalance;
+        const developerUsed = cumulativeEquity - jvCumulative;
+        const developerRemaining = Math.max(0, developerCap - developerUsed);
+        if (backstop > developerRemaining + 1) {
+          _fundingWarnings.push(
+            `Period ${i + 1}: equity backstop $${Math.round(backstop).toLocaleString()} exceeds remaining Developer cap $${Math.round(developerRemaining).toLocaleString()} — project is underfunded`
+          );
+        }
         eqInjections[i] += backstop;
         cumulativeEquity += backstop;
         bankBalance       = 0;
@@ -911,28 +989,33 @@ function runFundingWaterfall(
         bankBalance         -= repay;
       }
       if (bankBalance > 0) {
-        // Equity repatriation — pro-rata between JV and Kokoda based on outstanding
-        const jvOutstanding     = Math.max(0, jvCumulative - totalJVRepatriated);
-        const totalOutstanding  = Math.max(0, cumulativeEquity - totalEqRepatriated);
-        if (totalOutstanding > 0) {
-          const eqReturn  = Math.min(bankBalance, totalOutstanding);
-          const jvFrac    = jvOutstanding / totalOutstanding;
-          const jvRep     = eqReturn * jvFrac;
-          jvRepatriations[i]  += jvRep;
-          eqRepatriations[i]  += eqReturn;
-          totalJVRepatriated  += jvRep;
-          totalEqRepatriated  += eqReturn;
-          bankBalance         -= eqReturn;
-        }
-        if (bankBalance > 0) {
-          // Profit distribution — split by normalized profitShare weights
-          const jvShr    = inputs.equityJV?.profitShare  ?? 0;
-          const devShr   = inputs.equityKokoda?.profitShare ?? 1;
-          const totalShr = jvShr + devShr;
-          const jvProfit = totalShr > 0 ? bankBalance * jvShr / totalShr : 0;
-          jvProfitDist[i] += jvProfit;
-          profitDist[i]   += bankBalance;
+        if (i < eqDistStartIdx) {
+          // Before the distribution window: hold surplus in the project account
+          heldBankBalance += bankBalance;
           bankBalance      = 0;
+        } else {
+          // Equity repatriation — pro-rata between JV and Developer based on outstanding
+          const jvOutstanding     = Math.max(0, jvCumulative - totalJVRepatriated);
+          const totalOutstanding  = Math.max(0, cumulativeEquity - totalEqRepatriated);
+          if (totalOutstanding > 0) {
+            const eqReturn  = Math.min(bankBalance, totalOutstanding);
+            const jvFrac    = jvOutstanding / totalOutstanding;
+            const jvRep     = eqReturn * jvFrac;
+            jvRepatriations[i]  += jvRep;
+            eqRepatriations[i]  += eqReturn;
+            totalJVRepatriated  += jvRep;
+            totalEqRepatriated  += eqReturn;
+            bankBalance         -= eqReturn;
+          }
+          if (bankBalance > 0) {
+            // Profit distribution — jvShr is stored as a decimal fraction (e.g. 0.15 = 15%).
+            // Apply it directly; dev gets the remainder implicitly via profitDist - jvProfitDist.
+            const jvShr    = inputs.equityJV?.profitShare ?? 0;
+            const jvProfit = bankBalance * jvShr;
+            jvProfitDist[i] += jvProfit;
+            profitDist[i]   += bankBalance;
+            bankBalance      = 0;
+          }
         }
       }
     }

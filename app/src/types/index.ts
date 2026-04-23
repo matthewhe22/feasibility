@@ -116,6 +116,8 @@ export interface RevenueLineItem {
 
 
 
+// Rental and other income items are input-taxed under GSTA s.40-70 — no GST
+// is charged on income, and no ITC is claimable on costs to earn it.
 export interface RentalIncomeItem {
   code: string;
   description: string;
@@ -125,7 +127,6 @@ export interface RentalIncomeItem {
   sCurve: SCurveType;
   monthStart: number;
   monthSpan: number;
-  addGST: boolean;
   actuals?: number[]; // per-period actual income (0-based period index); overrides forecast for actual periods
 }
 
@@ -179,6 +180,18 @@ export interface AdminConfig {
   sCurveOptions: string[];
   manualSCurves: number[][]; // 3 manual s-curves, each array of monthly %
   buildSCurves: Record<number, number[]>; // keyed by build duration (12–60), monthly weights
+  /** Months to delay ITC recovery after the GST cost is incurred (0 = same-period, standard for feasibility) */
+  itcRecoveryLagMonths?: number;
+  /** Equity drawdown mode: 'equity-first' draws all equity before any senior; 'pro-rata' draws equity and senior simultaneously at a fixed ratio */
+  equityDrawdownMode?: 'equity-first' | 'pro-rata';
+  /** Branding: custom application title shown in header and browser tab */
+  appName?: string;
+  /** Branding: base64-encoded logo image (data URL) displayed in header top-left */
+  logoDataUrl?: string;
+  /** Branding: base64-encoded favicon image (data URL) applied to browser tab */
+  faviconDataUrl?: string;
+  /** Branding: CSS colour for the page background (e.g. '#f3f4f6') */
+  appBgColor?: string;
 }
 
 // ===== MAIN INPUTS =====
@@ -227,7 +240,7 @@ export interface MainInputs {
   grvItems: RevenueLineItem[];
   rentalIncome: RentalIncomeItem[];
   otherIncome: RentalIncomeItem[];
-  equityKokoda: EquityConfig;
+  equityDeveloper: EquityConfig;
   equityJV: EquityConfig;
   equityPreferred: EquityConfig;
   equityAdditional: EquityConfig;
@@ -328,6 +341,11 @@ export interface FeasibilitySummary {
   seniorFinanceCosts: number;
   mezzFinanceCosts: number;
   otherFinancingCosts: number;
+  /** Development costs only (codes 2001-2099), excludes other standard costs */
+  developmentCosts: number;
+  /** Other standard costs only (codes 5001-5020) */
+  otherStandardCosts: number;
+  /** Total = developmentCosts + otherStandardCosts */
   standardCosts: number;
   /** GST paid to vendors on costs (input tax credits claimable via BAS) */
   gst: number;

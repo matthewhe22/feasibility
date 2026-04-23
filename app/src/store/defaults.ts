@@ -188,17 +188,18 @@ export const defaultGRVItems: RevenueLineItem[] = [
 ];
 
 // ===== RENTAL INCOME =====
+// Rental and other income are input-taxed (GSTA s.40-70) — no GST applies.
 export const defaultRentalIncome: RentalIncomeItem[] = [
-  { code: '9101', description: '', revenueType: 'Gross Rental Income', units: 1, baseRate: 0, sCurve: 'Evenly Split', monthStart: 30, monthSpan: 12, addGST: false },
+  { code: '9101', description: '', revenueType: 'Gross Rental Income', units: 1, baseRate: 0, sCurve: 'Evenly Split', monthStart: 30, monthSpan: 12 },
 ];
 
 // ===== OTHER INCOME =====
 export const defaultOtherIncome: RentalIncomeItem[] = [
-  { code: '9201', description: 'other income', revenueType: 'Other Income', units: 1, baseRate: 0, sCurve: 'Evenly Split', monthStart: 40, monthSpan: 12, addGST: false },
+  { code: '9201', description: 'other income', revenueType: 'Other Income', units: 1, baseRate: 0, sCurve: 'Evenly Split', monthStart: 40, monthSpan: 12 },
 ];
 
 // ===== EQUITY =====
-export const defaultEquityKokoda: EquityConfig = {
+export const defaultEquityDeveloper: EquityConfig = {
   name: 'Developer',
   fixedAmount: 130419982,
   percentage: 0.1,
@@ -251,7 +252,7 @@ export const defaultLandLoan: DebtFacility = {
   name: 'Land Loan Facility',
   facilityLimit: 120000000,
   startMonth: 30,
-  maturityMonth: 3,
+  maturityMonth: 33,
   interestRate: 0.11265,
   bbsy: 0,
   margin: 0.11265,
