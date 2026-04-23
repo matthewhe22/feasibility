@@ -81,13 +81,32 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const backEndCommByPeriod = spreadBackEndCommissions(inputs.grvItems, inputs.sellingCosts, periods);
 
   // ===== PM FEES (dynamic: rate × all other costs) =====
-  // PM fee = rate × (all costs excluding PM fee itself)
-  // We calculate all costs first, then compute PM fee total dynamically.
+  // PM fee = rate × (all costs excluding PM fee itself, inclusive of GST on those costs).
+  // Compute preliminary GST on non-PM cost items so it can be included in the base
+  // (matching Excel's GST-inclusive base). PM fee GST is added in the full GST pass below.
+  let prelimGSTOnCosts = 0;
+  const nonPMCostItems = [
+    ...inputs.developmentCosts,
+    ...inputs.constructionCosts,
+    ...inputs.marketingCosts,
+    ...inputs.otherStandardCosts,
+    ...inputs.otherFinancingCosts,
+  ];
+  for (const item of nonPMCostItems) {
+    if (item.addGST !== false) {
+      prelimGSTOnCosts += item.totalCosts * gstRate;
+    }
+  }
+  prelimGSTOnCosts += contingencyTotal * gstRate;
+  prelimGSTOnCosts += commissions.frontEnd * gstRate;
+  prelimGSTOnCosts += commissions.backEnd * gstRate;
+
   const totalCostsExcPM =
     sum(landPayments) + sum(prsvPayments) + sum(acquisitionCosts) +
     sum(devCosts) + sum(constCosts) + sum(contingency) +
     sum(marketingCosts) + sum(otherStdCosts) + sum(otherFinCosts) +
-    sum(frontEndCommByPeriod) + sum(backEndCommByPeriod);
+    sum(frontEndCommByPeriod) + sum(backEndCommByPeriod) +
+    prelimGSTOnCosts;
   // PM fee rate comes from the item's `units` field (e.g. 0.02 = 2%)
   const pmFeeRate = (inputs.pmFees.length > 0 && inputs.pmFees[0].units > 0)
     ? inputs.pmFees[0].units
@@ -258,18 +277,11 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // and are NOT cash outflows in the period they accrue.  They inflate the balance
   // which is then swept out through repayments when revenue arrives, so they must
   // be excluded from the net cashflow formula to preserve net = 0 each period.
-  const seniorCapitalised  = inputs.seniorFacility?.isCapitalised   ?? false;
-  const senior2Capitalised = inputs.seniorFacility2?.isCapitalised  ?? false;
-  const senior3Capitalised = inputs.seniorFacility3?.isCapitalised  ?? false;
-  const mezzCapitalised    = inputs.mezzanine?.isCapitalised        ?? false;
-  const addl1Capitalised   = inputs.additionalLoan1?.isCapitalised  ?? false;
-  const addl2Capitalised   = inputs.additionalLoan2?.isCapitalised  ?? false;
-  const addl3Capitalised   = inputs.additionalLoan3?.isCapitalised  ?? false;
-
   // Calculate net cashflow — includes all cash financing flows so that it represents
   // the true change in the project bank account each period.
   // Net should be ≈ 0 every period: drawdowns fund costs, revenue repays debt.
-  // Capitalised interest is excluded because it is a balance adjustment, not cash.
+  // Capitalised interest/fees are now tracked as drawdowns in the waterfall, so they
+  // must also be deducted here as costs — the two entries cancel, preserving net ≈ 0.
   let cumCF = 0;
   for (const cf of cashflows) {
     cf.netCashflow =
@@ -277,7 +289,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       cf.grvSettlements + cf.rentalIncome + cf.otherIncome
       // ITC recovery: ATO refunds GST paid on costs (net effect = $0 on gstOnCosts)
       + cf.itcRecovery
-      // Financing inflows (drawdowns + equity injections)
+      // Financing inflows (drawdowns + equity injections; capitalised amounts included here)
       + cf.landLoanDrawdown + cf.seniorDrawdown + cf.senior2Drawdown + cf.senior3Drawdown
       + cf.mezzDrawdown + cf.addl1Drawdown + cf.addl2Drawdown + cf.addl3Drawdown
       + cf.equityInjection
@@ -287,16 +299,15 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       - cf.otherStandardCosts - cf.pmFees - cf.sellingCostsFrontEnd
       - cf.sellingCostsBackEnd - cf.otherFinancingCosts - cf.gstOnCosts
       - cf.gstOnRevenue
-      // Cash financing costs (land loan is never capitalised)
+      // Financing costs — always deducted (capitalised amounts cancel against their drawdown entry)
       - cf.landLoanInterest - cf.landLoanFees
-      // Senior/mezz interest & fees only if they are cash (non-capitalised)
-      - (seniorCapitalised  ? 0 : cf.seniorInterest  + cf.seniorFees)
-      - (senior2Capitalised ? 0 : cf.senior2Interest + cf.senior2Fees)
-      - (senior3Capitalised ? 0 : cf.senior3Interest + cf.senior3Fees)
-      - (mezzCapitalised    ? 0 : cf.mezzInterest    + cf.mezzFees)
-      - (addl1Capitalised   ? 0 : cf.addl1Interest  + cf.addl1Fees)
-      - (addl2Capitalised   ? 0 : cf.addl2Interest  + cf.addl2Fees)
-      - (addl3Capitalised   ? 0 : cf.addl3Interest  + cf.addl3Fees)
+      - cf.seniorInterest  - cf.seniorFees
+      - cf.senior2Interest - cf.senior2Fees
+      - cf.senior3Interest - cf.senior3Fees
+      - cf.mezzInterest    - cf.mezzFees
+      - cf.addl1Interest   - cf.addl1Fees
+      - cf.addl2Interest   - cf.addl2Fees
+      - cf.addl3Interest   - cf.addl3Fees
       // Financing outflows (principal repayments + equity returns)
       - cf.landLoanRepayment - cf.seniorRepayment - cf.senior2Repayment - cf.senior3Repayment
       - cf.mezzRepayment - cf.addl1Repayment - cf.addl2Repayment - cf.addl3Repayment
@@ -364,7 +375,15 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const loanCouponInterest = prefEquityBalance > 0 && prefEquityRate > 0
     ? prefEquityBalance * prefEquityRate * years
     : 0;
-  const totalProfitAfterCoupon = totalProfit - loanCouponInterest;
+
+  // JV equity coupon (same simple-interest approach as preferred equity)
+  const jvEquityBalance = funding.totalJVEquityInjected > 0 ? (inputs.equityJV?.fixedAmount ?? 0) : 0;
+  const jvEquityRate = inputs.equityJV?.interestRate ?? 0;
+  const jvCouponInterest = jvEquityBalance > 0 && jvEquityRate > 0
+    ? jvEquityBalance * jvEquityRate * years
+    : 0;
+
+  const totalProfitAfterCoupon = totalProfit - loanCouponInterest - jvCouponInterest;
 
   // NRV
   const backEndSelling = commissions.backEnd;
@@ -440,11 +459,11 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const landAllIn    = inputs.landLoan?.interestRate  ?? 0;
   const mezzAllIn    = inputs.mezzanine?.interestRate ?? 0;
 
+  // Interest-only metric (no fees) — matches Excel's "Peak Interest/Month" which shows
+  // the maximum periodic interest charge across all facilities, excluding line/establishment fees.
   const maxMonthlyInterest = Math.max(...cashflows.map(cf =>
-    cf.seniorInterest  + cf.seniorFees
-    + cf.senior2Interest + cf.senior2Fees
-    + cf.senior3Interest + cf.senior3Fees
-    + cf.landLoanInterest + cf.mezzInterest + cf.mezzFees
+    cf.seniorInterest + cf.senior2Interest + cf.senior3Interest
+    + cf.landLoanInterest + cf.mezzInterest
   ));
 
   // GRV Summary
@@ -593,7 +612,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
         equityRepatriation2nd: sum(funding.equityJVRepatriations),
         totalEquityRepatriation: sum(funding.equityJVRepatriations),
         establishmentFee: 0,
-        couponInterest: 0,
+        couponInterest: jvCouponInterest,
         couponInterestPercent: inputs.equityJV?.interestRate ?? 0,
         profitShareBalance: sum(funding.jvProfitDistributions),
         profitSharePercent: inputs.equityJV?.profitShare ?? 0,

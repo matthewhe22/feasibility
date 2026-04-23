@@ -105,7 +105,7 @@ const totalLandFees = wf.reduce((s, cf) => s + cf.landLoanFees, 0);
 const totalEquityInj = wf.reduce((s, cf) => s + cf.equityInjection, 0);
 const totalSnrDrawdown = wf.reduce((s, cf) => s + cf.seniorDrawdown, 0);
 const totalSnrRepayment = wf.reduce((s, cf) => s + cf.seniorRepayment, 0);
-const maxMonthlyInterest = Math.max(...wf.map(cf => cf.seniorInterest + cf.seniorFees + cf.landLoanInterest));
+const maxMonthlyInterest = Math.max(...wf.map(cf => cf.seniorInterest + cf.landLoanInterest));
 const netCFTotal = wf.reduce((s, cf) => s + cf.netCashflow, 0);
 
 const pct = (a: number, b: number) => {

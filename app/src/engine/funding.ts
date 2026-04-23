@@ -557,6 +557,7 @@ function runFundingWaterfall(
       totalSeniorInterest += snrInt;
       if (senior.isCapitalised) {
         snrRunningBalance += snrInt;
+        snrDrawdowns[i]   += snrInt;
       } else {
         bankBalance -= snrInt;
       }
@@ -575,6 +576,7 @@ function runFundingWaterfall(
         totalSeniorFees  += periodFees;
         if (senior.isCapitalised) {
           snrRunningBalance += periodFees;
+          snrDrawdowns[i]   += periodFees;
         } else {
           bankBalance -= periodFees;
         }
@@ -588,6 +590,7 @@ function runFundingWaterfall(
       totalSenior2Interest += snr2Int;
       if (senior2.isCapitalised) {
         snr2RunningBalance += snr2Int;
+        snr2Drawdowns[i]   += snr2Int;
       } else {
         bankBalance -= snr2Int;
       }
@@ -603,6 +606,7 @@ function runFundingWaterfall(
         totalSenior2Fees += periodFees;
         if (senior2.isCapitalised) {
           snr2RunningBalance += periodFees;
+          snr2Drawdowns[i]   += periodFees;
         } else {
           bankBalance -= periodFees;
         }
@@ -616,6 +620,7 @@ function runFundingWaterfall(
       totalSenior3Interest += snr3Int;
       if (senior3.isCapitalised) {
         snr3RunningBalance += snr3Int;
+        snr3Drawdowns[i]   += snr3Int;
       } else {
         bankBalance -= snr3Int;
       }
@@ -631,6 +636,7 @@ function runFundingWaterfall(
         totalSenior3Fees += periodFees;
         if (senior3.isCapitalised) {
           snr3RunningBalance += periodFees;
+          snr3Drawdowns[i]   += periodFees;
         } else {
           bankBalance -= periodFees;
         }
@@ -644,6 +650,7 @@ function runFundingWaterfall(
       totalMezzInterest += mzInt;
       if (mezz.isCapitalised) {
         mzRunningBalance += mzInt;
+        mzDrawdowns[i]   += mzInt;
       } else {
         bankBalance -= mzInt;
       }
@@ -654,6 +661,7 @@ function runFundingWaterfall(
         totalMezzFees   += mzLineFee;
         if (mezz.isCapitalised) {
           mzRunningBalance += mzLineFee;
+          mzDrawdowns[i]   += mzLineFee;
         } else {
           bankBalance -= mzLineFee;
         }
@@ -666,6 +674,7 @@ function runFundingWaterfall(
         totalMezzFees += mzEstFee;
         if (mezz.isCapitalised) {
           mzRunningBalance += mzEstFee;
+          mzDrawdowns[i]   += mzEstFee;
         } else {
           bankBalance -= mzEstFee;
         }
@@ -678,20 +687,20 @@ function runFundingWaterfall(
         const a1Int = periodInterest(addl1RunningBalance, addl1AllInRate, days, daysPerYear);
         addl1Interest[i]   += a1Int;
         totalAddl1Interest += a1Int;
-        if (addl1.isCapitalised) { addl1RunningBalance += a1Int; } else { bankBalance -= a1Int; }
+        if (addl1.isCapitalised) { addl1RunningBalance += a1Int; addl1Drawdowns[i] += a1Int; } else { bankBalance -= a1Int; }
       }
       if (i <= addl1EndIdx) {
         const a1Fee = periodInterest(addl1Limit, addl1.lineFeePercent, days, daysPerYear);
         if (a1Fee > 0) {
           addl1Fees[i]   += a1Fee; totalAddl1Fees += a1Fee;
-          if (addl1.isCapitalised) { addl1RunningBalance += a1Fee; } else { bankBalance -= a1Fee; }
+          if (addl1.isCapitalised) { addl1RunningBalance += a1Fee; addl1Drawdowns[i] += a1Fee; } else { bankBalance -= a1Fee; }
         }
       }
       if (i === addl1StartIdx) {
         const a1Est = addl1Limit * addl1.establishmentFeePercent;
         if (a1Est > 0) {
           addl1Fees[i]   += a1Est; totalAddl1Fees += a1Est;
-          if (addl1.isCapitalised) { addl1RunningBalance += a1Est; } else { bankBalance -= a1Est; }
+          if (addl1.isCapitalised) { addl1RunningBalance += a1Est; addl1Drawdowns[i] += a1Est; } else { bankBalance -= a1Est; }
         }
       }
     }
@@ -702,20 +711,20 @@ function runFundingWaterfall(
         const a2Int = periodInterest(addl2RunningBalance, addl2AllInRate, days, daysPerYear);
         addl2Interest[i]   += a2Int;
         totalAddl2Interest += a2Int;
-        if (addl2.isCapitalised) { addl2RunningBalance += a2Int; } else { bankBalance -= a2Int; }
+        if (addl2.isCapitalised) { addl2RunningBalance += a2Int; addl2Drawdowns[i] += a2Int; } else { bankBalance -= a2Int; }
       }
       if (i <= addl2EndIdx) {
         const a2Fee = periodInterest(addl2Limit, addl2.lineFeePercent, days, daysPerYear);
         if (a2Fee > 0) {
           addl2Fees[i]   += a2Fee; totalAddl2Fees += a2Fee;
-          if (addl2.isCapitalised) { addl2RunningBalance += a2Fee; } else { bankBalance -= a2Fee; }
+          if (addl2.isCapitalised) { addl2RunningBalance += a2Fee; addl2Drawdowns[i] += a2Fee; } else { bankBalance -= a2Fee; }
         }
       }
       if (i === addl2StartIdx) {
         const a2Est = addl2Limit * addl2.establishmentFeePercent;
         if (a2Est > 0) {
           addl2Fees[i]   += a2Est; totalAddl2Fees += a2Est;
-          if (addl2.isCapitalised) { addl2RunningBalance += a2Est; } else { bankBalance -= a2Est; }
+          if (addl2.isCapitalised) { addl2RunningBalance += a2Est; addl2Drawdowns[i] += a2Est; } else { bankBalance -= a2Est; }
         }
       }
     }
@@ -726,20 +735,20 @@ function runFundingWaterfall(
         const a3Int = periodInterest(addl3RunningBalance, addl3AllInRate, days, daysPerYear);
         addl3Interest[i]   += a3Int;
         totalAddl3Interest += a3Int;
-        if (addl3.isCapitalised) { addl3RunningBalance += a3Int; } else { bankBalance -= a3Int; }
+        if (addl3.isCapitalised) { addl3RunningBalance += a3Int; addl3Drawdowns[i] += a3Int; } else { bankBalance -= a3Int; }
       }
       if (i <= addl3EndIdx) {
         const a3Fee = periodInterest(addl3Limit, addl3.lineFeePercent, days, daysPerYear);
         if (a3Fee > 0) {
           addl3Fees[i]   += a3Fee; totalAddl3Fees += a3Fee;
-          if (addl3.isCapitalised) { addl3RunningBalance += a3Fee; } else { bankBalance -= a3Fee; }
+          if (addl3.isCapitalised) { addl3RunningBalance += a3Fee; addl3Drawdowns[i] += a3Fee; } else { bankBalance -= a3Fee; }
         }
       }
       if (i === addl3StartIdx) {
         const a3Est = addl3Limit * addl3.establishmentFeePercent;
         if (a3Est > 0) {
           addl3Fees[i]   += a3Est; totalAddl3Fees += a3Est;
-          if (addl3.isCapitalised) { addl3RunningBalance += a3Est; } else { bankBalance -= a3Est; }
+          if (addl3.isCapitalised) { addl3RunningBalance += a3Est; addl3Drawdowns[i] += a3Est; } else { bankBalance -= a3Est; }
         }
       }
     }
@@ -925,11 +934,10 @@ function runFundingWaterfall(
           bankBalance         -= eqReturn;
         }
         if (bankBalance > 0) {
-          // Profit distribution — split by normalized profitShare weights
-          const jvShr    = inputs.equityJV?.profitShare  ?? 0;
-          const devShr   = inputs.equityKokoda?.profitShare ?? 1;
-          const totalShr = jvShr + devShr;
-          const jvProfit = totalShr > 0 ? bankBalance * jvShr / totalShr : 0;
+          // Profit distribution — jvShr is stored as a decimal fraction (e.g. 0.15 = 15%).
+          // Apply it directly; dev gets the remainder implicitly via profitDist - jvProfitDist.
+          const jvShr    = inputs.equityJV?.profitShare ?? 0;
+          const jvProfit = bankBalance * jvShr;
           jvProfitDist[i] += jvProfit;
           profitDist[i]   += bankBalance;
           bankBalance      = 0;
