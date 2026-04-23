@@ -151,13 +151,37 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const appTitle = admin.appName || 'Project Development Feasibility Model';
+
+  // Sync browser tab title
+  useEffect(() => {
+    document.title = admin.projectName ? `${admin.projectName} — ${appTitle}` : appTitle;
+  }, [appTitle, admin.projectName]);
+
+  // Sync favicon
+  useEffect(() => {
+    if (!admin.faviconDataUrl) return;
+    let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    link.href = admin.faviconDataUrl;
+  }, [admin.faviconDataUrl]);
+
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col">
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: admin.appBgColor || '#f3f4f6' }}>
       {/* Header */}
       <header className="bg-gray-800 text-white px-4 py-3 flex items-center justify-between shadow">
-        <div>
-          <h1 className="text-lg font-bold tracking-wide">Project Development Feasibility Model</h1>
-          <p className="text-xs text-gray-400">{admin.projectName || 'Property Development Feasibility Analysis'}</p>
+        <div className="flex items-center gap-3">
+          {admin.logoDataUrl && (
+            <img src={admin.logoDataUrl} alt="Logo" className="h-10 w-auto object-contain rounded" />
+          )}
+          <div>
+            <h1 className="text-lg font-bold tracking-wide">{appTitle}</h1>
+            <p className="text-xs text-gray-400">{admin.projectName || 'Property Development Feasibility Analysis'}</p>
+          </div>
         </div>
         <div className="flex gap-2">
           <button
@@ -232,7 +256,7 @@ function App() {
 
       {/* Footer */}
       <footer className="bg-gray-800 text-gray-500 text-xs text-center py-2">
-        <div>Project Development Feasibility Model &mdash; Web Application</div>
+        <div>{appTitle} &mdash; Web Application</div>
         <div className="text-gray-600 text-[10px] mt-0.5">
           Last updated: {new Date(__BUILD_TIME__).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}
         </div>

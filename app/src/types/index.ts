@@ -184,6 +184,14 @@ export interface AdminConfig {
   itcRecoveryLagMonths?: number;
   /** Equity drawdown mode: 'equity-first' draws all equity before any senior; 'pro-rata' draws equity and senior simultaneously at a fixed ratio */
   equityDrawdownMode?: 'equity-first' | 'pro-rata';
+  /** Branding: custom application title shown in header and browser tab */
+  appName?: string;
+  /** Branding: base64-encoded logo image (data URL) displayed in header top-left */
+  logoDataUrl?: string;
+  /** Branding: base64-encoded favicon image (data URL) applied to browser tab */
+  faviconDataUrl?: string;
+  /** Branding: CSS colour for the page background (e.g. '#f3f4f6') */
+  appBgColor?: string;
 }
 
 // ===== MAIN INPUTS =====

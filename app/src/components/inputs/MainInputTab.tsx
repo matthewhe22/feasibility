@@ -924,6 +924,7 @@ export function MainInputTab() {
     { id: 'otherFin', label: '4.3 Other Fin' },
     { id: 'actuals', label: 'Actuals' },
     { id: 'sCurves', label: 'S-Curves' },
+    { id: 'branding', label: 'Branding' },
   ];
 
   const totalPeriods = inputs.preliminary.projectSpanMonths || 74;
@@ -1439,6 +1440,151 @@ export function MainInputTab() {
           </div>
         </div>
       )}
+
+      {/* Branding */}
+      {section === 'branding' && (
+        <BrandingSection />
+      )}
+    </div>
+  );
+}
+
+// ── Branding Section ──────────────────────────────────────────────────────────
+function BrandingSection() {
+  const { admin, setAdmin } = useStore();
+
+  const handleFileUpload = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    field: 'logoDataUrl' | 'faviconDataUrl',
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const dataUrl = ev.target?.result as string;
+      setAdmin({ [field]: dataUrl });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const DEFAULT_BG = '#f3f4f6';
+
+  return (
+    <div>
+      <SectionHeader number="6" title="Branding & Appearance">
+        <button
+          onClick={() => {
+            if (!confirm('Reset all branding to defaults?')) return;
+            setAdmin({ appName: undefined, logoDataUrl: undefined, faviconDataUrl: undefined, appBgColor: undefined });
+          }}
+          className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
+        >Reset to Defaults</button>
+      </SectionHeader>
+      <div className="bg-white border border-t-0 border-gray-200 rounded-b p-4 space-y-5">
+
+        {/* App name */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">Application Title</label>
+          <input
+            type="text"
+            value={admin.appName ?? ''}
+            placeholder="Project Development Feasibility Model"
+            onChange={e => setAdmin({ appName: e.target.value || undefined })}
+            className="w-full max-w-sm text-sm bg-yellow-50 border border-gray-300 rounded px-2 py-1.5"
+          />
+          <p className="text-xs text-gray-400 mt-1">Shown in the header and browser tab. Leave blank for the default title.</p>
+        </div>
+
+        {/* Page background colour */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">Page Background Colour</label>
+          <div className="flex items-center gap-3">
+            <input
+              type="color"
+              value={admin.appBgColor ?? DEFAULT_BG}
+              onChange={e => setAdmin({ appBgColor: e.target.value })}
+              className="h-9 w-16 rounded border border-gray-300 cursor-pointer"
+            />
+            <input
+              type="text"
+              value={admin.appBgColor ?? DEFAULT_BG}
+              placeholder={DEFAULT_BG}
+              onChange={e => setAdmin({ appBgColor: e.target.value || undefined })}
+              className="w-28 text-sm bg-yellow-50 border border-gray-300 rounded px-2 py-1.5 font-mono"
+            />
+            <button
+              onClick={() => setAdmin({ appBgColor: undefined })}
+              className="text-xs text-gray-500 underline"
+            >Reset</button>
+          </div>
+        </div>
+
+        {/* Logo */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">Header Logo</label>
+          <div className="flex items-start gap-4">
+            {admin.logoDataUrl ? (
+              <div className="flex flex-col items-center gap-1">
+                <img src={admin.logoDataUrl} alt="Logo preview" className="h-16 w-auto object-contain border border-gray-200 rounded p-1 bg-gray-800" />
+                <button
+                  onClick={() => setAdmin({ logoDataUrl: undefined })}
+                  className="text-xs text-red-500 underline"
+                >Remove</button>
+              </div>
+            ) : (
+              <div className="h-16 w-28 border border-dashed border-gray-300 rounded flex items-center justify-center text-xs text-gray-400 bg-gray-50">
+                No logo
+              </div>
+            )}
+            <div>
+              <label className="cursor-pointer inline-block text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded font-medium">
+                Upload Logo
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={e => handleFileUpload(e, 'logoDataUrl')}
+                />
+              </label>
+              <p className="text-xs text-gray-400 mt-1">PNG, SVG or JPG. Displayed at 40px height in the header.</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Favicon */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">Browser Tab Favicon</label>
+          <div className="flex items-start gap-4">
+            {admin.faviconDataUrl ? (
+              <div className="flex flex-col items-center gap-1">
+                <img src={admin.faviconDataUrl} alt="Favicon preview" className="h-10 w-10 object-contain border border-gray-200 rounded p-1" />
+                <button
+                  onClick={() => setAdmin({ faviconDataUrl: undefined })}
+                  className="text-xs text-red-500 underline"
+                >Remove</button>
+              </div>
+            ) : (
+              <div className="h-10 w-10 border border-dashed border-gray-300 rounded flex items-center justify-center text-xs text-gray-400 bg-gray-50">
+                —
+              </div>
+            )}
+            <div>
+              <label className="cursor-pointer inline-block text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded font-medium">
+                Upload Favicon
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={e => handleFileUpload(e, 'faviconDataUrl')}
+                />
+              </label>
+              <p className="text-xs text-gray-400 mt-1">ICO, PNG or SVG. Applied immediately to the browser tab.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
     </div>
   );
 }
