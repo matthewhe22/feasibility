@@ -1,6 +1,11 @@
 import type { Period, MainInputs, DebtFacility } from '../types';
 import { sum } from '../utils';
 
+// Collect warnings for equity backstop overruns — reset per engine run
+const _fundingWarnings: string[] = [];
+export function clearFundingWarnings(): void { _fundingWarnings.length = 0; }
+export function getFundingWarnings(): string[] { return [..._fundingWarnings]; }
+
 // Zero-value facility used as a safe fallback when an optional facility is missing
 // (e.g. when loading a project saved before Senior Facility #2/#3 were added).
 const EMPTY_FACILITY: DebtFacility = {
@@ -875,7 +880,14 @@ function runFundingWaterfall(
 
       // Equity backstop — developer (Kokoda) is always the equity of last resort
       if (bankBalance < 0) {
-        const backstop   = -bankBalance;
+        const backstop = -bankBalance;
+        const kokodaUsed = cumulativeEquity - jvCumulative;
+        const kokodaRemaining = Math.max(0, kokodaCap - kokodaUsed);
+        if (backstop > kokodaRemaining + 1) {
+          _fundingWarnings.push(
+            `Period ${i + 1}: equity backstop $${Math.round(backstop).toLocaleString()} exceeds remaining Kokoda cap $${Math.round(kokodaRemaining).toLocaleString()} — project is underfunded`
+          );
+        }
         eqInjections[i] += backstop;
         cumulativeEquity += backstop;
         bankBalance       = 0;

@@ -251,7 +251,7 @@ export const defaultLandLoan: DebtFacility = {
   name: 'Land Loan Facility',
   facilityLimit: 120000000,
   startMonth: 30,
-  maturityMonth: 3,
+  maturityMonth: 33,
   interestRate: 0.11265,
   bbsy: 0,
   margin: 0.11265,

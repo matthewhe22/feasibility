@@ -2,12 +2,13 @@ import type { AdminConfig, MainInputs, DashboardData, MonthlyCashflow } from '..
 import { generateTimeline } from './timeline';
 import { spreadCosts, spreadLandPayments, clearSCurveWarnings, getSCurveWarnings } from './costSpreading';
 import { spreadSettlements, spreadDeposits, spreadIncome, spreadBackEndCommissions, calculateSellingCommissions, totalGRV, totalNRV } from './revenue';
-import { solveFunding } from './funding';
+import { solveFunding, clearFundingWarnings, getFundingWarnings } from './funding';
 import { sum, calculateIRR } from '../utils';
 
 export function runCalculations(admin: AdminConfig, inputs: MainInputs): DashboardData {
-  // Reset S-curve warnings for this run
+  // Reset warnings for this run
   clearSCurveWarnings();
+  clearFundingWarnings();
 
   const periods = generateTimeline(admin, inputs);
   const n = periods.length;
@@ -690,6 +691,6 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       unsoldGRV: totalAptGRV - grvSoldExchanged,
     },
     cashflows,
-    warnings: getSCurveWarnings(),
+    warnings: [...getSCurveWarnings(), ...getFundingWarnings()],
   };
 }
