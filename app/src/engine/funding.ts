@@ -438,7 +438,12 @@ function runFundingWaterfall(
   const addl3Interest   = new Array(n).fill(0);
   const addl3Fees       = new Array(n).fill(0);
 
+  // Equity/profit distributions are gated: no distributions before equityDistStartMonth.
+  // Surplus cash accumulates in the project bank account and carries forward.
+  const eqDistStartIdx = (inputs.preliminary.equityDistStartMonth ?? 0) - 1;
+
   // ===== Running state =====
+  let heldBankBalance     = 0; // surplus cash held when distributions are gated
   let llRunningBalance    = 0;
   let snrRunningBalance   = 0;
   let snr2RunningBalance  = 0;
@@ -501,7 +506,9 @@ function runFundingWaterfall(
     const snr3OpenBalance = snr3RunningBalance;
     const mzOpenBalance   = mzRunningBalance;
 
-    let bankBalance = 0;
+    // Carry forward any surplus held from prior periods (distributions gated)
+    let bankBalance = heldBankBalance;
+    heldBankBalance = 0;
 
     // ── 2. Land loan lump-sum draw + establishment fee ─────────────────────────
     if (i === llStartIdx && landLoan.facilityLimit > 0) {
@@ -920,27 +927,33 @@ function runFundingWaterfall(
         bankBalance         -= repay;
       }
       if (bankBalance > 0) {
-        // Equity repatriation — pro-rata between JV and Kokoda based on outstanding
-        const jvOutstanding     = Math.max(0, jvCumulative - totalJVRepatriated);
-        const totalOutstanding  = Math.max(0, cumulativeEquity - totalEqRepatriated);
-        if (totalOutstanding > 0) {
-          const eqReturn  = Math.min(bankBalance, totalOutstanding);
-          const jvFrac    = jvOutstanding / totalOutstanding;
-          const jvRep     = eqReturn * jvFrac;
-          jvRepatriations[i]  += jvRep;
-          eqRepatriations[i]  += eqReturn;
-          totalJVRepatriated  += jvRep;
-          totalEqRepatriated  += eqReturn;
-          bankBalance         -= eqReturn;
-        }
-        if (bankBalance > 0) {
-          // Profit distribution — jvShr is stored as a decimal fraction (e.g. 0.15 = 15%).
-          // Apply it directly; dev gets the remainder implicitly via profitDist - jvProfitDist.
-          const jvShr    = inputs.equityJV?.profitShare ?? 0;
-          const jvProfit = bankBalance * jvShr;
-          jvProfitDist[i] += jvProfit;
-          profitDist[i]   += bankBalance;
+        if (i < eqDistStartIdx) {
+          // Before the distribution window: hold surplus in the project account
+          heldBankBalance += bankBalance;
           bankBalance      = 0;
+        } else {
+          // Equity repatriation — pro-rata between JV and Kokoda based on outstanding
+          const jvOutstanding     = Math.max(0, jvCumulative - totalJVRepatriated);
+          const totalOutstanding  = Math.max(0, cumulativeEquity - totalEqRepatriated);
+          if (totalOutstanding > 0) {
+            const eqReturn  = Math.min(bankBalance, totalOutstanding);
+            const jvFrac    = jvOutstanding / totalOutstanding;
+            const jvRep     = eqReturn * jvFrac;
+            jvRepatriations[i]  += jvRep;
+            eqRepatriations[i]  += eqReturn;
+            totalJVRepatriated  += jvRep;
+            totalEqRepatriated  += eqReturn;
+            bankBalance         -= eqReturn;
+          }
+          if (bankBalance > 0) {
+            // Profit distribution — jvShr is stored as a decimal fraction (e.g. 0.15 = 15%).
+            // Apply it directly; dev gets the remainder implicitly via profitDist - jvProfitDist.
+            const jvShr    = inputs.equityJV?.profitShare ?? 0;
+            const jvProfit = bankBalance * jvShr;
+            jvProfitDist[i] += jvProfit;
+            profitDist[i]   += bankBalance;
+            bankBalance      = 0;
+          }
         }
       }
     }
