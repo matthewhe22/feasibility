@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+:root {
+  --pencil-ink: #0E1012;
+  --pencil-paper: #F4F1EA;
+  --pencil-paper-2: #EBE6DB;
+  --pencil-rule: #CFC7B5;
+  --pencil-muted: #6A6558;
+  --pencil-ochre: #C48A3C;
+  --pencil-ochre-deep: #91571E;
+}
+
+body {
+  margin: 0;
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  background: var(--pencil-paper);
+  color: var(--pencil-ink);
+}
+
+#root { width: 100%; max-width: 100%; margin: 0; text-align: left; }
+
+/* Pencil header + nav */
+.pencil-header {
+  background: var(--pencil-ink);
+  color: var(--pencil-paper);
+  border-bottom: 1px solid #1A1D21;
+}
+.pencil-wordmark {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.pencil-tagline {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #B5AE9C;
+}
+.pencil-tab {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.pencil-tab-active {
+  color: var(--pencil-ink);
+  border-bottom-color: var(--pencil-ochre);
+}
+.pencil-num { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--pencil-paper-2); }
+::-webkit-scrollbar-thumb { background: var(--pencil-muted); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--pencil-ink); }
+
+input[type="number"]::-webkit-inner-spin-button { opacity: 0; }
+input[type="number"]:hover::-webkit-inner-spin-button { opacity: 1; }
