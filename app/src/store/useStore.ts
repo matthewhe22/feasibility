@@ -167,6 +167,18 @@ export const useStore = create<AppState>()(
         currentProjectId: state.currentProjectId,
         // dashboardData and isCalculating are intentionally excluded
       }),
+      // Deep-merge persisted inputs/admin with current defaults so that newly
+      // added fields (e.g. equityJV, equityPreferred) are never undefined when
+      // loading an older persisted state.
+      merge: (persisted, current) => {
+        const p = persisted as Partial<AppState>;
+        return {
+          ...current,
+          ...p,
+          admin: { ...current.admin, ...(p.admin ?? {}) },
+          inputs: { ...current.inputs, ...(p.inputs ?? {}) },
+        };
+      },
     },
   ),
 );

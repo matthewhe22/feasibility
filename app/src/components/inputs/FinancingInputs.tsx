@@ -149,22 +149,22 @@ export function FinancingInputs() {
           <div>
             <h4 className="text-sm font-bold text-gray-700 mb-2">4.1 Equity</h4>
             <EquitySection
-              title={inputs.equityDeveloper.name}
+              title={inputs.equityDeveloper?.name ?? 'Developer'}
               config={inputs.equityDeveloper}
               onChange={(c) => setInputs({ equityDeveloper: c })}
             />
             <EquitySection
-              title={inputs.equityJV.name}
+              title={inputs.equityJV?.name ?? 'JV Partner'}
               config={inputs.equityJV}
               onChange={(c) => setInputs({ equityJV: c })}
             />
             <EquitySection
-              title={inputs.equityPreferred.name}
+              title={inputs.equityPreferred?.name ?? 'Preferred Equity'}
               config={inputs.equityPreferred}
               onChange={(c) => setInputs({ equityPreferred: c })}
             />
             <EquitySection
-              title={inputs.equityAdditional.name}
+              title={inputs.equityAdditional?.name ?? 'Additional Equity #1'}
               config={inputs.equityAdditional}
               onChange={(c) => setInputs({ equityAdditional: c })}
             />
