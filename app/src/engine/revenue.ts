@@ -1,16 +1,47 @@
-import type { RevenueLineItem, RentalIncomeItem, Period, SellingCostConfig } from '../types';
+import type { RevenueLineItem, RentalIncomeItem, Period, SellingCostConfig, GSTSupplyType } from '../types';
+
+// Collects per-engine-run warnings about invalid revenue input (month ordering, span overflow).
+// Cleared via clearRevenueWarnings() at the start of each runCalculations() call.
+const _revenueWarnings: Set<string> = new Set();
+export function clearRevenueWarnings(): void { _revenueWarnings.clear(); }
+export function getRevenueWarnings(): string[] { return Array.from(_revenueWarnings); }
+
+// Guard: coerce a possibly-invalid numeric span to a positive integer, logging a warning.
+function normaliseSpan(
+  span: number | undefined,
+  periodsLength: number,
+  context: string,
+): number {
+  const n = Number.isFinite(span) ? Math.floor(span as number) : 0;
+  if (n <= 0) return 1;
+  if (n > periodsLength) {
+    _revenueWarnings.add(`${context}: span ${n} exceeds timeline length ${periodsLength} — capped.`);
+    return periodsLength;
+  }
+  return n;
+}
 
 // Spread GRV settlements across periods, blending per-period actuals with
 // remaining-budget redistribution (same pattern as spreadCost in costSpreading.ts).
 export function spreadSettlements(items: RevenueLineItem[], periods: Period[]): number[] {
-  const result = new Array(periods.length).fill(0);
+  const n = periods.length;
+  const result = new Array(n).fill(0);
   for (const item of items) {
-    if (item.currentSalePrice === 0 || item.settlementMonth <= 0) continue;
+    if (!Number.isFinite(item.currentSalePrice) || item.currentSalePrice <= 0) continue;
+    if (!Number.isFinite(item.settlementMonth) || item.settlementMonth <= 0) continue;
+
+    // Validate month ordering: settlement must not precede presale exchange.
+    if (item.preSaleExchangeMonth > 0 && item.settlementMonth < item.preSaleExchangeMonth) {
+      _revenueWarnings.add(
+        `Revenue item ${item.code}: settlement month ${item.settlementMonth} precedes presale exchange month ${item.preSaleExchangeMonth}. `
+        + `This would reverse the cashflow (deposit received after settlement). Check inputs.`
+      );
+    }
 
     if (item.actuals && item.actuals.some(v => v != null && v > 0)) {
       // Actual periods: use uploaded values
       let actualTotal = 0;
-      for (let i = 0; i < periods.length; i++) {
+      for (let i = 0; i < n; i++) {
         if (periods[i].isActual) {
           const actual = item.actuals[i] ?? 0;
           result[i] += actual;
@@ -22,11 +53,11 @@ export function spreadSettlements(items: RevenueLineItem[], periods: Period[]): 
       const remaining = item.currentSalePrice - actualTotal;
       if (remaining > 0) {
         const startIdx = item.settlementMonth - 1;
-        const span = item.settlementSpan || 1;
+        const span = normaliseSpan(item.settlementSpan, n, `Revenue item ${item.code} settlement`);
         const forecastEntries: { idx: number; weight: number }[] = [];
         for (let i = 0; i < span; i++) {
           const idx = startIdx + i;
-          if (idx >= 0 && idx < periods.length && !periods[idx].isActual) {
+          if (idx >= 0 && idx < n && !periods[idx].isActual) {
             forecastEntries.push({ idx, weight: 1 }); // uniform: each slot has equal weight
           }
         }
@@ -42,11 +73,11 @@ export function spreadSettlements(items: RevenueLineItem[], periods: Period[]): 
 
     // Standard: even distribution across settlement span
     const startIdx = item.settlementMonth - 1;
-    const span = item.settlementSpan || 1;
+    const span = normaliseSpan(item.settlementSpan, n, `Revenue item ${item.code} settlement`);
     const perMonth = item.currentSalePrice / span;
     for (let i = 0; i < span; i++) {
       const idx = startIdx + i;
-      if (idx >= 0 && idx < periods.length) {
+      if (idx >= 0 && idx < n) {
         result[idx] += perMonth;
       }
     }
@@ -54,19 +85,30 @@ export function spreadSettlements(items: RevenueLineItem[], periods: Period[]): 
   return result;
 }
 
-// Spread deposits (presale exchange) across periods
-export function spreadDeposits(items: RevenueLineItem[], periods: Period[]): number[] {
-  const result = new Array(periods.length).fill(0);
-  for (const item of items) {
-    if (item.currentSalePrice === 0 || item.preSaleExchangeMonth <= 0 || item.preSaleSpan <= 0) continue;
-    const depositAmount = item.currentSalePrice * 0.1;
+// Spread deposits (presale exchange) across periods.
+// Per-item depositPercent is read from the matching SellingCostConfig (defaults to 10%).
+export function spreadDeposits(
+  items: RevenueLineItem[],
+  periods: Period[],
+  sellingCosts?: SellingCostConfig[],
+): number[] {
+  const n = periods.length;
+  const result = new Array(n).fill(0);
+  for (let idx = 0; idx < items.length; idx++) {
+    const item = items[idx];
+    if (!Number.isFinite(item.currentSalePrice) || item.currentSalePrice <= 0) continue;
+    if (!Number.isFinite(item.preSaleExchangeMonth) || item.preSaleExchangeMonth <= 0) continue;
+    if (!Number.isFinite(item.preSaleSpan) || item.preSaleSpan <= 0) continue;
+    const configuredPct = sellingCosts?.[idx]?.depositPercent;
+    const depositPct = (typeof configuredPct === 'number' && configuredPct > 0) ? configuredPct : 0.1;
+    const depositAmount = item.currentSalePrice * depositPct;
     const startIdx = item.preSaleExchangeMonth - 1;
-    const span = item.preSaleSpan;
+    const span = normaliseSpan(item.preSaleSpan, n, `Revenue item ${item.code} presale`);
     const perMonth = depositAmount / span;
     for (let i = 0; i < span; i++) {
-      const idx = startIdx + i;
-      if (idx >= 0 && idx < periods.length) {
-        result[idx] += perMonth;
+      const targetIdx = startIdx + i;
+      if (targetIdx >= 0 && targetIdx < n) {
+        result[targetIdx] += perMonth;
       }
     }
   }
@@ -102,22 +144,24 @@ export function spreadBackEndCommissions(
   sellingCosts: SellingCostConfig[],
   periods: Period[],
 ): number[] {
-  const result = new Array(periods.length).fill(0);
+  const n = periods.length;
+  const result = new Array(n).fill(0);
   for (let i = 0; i < grvItems.length && i < sellingCosts.length; i++) {
     const grv = grvItems[i];
     const sc = sellingCosts[i];
-    if (!sc || grv.currentSalePrice === 0 || grv.settlementMonth <= 0) continue;
+    if (!sc || !Number.isFinite(grv.currentSalePrice) || grv.currentSalePrice <= 0) continue;
+    if (!Number.isFinite(grv.settlementMonth) || grv.settlementMonth <= 0) continue;
 
     const totalCommission = grv.currentSalePrice * sc.salesCommission;
     const backEnd = totalCommission * (1 - sc.preCommissionPercent);
     if (backEnd <= 0) continue;
 
     const startIdx = grv.settlementMonth - 1;
-    const span = grv.settlementSpan || 1;
+    const span = normaliseSpan(grv.settlementSpan, n, `Revenue item ${grv.code} settlement`);
     const perMonth = backEnd / span;
     for (let j = 0; j < span; j++) {
       const idx = startIdx + j;
-      if (idx >= 0 && idx < periods.length) {
+      if (idx >= 0 && idx < n) {
         result[idx] += perMonth;
       }
     }
@@ -128,16 +172,19 @@ export function spreadBackEndCommissions(
 // Spread rental/other income, blending per-period actuals with remaining-budget
 // redistribution over forecast periods within the item's span.
 export function spreadIncome(items: RentalIncomeItem[], periods: Period[]): number[] {
-  const result = new Array(periods.length).fill(0);
+  const n = periods.length;
+  const result = new Array(n).fill(0);
   for (const item of items) {
     const total = item.units * item.baseRate;
-    if (total === 0 || item.monthSpan <= 0) continue;
+    if (!Number.isFinite(total) || total === 0) continue;
+    if (!Number.isFinite(item.monthSpan) || item.monthSpan <= 0) continue;
     const startIdx = item.monthStart - 1;
+    const monthSpan = normaliseSpan(item.monthSpan, n, `Income item ${item.code}`);
 
     if (item.actuals && item.actuals.some(v => v != null && v > 0)) {
       // Actual periods: use uploaded values
       let actualTotal = 0;
-      for (let i = 0; i < periods.length; i++) {
+      for (let i = 0; i < n; i++) {
         if (periods[i].isActual) {
           const actual = item.actuals[i] ?? 0;
           result[i] += actual;
@@ -148,9 +195,9 @@ export function spreadIncome(items: RentalIncomeItem[], periods: Period[]): numb
       const remaining = total - actualTotal;
       if (remaining > 0) {
         const forecastIdxs: number[] = [];
-        for (let i = 0; i < item.monthSpan; i++) {
+        for (let i = 0; i < monthSpan; i++) {
           const idx = startIdx + i;
-          if (idx >= 0 && idx < periods.length && !periods[idx].isActual) {
+          if (idx >= 0 && idx < n && !periods[idx].isActual) {
             forecastIdxs.push(idx);
           }
         }
@@ -165,15 +212,39 @@ export function spreadIncome(items: RentalIncomeItem[], periods: Period[]): numb
     }
 
     // Standard: even distribution
-    const perMonth = total / item.monthSpan;
-    for (let i = 0; i < item.monthSpan; i++) {
+    const perMonth = total / monthSpan;
+    for (let i = 0; i < monthSpan; i++) {
       const idx = startIdx + i;
-      if (idx >= 0 && idx < periods.length) {
+      if (idx >= 0 && idx < n) {
         result[idx] += perMonth;
       }
     }
   }
   return result;
+}
+
+/**
+ * Resolve the effective GST supply type for a revenue item.
+ * If the item specifies supplyType explicitly, use that. Otherwise derive from
+ * gstIncluded: gstIncluded=true → margin-scheme (new residential), false → input-taxed.
+ *
+ * NOTE: commercial/retail/hotel items that ARE standard-rated should be configured
+ * with gstIncluded=true or explicit supplyType='standard'. Legacy projects with
+ * gstIncluded=false on commercial items are preserved as input-taxed (no GST).
+ */
+export function resolveSupplyType(item: RevenueLineItem): GSTSupplyType {
+  if (item.supplyType) return item.supplyType;
+  if (item.gstIncluded) return 'margin-scheme';
+  return 'input-taxed';
+}
+
+/**
+ * Resolve the effective GST supply type for a rental/other income item.
+ * Default is input-taxed (long-term residential rental, GSTA s.40-70).
+ */
+export function resolveIncomeSupplyType(item: RentalIncomeItem): GSTSupplyType {
+  if (item.supplyType) return item.supplyType;
+  return 'input-taxed';
 }
 
 // Calculate GST on residential sales (margin scheme)

@@ -361,7 +361,44 @@ export function InternalDashboard() {
           <TableBox>
             <TableHeader>Table 10 - Other Indicators</TableHeader>
             <DashValue label="Peak Interest Holding Cost per Month" value={data.otherIndicators.peakInterestHoldingCostPerMonth} />
+            <DashValue label="Payback Period (months)" value={data.otherIndicators.paybackPeriodMonths ?? 0} unit="#" indent />
           </TableBox>
+
+          {/* DSCR & Peak Equity */}
+          {data.dscr && (
+            <TableBox>
+              <TableHeader>Table 12 - Debt Service &amp; Peak Exposure</TableHeader>
+              <DashValue label="Average DSCR" value={data.dscr.averageDSCR} unit="ratio" />
+              <DashValue label="Minimum DSCR" value={data.dscr.minimumDSCR} unit="ratio" indent />
+              <DashValue label="DSCR Target" value={data.dscr.targetDSCR} unit="ratio" indent />
+              <div className={`flex justify-between items-center py-0.5 px-2 text-xs pl-4 ${data.dscr.meetsTarget ? 'text-green-700' : 'text-red-700'}`}>
+                <span>Target Met?</span><span>{data.dscr.meetsTarget ? 'Yes' : 'No'}</span>
+              </div>
+              <DashValue label="Peak Debt" value={data.dscr.peakDebt} bold />
+              <DashValue label="Peak Equity (net of repatriations)" value={data.dscr.peakEquity} bold />
+              <DashValue label="Peak Equity Month (period #)" value={data.dscr.peakEquityMonth} unit="#" indent />
+            </TableBox>
+          )}
+
+          {/* GST Compliance Schedule */}
+          {data.gstCompliance && (
+            <TableBox>
+              <TableHeader>Table 13 - GST Compliance Schedule</TableHeader>
+              <DashValue label="Margin-Scheme Supplies (Division 75)" value={data.gstCompliance.marginSchemeSupplies} />
+              <DashValue label="  Land Cost Apportioned to Margin" value={data.gstCompliance.marginSchemeLandCost} indent />
+              <DashValue label="  Taxable Margin" value={data.gstCompliance.taxableMargin} indent />
+              <DashValue label="  GST on Margin-Scheme Supplies" value={data.gstCompliance.gstOnMarginSchemeSupplies} indent bold />
+              <DashValue label="Standard-Rated Supplies" value={data.gstCompliance.standardRatedSupplies} />
+              <DashValue label="  GST on Standard Supplies" value={data.gstCompliance.gstOnStandardSupplies} indent />
+              <DashValue label="Input-Taxed Supplies" value={data.gstCompliance.inputTaxedSupplies} />
+              <DashValue label="Going-Concern Supplies" value={data.gstCompliance.goingConcernSupplies} />
+              <DashValue label="Creditable Acquisitions (ex-GST)" value={data.gstCompliance.creditableAcquisitions} />
+              <DashValue label="ITC Claimable" value={data.gstCompliance.itcClaimable} indent />
+              <DashValue label="GST Withholding (s.72-55)" value={data.gstCompliance.gstWithholdingTotal} indent />
+              <div className="h-1 bg-gray-300" />
+              <DashValue label="Net GST Payable to ATO" value={data.gstCompliance.netGSTPayable} bold highlight />
+            </TableBox>
+          )}
 
           {/* GRV Summary */}
           <TableBox>
@@ -370,6 +407,18 @@ export function InternalDashboard() {
             <DashValue label="GRV Sold / Exchanged" value={data.grvSummary.grvSoldExchanged} indent />
             <DashValue label="Unsold GRV" value={data.grvSummary.unsoldGRV} indent />
           </TableBox>
+
+          {/* Warnings */}
+          {data.warnings && data.warnings.length > 0 && (
+            <TableBox>
+              <TableHeader>Model Warnings</TableHeader>
+              <ul className="text-xs text-amber-900 bg-amber-50 px-3 py-2 space-y-1">
+                {data.warnings.map((w, i) => (
+                  <li key={i} className="list-disc list-inside">{w}</li>
+                ))}
+              </ul>
+            </TableBox>
+          )}
         </div>
       </div>
     </div>

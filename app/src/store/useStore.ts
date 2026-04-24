@@ -30,6 +30,7 @@ import {
   defaultAdditionalLoan,
   defaultOtherFinancingCosts,
 } from './defaults';
+import { cloneStandardBuildSCurves } from '../engine/sCurves';
 
 export type TabId = 'admin' | 'input' | 'timeDist' | 'actuals' | 'internalDash' | 'externalDash' | 'cashflow' | 'summary' | 'charts' | 'checks' | 'docs';
 
@@ -72,7 +73,11 @@ const defaultAdmin: AdminConfig = {
     'Manual S-curve 3',
   ],
   manualSCurves: [[], [], []],
-  buildSCurves: {},
+  buildSCurves: cloneStandardBuildSCurves(),
+  itcRecoveryLagMonths: 0,
+  applyGSTWithholding: false,
+  contingencyGSTMode: 'full',
+  dscrTarget: 1.25,
 };
 
 const defaultInputs: MainInputs = {
