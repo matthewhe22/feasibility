@@ -203,6 +203,7 @@ export function solveFunding(
   let prevPeakSnrBalance  = 0;
   let prevPeakSnr2Balance = 0;
   let prevPeakSnr3Balance = 0;
+  let prevPeakMezzBalance = 0;
   let result: FundingResult = createEmptyResult(n);
   let converged = false;
   let iterationsRun = 0;
@@ -217,7 +218,7 @@ export function solveFunding(
     result = runFundingWaterfall(
       periods, monthlyCostsExcFinance, monthlyRevenue, _monthlyGSTNet, gstOnRevenue,
       inputs, tdc, daysPerYear,
-      prevPeakSnrBalance, prevPeakSnr2Balance, prevPeakSnr3Balance,
+      prevPeakSnrBalance, prevPeakSnr2Balance, prevPeakSnr3Balance, prevPeakMezzBalance,
       equityDrawdownMode,
     );
 
@@ -245,6 +246,7 @@ export function solveFunding(
     prevPeakSnrBalance  = result.seniorFacilitySize;
     prevPeakSnr2Balance = result.senior2FacilitySize;
     prevPeakSnr3Balance = result.senior3FacilitySize;
+    prevPeakMezzBalance = result.mezzFacilitySize;
   }
 
   result.converged = converged;
@@ -343,6 +345,7 @@ function runFundingWaterfall(
   peakSnrBalancePrev = 0,
   peakSnr2BalancePrev = 0,
   peakSnr3BalancePrev = 0,
+  peakMezzBalancePrev = 0,
   equityDrawdownMode: 'equity-first' | 'pro-rata' = 'equity-first',
 ): FundingResult {
   const n = periods.length;
@@ -532,6 +535,7 @@ function runFundingWaterfall(
   let peakSnrBalance       = 0;
   let peakSnr2Balance      = 0;
   let peakSnr3Balance      = 0;
+  let peakMezzBalance      = 0;
   let peakEquityDrawn      = 0;
   let peakEquityMonth      = 0;
 
@@ -723,7 +727,8 @@ function runFundingWaterfall(
         bankBalance -= mzInt;
       }
 
-      const mzLineFee = periodInterest(mezzLimit, mezz.lineFeePercent, days, daysPerYear);
+      const mzLineFeeBase = resolveLineFeeBase(mezz, mezzLimit, mzRunningBalance, peakMezzBalancePrev);
+      const mzLineFee = periodInterest(mzLineFeeBase, mezz.lineFeePercent, days, daysPerYear);
       if (mzLineFee > 0) {
         mzFees[i]       += mzLineFee;
         totalMezzFees   += mzLineFee;
@@ -1086,6 +1091,7 @@ function runFundingWaterfall(
     peakSnrBalance  = Math.max(peakSnrBalance,  snrRunningBalance);
     peakSnr2Balance = Math.max(peakSnr2Balance, snr2RunningBalance);
     peakSnr3Balance = Math.max(peakSnr3Balance, snr3RunningBalance);
+    peakMezzBalance = Math.max(peakMezzBalance, mzRunningBalance);
 
     // Peak equity outstanding (cumulative injections − repatriations at this period)
     const equityOutstanding = cumulativeEquity - totalEqRepatriated;
@@ -1161,7 +1167,7 @@ function runFundingWaterfall(
     senior2FacilityLimit: hasSenior2 ? senior2Limit : 0,
     senior3FacilitySize: peakSnr3Balance,
     senior3FacilityLimit: hasSenior3 ? senior3Limit : 0,
-    mezzFacilitySize: hasMezz ? mezzLimit : 0,
+    mezzFacilitySize: peakMezzBalance,
     // Populated in solveFunding():
     converged: false,
     iterations: 0,

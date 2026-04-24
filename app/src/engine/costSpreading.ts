@@ -1,4 +1,4 @@
-import type { CostLineItem, Period } from '../types';
+import type { CostLineItem, CostLineVariance, Period } from '../types';
 
 // Collect warnings for empty S-curve fallbacks — reset per engine run via clearSCurveWarnings()
 const _sCurveWarnings: Set<string> = new Set();
@@ -156,6 +156,36 @@ export function spreadCosts(
     }
   }
   return result;
+}
+
+/**
+ * Compute cost-to-date (ctd) and cost-to-complete (ctc) for a single cost line item.
+ * ctd = sum of actuals[i] for every period where isActual is true.
+ * ctc = max(0, totalCosts − ctd).
+ */
+export function computeCtdCtc(item: CostLineItem, periods: Period[]): { ctd: number; ctc: number } {
+  let ctd = 0;
+  if (item.actuals) {
+    for (let i = 0; i < periods.length; i++) {
+      if (periods[i].isActual) ctd += item.actuals[i] ?? 0;
+    }
+  }
+  return { ctd, ctc: Math.max(0, item.totalCosts - ctd) };
+}
+
+/** Build a CostLineVariance array for a set of cost items. */
+export function buildCostVariance(items: CostLineItem[], periods: Period[]): CostLineVariance[] {
+  return items.map(item => {
+    const { ctd, ctc } = computeCtdCtc(item, periods);
+    return {
+      code: item.code,
+      description: item.description,
+      budget: item.totalCosts,
+      ctd,
+      ctc,
+      varianceToDate: ctd - item.totalCosts,
+    };
+  });
 }
 
 // Spread land payment stages
