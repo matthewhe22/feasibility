@@ -118,6 +118,11 @@ function DebtSection({ title, facility, isLandLoan = false, onChange }: {
               <option value="undrawn-commitment">Undrawn Commitment</option>
             </select>
           </div>
+          {(facility.lineFeeBasis ?? 'peak-drawn') === 'peak-drawn' && (facility.lineFeePercent ?? 0) > 0 && (
+            <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+              Term sheet note: most senior construction facilities (e.g. Goldman Sachs indicative terms) charge the line fee on the <strong>Facility Limit</strong> from Financial Close. Consider switching to <em>Committed Limit</em> for lender-facing models.
+            </p>
+          )}
           <div className="flex items-center gap-2 mt-1">
             <span className="text-xs text-gray-600 w-56 shrink-0" title="If the lender is a GST-exempt financial institution (GSTA s.40-60, typical for banks), fees are GST-free. Non-bank lenders may charge GST on fees with no ITC available (s.11-15).">Lender GST Exempt</span>
             <select

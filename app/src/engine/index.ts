@@ -1,6 +1,6 @@
 import type { AdminConfig, MainInputs, DashboardData, MonthlyCashflow, GSTCompliance, DSCRSummary } from '../types';
 import { generateTimeline } from './timeline';
-import { spreadCosts, spreadLandPayments, clearSCurveWarnings, getSCurveWarnings } from './costSpreading';
+import { spreadCosts, spreadLandPayments, clearSCurveWarnings, getSCurveWarnings, buildCostVariance } from './costSpreading';
 import {
   spreadSettlements, spreadDeposits, spreadIncome, spreadBackEndCommissions,
   calculateSellingCommissions, totalGRV, totalNRV, resolveSupplyType,
@@ -219,30 +219,41 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     const isMarginScheme = supplyType === 'margin-scheme';
     // Standard-rated: full 1/11; margin-scheme: applies only to the margin portion.
     const effectiveFactor = isMarginScheme ? marginSchemeFactor : 1;
-    const gstAmount = item.currentSalePrice * gstRate / (1 + gstRate) * effectiveFactor;
+
+    // Deposit percent for this item — needed before the settlement loop to avoid
+    // double-counting: GST on the deposit is recognised at exchange (gstOnDeposits),
+    // so settlement-period GST should only cover the remaining (1 − depositPct) portion.
+    const hasPresale = item.preSaleExchangeMonth > 0 && item.preSaleSpan > 0;
+    const configuredPct = inputs.sellingCosts[inputs.grvItems.indexOf(item)]?.depositPercent;
+    const depositPct = hasPresale && (typeof configuredPct === 'number' && configuredPct > 0)
+      ? configuredPct
+      : (hasPresale ? 0.1 : 0);
+
+    // Settlement GST — charged on the balance only (full price minus deposit already
+    // taxed at exchange). Without this deduction, GST on the deposit is counted twice.
+    const settleGSTAmount = item.currentSalePrice * (1 - depositPct) * gstRate / (1 + gstRate) * effectiveFactor;
     const settleSpread = spreadSettlements([item], periods);
     for (let i = 0; i < n; i++) {
       const periodShare = settleSpread[i] / item.currentSalePrice;
-      gstOnRevenue[i] += periodShare * gstAmount;
+      gstOnRevenue[i] += periodShare * settleGSTAmount;
     }
-    // Withholding applies to new residential premises (margin-scheme) by default;
-    // commercial standard supplies do not trigger purchaser withholding.
+
+    // Withholding (GSTA s.72-55) — applies to the full supply at settlement.
+    // The purchaser withholds 1/11 of the full GST-exclusive price regardless of
+    // how much was paid as deposit; this is correct per the ATO's remittance rules.
     const itemWithholds = item.withholdingApplies ?? isMarginScheme;
     if (applyWithholding && itemWithholds) {
-      // Withholding = 1/11 of GST-exclusive price (or, under the margin scheme,
-      // 7% of contract price when vendor elects GSTR 2018/1). We use the 1/11 default.
       const withholdAmount = item.currentSalePrice * gstRate / (1 + gstRate) * effectiveFactor;
       for (let i = 0; i < n; i++) {
         const periodShare = settleSpread[i] / item.currentSalePrice;
         gstWithholding[i] += periodShare * withholdAmount;
       }
     }
+
     // Deposit GST — GST liability attaches when deposits are received (GSTA s.9-70).
-    // Allocate GST proportionally across the deposit spread so BAS position reflects
-    // when deposits are actually collected (not deferred to settlement).
-    if (item.preSaleExchangeMonth > 0 && item.preSaleSpan > 0) {
-      const configuredPct = inputs.sellingCosts[inputs.grvItems.indexOf(item)]?.depositPercent;
-      const depositPct = (typeof configuredPct === 'number' && configuredPct > 0) ? configuredPct : 0.1;
+    // Allocate across presale span; together with settleGSTAmount above the total
+    // equals item.currentSalePrice × effectiveFactor × 1/11.
+    if (hasPresale) {
       const depositGST = item.currentSalePrice * depositPct * gstRate / (1 + gstRate) * effectiveFactor;
       const span = Math.max(1, item.preSaleSpan);
       const perMonth = depositGST / span;
@@ -700,11 +711,16 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     else if (supplyType === 'going-concern') goingConcernSupplies += item.currentSalePrice;
   }
   const taxableMargin = Math.max(0, marginSchemeSupplies - marginSchemeDeduction);
-  const gstOnMarginSchemeSupplies = marginSchemeSupplies > 0
-    ? marginSchemeSupplies * gstRate / (1 + gstRate) * marginSchemeFactor
+  // GST on margin-scheme supplies = taxable margin × 1/11 (Division 75, GSTR 2006/1).
+  // Use the pre-computed taxableMargin directly rather than re-applying marginSchemeFactor
+  // to the gross supply value, which is an indirect approximation.
+  const gstOnMarginSchemeSupplies = taxableMargin > 0
+    ? taxableMargin * gstRate / (1 + gstRate)
     : 0;
   const gstWithholdingTotal = sum(gstWithholding);
-  const creditableAcquisitions = totalGSTOnCosts > 0 ? totalGSTOnCosts / gstRate : 0;
+  // Creditable acquisitions = GST-inclusive value of creditable purchases (BAS G18).
+  // ITC = G18 × gstRate/(1+gstRate), so G18 = ITC × (1+gstRate)/gstRate.
+  const creditableAcquisitions = totalGSTOnCosts > 0 ? totalGSTOnCosts * (1 + gstRate) / gstRate : 0;
   const gstCompliance: GSTCompliance = {
     gstRate,
     marginSchemeSupplies,
@@ -909,5 +925,15 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       ...getFundingWarnings(),
       ...getRevenueWarnings(),
     ],
+    costVariance: buildCostVariance(
+      [
+        ...inputs.developmentCosts,
+        ...inputs.constructionCosts,
+        ...inputs.marketingCosts,
+        ...inputs.otherStandardCosts,
+        ...inputs.otherFinancingCosts,
+      ],
+      periods,
+    ),
   };
 }

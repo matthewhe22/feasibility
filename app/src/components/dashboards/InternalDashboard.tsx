@@ -164,7 +164,7 @@ export function InternalDashboard() {
                   <tr className="bg-blue-50 text-blue-800">
                     <th className="px-2 py-1 text-left">Capital Stack</th>
                     <th className="px-2 py-1 text-right">LTC</th>
-                    <th className="px-2 py-1 text-right">LVR</th>
+                    <th className="px-2 py-1 text-right" title="Loan-to-Value Ratio. Denominator is NRV — Gross Realization Value net of GST on residential and selling costs. Matches term sheet convention: LTV based on valuation net of GST and selling costs.">LVR (NRV)</th>
                     <th className="px-2 py-1 text-right">Total</th>
                   </tr>
                 </thead>

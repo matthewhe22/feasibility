@@ -596,4 +596,19 @@ export interface DashboardData {
   gstCompliance?: GSTCompliance;
   cashflows: MonthlyCashflow[];
   warnings: string[]; // S-curve and other calculation warnings
+  /** Per-line-item cost variance: budget vs actuals, cost-to-date, cost-to-complete. */
+  costVariance: CostLineVariance[];
+}
+
+/** Budget control metrics for a single cost line item. */
+export interface CostLineVariance {
+  code: string;
+  description: string;
+  budget: number;
+  /** Sum of actuals for all isActual periods. */
+  ctd: number;
+  /** Remaining budget: max(0, budget − ctd). */
+  ctc: number;
+  /** Positive = over budget so far; negative = under budget. */
+  varianceToDate: number;
 }
