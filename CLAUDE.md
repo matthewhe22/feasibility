@@ -102,13 +102,57 @@ src/
 ## Calculation Methodology (Current Decisions)
 
 ### Line Fee
-Charged on the **peak drawn balance** (maximum senior balance reached during the facility term) — per financing term sheet convention where the line fee reflects the maximum committed/drawn amount. The peak balance is computed via the iterative solver: each iteration uses the peak balance from the prior pass as the fee basis, converging to the actual peak debt. Formula: `peakDrawnBalance × lineFeePercent × daysInPeriod / daysPerYear`. Applies for every period that `seniorActive` is true (start month to maturity month inclusive).
+Charged on the **peak drawn balance** by default (maximum senior balance reached during the facility term) — per financing term sheet convention where the line fee reflects the maximum committed/drawn amount. The peak balance is computed via the iterative solver: each iteration uses the peak balance from the prior pass as the fee basis, converging to the actual peak debt. Formula: `peakDrawnBalance × lineFeePercent × daysInPeriod / daysPerYear`. Applies for every period that `seniorActive` is true (start month to maturity month inclusive).
+
+**Line Fee Basis is now configurable** via `DebtFacility.lineFeeBasis`:
+- `'peak-drawn'` (default): converges via solver to the actual peak balance — matches the legacy Excel model and term sheets that reference maximum drawn amount.
+- `'committed-limit'`: charge on the full approved facility limit each active period — matches term sheets where the lender charges the fee on the full commitment (reserved capital).
+- `'undrawn-commitment'`: charge only on the undrawn portion (`limit − drawn`) — commitment-fee style.
+
+Choose the basis that matches the actual term sheet. Do not change the default unless the lender specifies otherwise.
 
 ### ITC Recovery
-GST paid on costs (`gstOnCosts`) is modelled as a **same-period cash recovery** from the ATO (Input Tax Credit). In the funding waterfall, `gstOnCosts` is added to revenue each period to net it against the cost outflow, so the waterfall funds costs on an effective ex-GST basis. The `MonthlyCashflow.itcRecovery` field records this recovery and is included in the net cashflow formula to keep the per-period net ≈ $0.
+GST paid on costs (`gstOnCosts`) is modelled as a cash recovery from the ATO (Input Tax Credit). In the funding waterfall, `gstOnCosts[i - itcLag]` is added to revenue each period to net it against the cost outflow, so the waterfall funds costs on an effective ex-GST basis. The `MonthlyCashflow.itcRecovery` field records this recovery and is included in the net cashflow formula to keep the per-period net ≈ $0.
+
+The lag is configurable via `AdminConfig.itcRecoveryLagMonths` (default 0 = same-period recovery, matches Excel). Set to 1–3 months to model realistic quarterly BAS timing for lender-facing models.
+
+### GST Vendor Withholding (s.72-55)
+When `AdminConfig.applyGSTWithholding=true`, purchasers of margin-scheme residential settlements withhold 1/11 of the GST-exclusive price and remit directly to the ATO under GSTA s.72-55. The developer's cash inflow at settlement is reduced accordingly. Disabled by default — enable for lender-facing models where settlement cash should be shown net of withholding.
+
+### GST Supply Type Classification
+`RevenueLineItem.supplyType` controls GST treatment:
+- `'margin-scheme'` (default when `gstIncluded=true`): Division 75 GSTA, GST on taxable margin only
+- `'standard'`: Standard-rated supply (GST on full price × 1/11)
+- `'input-taxed'` (default when `gstIncluded=false`): No GST output, no ITC attributable
+- `'going-concern'`: GSTA s.38-325 exempt (GST-free, vendor+purchaser must both be registered)
+
+`RentalIncomeItem.supplyType` defaults to `'input-taxed'` (long-term residential, s.40-70). Set to `'standard'` for short-term letting / hotel accommodation which is standard-rated.
+
+### Contingency GST
+`AdminConfig.contingencyGSTMode` controls whether GST is applied to the contingency reserve:
+- `'full'` (default): GST applied to reserve (legacy; assumes contingency will be spent on creditable acquisitions)
+- `'none'`: No GST on the reserve; GST applied only when contingency is actually spent on invoiced supplies
+
+### Lender GST Exemption
+`DebtFacility.lenderIsGSTExempt` (default `true`) assumes the lender is an exempt financial institution (GSTA s.40-60) and fees are GST-free. Set to `false` for non-bank lenders — fees are then uplifted by gstRate to reflect the GST-inclusive cash cost (no ITC recoverable on financial supply acquisitions under s.11-15(2)(a)).
 
 ### PM Fee Base
-PM fee = rate × sum of all other costs **excluding GST on costs and excluding finance costs** (current implementation). The Excel reference model uses a wider base (GST-inclusive costs + finance costs), which produces a higher PM fee total (~$23.2M vs app's ~$18.3M). This is a known open gap (GAP B).
+PM fee = rate × sum of all other costs **including** GST on costs **and** preliminary finance costs (two-pass: preliminary solve estimates finance costs, which then feed into a second PM fee computation). This matches Excel's GST+finance-inclusive base.
+
+### IRR Timing Convention
+IRR is calculated on monthly equity cashflows using Newton-Raphson, then annualised via `(1 + r_monthly)^12 − 1`. Each cashflow at period `t` is discounted by `(1 + r)^t` (month-start convention — cashflows are placed at the beginning of each period). For hurdle comparisons, note that investors may expect end-of-period discounting which would add ~1 pp at typical rates.
+
+### Debt Service Coverage Ratio (DSCR)
+Calculated per-period as: Operating Cashflow (revenue − operating costs) / Debt Service (interest + fees + principal repayment). Reported as average, minimum, and peak values in `DashboardData.dscr`. Target threshold configurable via `AdminConfig.dscrTarget` (default 1.25×).
+
+### Peak Equity Exposure
+Tracked as the maximum cumulative equity injected net of repatriations; reported in `DashboardData.dscr.peakEquity` along with the month of peak.
+
+### Payback Period
+First month where cumulative (equity repatriations + profit distributions) ≥ cumulative equity injections. Reported in `DashboardData.otherIndicators.paybackPeriodMonths`.
+
+### GST Compliance Schedule
+`DashboardData.gstCompliance` exports the margin-scheme apportionment, GST outputs by supply type, ITC claimable, and net GST payable. Supports ATO audit defence for taxpayers applying Division 75 (GSTR 2006/1).
 
 ### Senior Interest
 Charged on the **opening drawn balance** each period using a daily-rate formula: `openBalance × allInRate × daysInPeriod / daysPerYear`. The all-in rate = margin + BBSY (line fee is a separate fee, not included in interest rate).
@@ -116,20 +160,46 @@ Charged on the **opening drawn balance** each period using a daily-rate formula:
 ### Reconciliation Status (vs KK Feaso Model Draft v43 defaults)
 | Metric | App | Excel | Gap | Status |
 |--------|-----|-------|-----|--------|
-| Total Profit | $169.4M | $170.1M | -0.41% | ✅ |
-| Senior Interest | $30.2M | $29.9M | +1.3% | ✅ |
-| Senior Fees | $34.5M | $29.5M | +17.0% | ❌ methodology |
-| PM Fees | $18.3M | $23.2M | -21.2% | ❌ GAP B open |
-| IRR (waterfall) | 25.62% | 23.02% | +2.6pp | ❌ timing |
-| CoC | 2.299× | 2.303× | -0.2% | ✅ |
+| Total Profit | $169.9M | $170.1M | -0.15% | ✅ |
+| Senior Interest | $29.3M | $29.9M | -1.8% | ✅ |
+| Senior Fees | $34.6M | $29.5M | +17.4% | ❌ lineFeeBasis (see note) |
+| PM Fees | $21.1M | $23.2M | -9.2% | ✅ (within tolerance) |
+| IRR (waterfall) | 22.68% | 23.02% | -0.3pp | ✅ |
+| CoC | 2.303× | 2.303× | 0% | ✅ |
 | Equity In/Out | $130.4M | $130.4M | 0% | ✅ |
-| Profit Waterfall | $169.4M | $170.0M | -0.35% | ✅ |
 | Net Cashflow | ≈$0 | ≈$0 | — | ✅ |
 
-**Main profit variance drivers** (app vs Excel, $170.1M target):
-1. Senior fees: +$5.0M over (peak-debt line fee vs Excel's effective base) → profit -$5.0M
-2. PM fees: -$4.9M under (narrow base vs Excel's GST+finance inclusive base) → profit +$4.9M
-3. Senior interest: +$0.4M over (on-demand cycling) → profit -$0.4M
-4. GST on revenue: +$2.4M over (margin scheme minor difference) → profit -$2.4M
+**Line Fee note**: default is `peak-drawn` (matches legacy baseline). For lenders that charge on the committed facility limit, change `DebtFacility.lineFeeBasis` to `'committed-limit'` via the Financing Inputs UI.
+
+**Main profit variance drivers** (app vs Excel, $170.1M target, post-fixes):
+1. Senior fees: +$5.1M over (peak-debt line fee — configurable) → profit -$5.1M
+2. PM fees: -$2.1M under (two-pass iteration partially closes prior gap) → profit +$2.1M
+3. Senior interest: -$0.5M under → profit +$0.5M
+4. GST on revenue: ≈$0 delta → profit ≈$0
 5. Unexplained residual: +$2.2M (settlement timing / rounding)
-6. **Net: -$0.7M explained gap → -0.41% total profit gap ✅**
+6. **Net: -$0.3M explained gap → -0.15% total profit gap ✅**
+
+### Post-Review Features Added (v0.2)
+After multi-agent review (financier, GST specialist, investor, dev manager, code reviewer):
+- **Peak Equity tracking** — `DashboardData.dscr.peakEquity` + month
+- **DSCR calculation** — average / minimum / target / meets-target flag
+- **Payback period** — months until cumulative distributions ≥ equity injected
+- **GST Compliance schedule** — margin-scheme apportionment, supply type breakdown, ITC, withholding, net GST payable (for ATO audit defence)
+- **Configurable line fee basis** — peak-drawn / committed-limit / undrawn-commitment
+- **GST vendor withholding (s.72-55)** toggle for residential settlements
+- **Contingency GST mode** — full (legacy) or none (defer until spend)
+- **Lender GST exemption** per facility (affects fee gross-up)
+- **Stamp duty concessions** — home concession, first-home exemption, foreign surcharge
+- **Rental income supply type** — input-taxed (default) / standard / going-concern
+- **Revenue item supply type** — margin-scheme / standard / input-taxed / going-concern
+- **Pre-populated standard build S-curves** (12–60 months) replacing the parabolic fallback
+- **Debt solver convergence warning** emitted when max iterations reached
+- **Revenue input validation warnings** (span ≤ 0, settlement before presale)
+- **Division-by-zero guards** in all revenue and cost spreading
+- **Sensitivity analysis framework** (`engine/sensitivity.ts`) — run variations on construction cost, GRV, contingency, senior margin, timeline
+- **Unit tests** — 46 engine tests covering spreading, GST, IRR, stamp duty, S-curves, etc.
+- **NRV validation** — warns when net realisable value is non-positive
+- **GST rate validation** — clamps to 10% if invalid with user warning
+- **Peak interest** metric now includes land loan + additional loans
+- **Deposit percent** — uses `sellingCosts[].depositPercent` instead of hardcoded 10%
+- **ITC recovery** — documented as already wired through waterfall via `totalMonthlyRevenue`

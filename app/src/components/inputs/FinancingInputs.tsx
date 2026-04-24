@@ -106,6 +106,29 @@ function DebtSection({ title, facility, isLandLoan = false, onChange }: {
           <p className="text-[10px] font-semibold text-gray-500 mb-1">Fees</p>
           <PercentInput label="Establishment Fee" value={facility.establishmentFeePercent} onChange={v => update('establishmentFeePercent', v)} />
           <PercentInput label="Annual Line Fee" value={facility.lineFeePercent} onChange={v => update('lineFeePercent', v)} />
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-xs text-gray-600 w-56 shrink-0" title="Line Fee basis: Peak Drawn (default) — converges to actual peak debt via solver. Committed Limit — charge on the full approved facility (some term sheets). Undrawn Commitment — only on limit − drawn (commitment-fee style).">Line Fee Basis</span>
+            <select
+              value={facility.lineFeeBasis ?? 'peak-drawn'}
+              onChange={e => update('lineFeeBasis', e.target.value as 'peak-drawn' | 'committed-limit' | 'undrawn-commitment')}
+              className="text-xs bg-yellow-50 border border-gray-300 rounded px-2 py-0.5"
+            >
+              <option value="peak-drawn">Peak Drawn (default)</option>
+              <option value="committed-limit">Committed Limit</option>
+              <option value="undrawn-commitment">Undrawn Commitment</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-xs text-gray-600 w-56 shrink-0" title="If the lender is a GST-exempt financial institution (GSTA s.40-60, typical for banks), fees are GST-free. Non-bank lenders may charge GST on fees with no ITC available (s.11-15).">Lender GST Exempt</span>
+            <select
+              value={(facility.lenderIsGSTExempt ?? true) ? 'yes' : 'no'}
+              onChange={e => update('lenderIsGSTExempt', e.target.value === 'yes')}
+              className="text-xs bg-yellow-50 border border-gray-300 rounded px-2 py-0.5"
+            >
+              <option value="yes">Yes (exempt — fees GST-free)</option>
+              <option value="no">No (fees GST-inclusive)</option>
+            </select>
+          </div>
         </div>
         <div className="border-t border-gray-100 pt-1.5 mt-1.5">
           <p className="text-[10px] font-semibold text-gray-500 mb-1">Constraints</p>

@@ -11,14 +11,46 @@ export const STAMP_DUTY_STATES: StampDutyState[] = [
 ];
 
 /**
- * Calculate transfer duty (stamp duty) for a land/property acquisition.
- * Applies standard scale for non-residential/commercial property.
- *
- * @param landPrice  Purchase price in AUD (excl. GST)
- * @param state      Australian state or territory
- * @returns          Stamp duty amount in AUD
+ * Concession/surcharge adjustments applied on top of the base transfer duty rate.
+ *  - 'none':               Standard transfer duty
+ *  - 'home-concession':    50% concession (QLD Duties Act 2001 s.87; similar in other states)
+ *  - 'first-home':         First Home Owner Grant exemption (typically full exemption if eligible)
+ *  - 'foreign-surcharge':  Additional foreign acquirer surcharge (approx 7-8% extra)
  */
-export function calculateStampDuty(landPrice: number, state: StampDutyState): number {
+export type StampDutyConcession = 'none' | 'home-concession' | 'first-home' | 'foreign-surcharge';
+
+/** Foreign acquirer surcharge rates by state (approx 2024-25; verify with revenue office) */
+const FOREIGN_SURCHARGE: Record<StampDutyState, number> = {
+  QLD: 0.08, NSW: 0.08, VIC: 0.08, SA: 0.07, WA: 0.07, TAS: 0.08, ACT: 0.04, NT: 0.00,
+};
+
+/**
+ * Calculate transfer duty (stamp duty) for a land/property acquisition.
+ * Applies standard scale for non-residential/commercial property plus any
+ * concession or foreign surcharge.
+ *
+ * @param landPrice   Purchase price in AUD (excl. GST)
+ * @param state       Australian state or territory
+ * @param concession  Optional concession/surcharge adjustment (default 'none')
+ * @returns           Stamp duty amount in AUD
+ */
+export function calculateStampDuty(
+  landPrice: number,
+  state: StampDutyState,
+  concession: StampDutyConcession = 'none',
+): number {
+  const base = calculateStampDutyBase(landPrice, state);
+  if (base <= 0) return 0;
+  switch (concession) {
+    case 'home-concession': return base * 0.5;
+    case 'first-home':      return 0;
+    case 'foreign-surcharge': return base + landPrice * (FOREIGN_SURCHARGE[state] ?? 0);
+    case 'none':
+    default:                return base;
+  }
+}
+
+function calculateStampDutyBase(landPrice: number, state: StampDutyState): number {
   if (landPrice <= 0) return 0;
 
   switch (state) {

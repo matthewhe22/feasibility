@@ -943,7 +943,8 @@ export function MainInputTab() {
   // Stamp duty auto-calculation
   const handleStateChange = (state: StampDutyState) => {
     const landPrice = inputs.landPurchase.landPurchasePrice;
-    const autoSD = calculateStampDuty(landPrice, state);
+    const concession = inputs.landPurchase.stampDutyConcession ?? 'none';
+    const autoSD = calculateStampDuty(landPrice, state, concession);
     // Also update the acquisition cost item for stamp duty (id='sd')
     const updatedAcq = inputs.landPurchase.acquisitionCosts.map(a =>
       a.id === 'sd' ? { ...a, amount: autoSD } : a
@@ -959,8 +960,14 @@ export function MainInputTab() {
   };
 
   const handleLandPriceChangeWithSD = (landPrice: number) => {
+    if (inputs.landPurchase.stampDutyManual) {
+      // Manual override — do not recompute
+      setInputs({ landPurchase: { ...inputs.landPurchase, landPurchasePrice: landPrice } });
+      return;
+    }
     const state = (inputs.landPurchase.stampDutyState as StampDutyState) || 'QLD';
-    const autoSD = calculateStampDuty(landPrice, state);
+    const concession = inputs.landPurchase.stampDutyConcession ?? 'none';
+    const autoSD = calculateStampDuty(landPrice, state, concession);
     const updatedAcq = inputs.landPurchase.acquisitionCosts.map(a =>
       a.id === 'sd' ? { ...a, amount: autoSD } : a
     );
@@ -968,6 +975,23 @@ export function MainInputTab() {
       landPurchase: {
         ...inputs.landPurchase,
         landPurchasePrice: landPrice,
+        stampDutyAmount: autoSD,
+        acquisitionCosts: updatedAcq,
+      },
+    });
+  };
+
+  const handleConcessionChange = (concession: 'none' | 'home-concession' | 'first-home' | 'foreign-surcharge') => {
+    const state = (inputs.landPurchase.stampDutyState as StampDutyState) || 'QLD';
+    const landPrice = inputs.landPurchase.landPurchasePrice;
+    const autoSD = calculateStampDuty(landPrice, state, concession);
+    const updatedAcq = inputs.landPurchase.acquisitionCosts.map(a =>
+      a.id === 'sd' ? { ...a, amount: autoSD } : a
+    );
+    setInputs({
+      landPurchase: {
+        ...inputs.landPurchase,
+        stampDutyConcession: concession,
         stampDutyAmount: autoSD,
         acquisitionCosts: updatedAcq,
       },
@@ -1065,6 +1089,37 @@ export function MainInputTab() {
                 <option value="pro-rata">Pro-Rata (equity:senior concurrent)</option>
               </select>
             </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-gray-600 w-40 shrink-0" title="GSTA s.72-55: purchaser of new residential premises withholds 1/11 at settlement and remits to ATO. Reduces developer cash at settlement.">GST Withholding (res.)</span>
+              <select
+                value={admin.applyGSTWithholding ? 'yes' : 'no'}
+                onChange={e => setAdmin({ applyGSTWithholding: e.target.value === 'yes' })}
+                className="text-xs bg-yellow-50 border border-gray-300 rounded px-2 py-1"
+              >
+                <option value="no">Off (default – net settlement modelled)</option>
+                <option value="yes">On (s.72-55 withholding applies)</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-gray-600 w-40 shrink-0" title="'Full' applies GST to the contingency reserve (legacy, assumes reserve spent on creditable acquisitions). 'None' defers GST until actual spend.">Contingency GST</span>
+              <select
+                value={admin.contingencyGSTMode ?? 'full'}
+                onChange={e => setAdmin({ contingencyGSTMode: e.target.value as 'full' | 'none' })}
+                className="text-xs bg-yellow-50 border border-gray-300 rounded px-2 py-1"
+              >
+                <option value="full">Full (default)</option>
+                <option value="none">None (defer until spend)</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-gray-600 w-40 shrink-0" title="Target minimum DSCR (Debt Service Coverage Ratio). Lenders typically require 1.25x.">DSCR Target</span>
+              <input type="number" min={0} max={5} step={0.05}
+                value={admin.dscrTarget ?? 1.25}
+                onChange={e => setAdmin({ dscrTarget: parseFloat(e.target.value) || 1.25 })}
+                className="w-20 text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
+              />
+              <span className="text-xs text-gray-400">× (1.25 standard)</span>
+            </div>
           </div>
         </div>
       )}
@@ -1106,6 +1161,32 @@ export function MainInputTab() {
                 ))}
               </select>
               <span className="text-xs text-gray-400">auto-calculates stamp duty</span>
+            </div>
+            {/* Stamp Duty Concession/Surcharge */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-gray-600 w-40 shrink-0" title="Concession or surcharge applied to standard transfer duty. Home concession = 50% reduction; First Home = full exemption; Foreign surcharge adds ~7-8%.">Concession / Surcharge</span>
+              <select
+                value={inputs.landPurchase.stampDutyConcession ?? 'none'}
+                onChange={e => handleConcessionChange(e.target.value as 'none' | 'home-concession' | 'first-home' | 'foreign-surcharge')}
+                className="text-xs bg-yellow-50 border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="none">None (standard rate)</option>
+                <option value="home-concession">Home concession (50% reduction)</option>
+                <option value="first-home">First Home Owner (exempt)</option>
+                <option value="foreign-surcharge">Foreign acquirer surcharge</option>
+              </select>
+            </div>
+            {/* Manual Override Toggle */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-gray-600 w-40 shrink-0" title="When enabled, the Stamp Duty field is edited manually and is not recomputed when the land price or state changes.">Manual Stamp Duty</span>
+              <select
+                value={inputs.landPurchase.stampDutyManual ? 'yes' : 'no'}
+                onChange={e => setInputs({ landPurchase: { ...inputs.landPurchase, stampDutyManual: e.target.value === 'yes' } })}
+                className="text-xs bg-yellow-50 border border-gray-300 rounded px-2 py-1"
+              >
+                <option value="no">No (auto-calc from state + concession)</option>
+                <option value="yes">Yes (manual override)</option>
+              </select>
             </div>
             <CurrencyInput label="Stamp Duty (auto)" value={inputs.landPurchase.stampDutyAmount}
               onChange={v => {

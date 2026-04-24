@@ -135,6 +135,8 @@ export interface FundingResult {
   totalAddl3Interest: number;
   totalAddl3Fees: number;
   peakDebt: number;
+  peakEquity: number;
+  peakEquityMonth: number; // 1-based
   seniorFacilitySize: number;
   seniorFacilityLimit: number;
   senior2FacilitySize: number;
@@ -142,11 +144,35 @@ export interface FundingResult {
   senior3FacilitySize: number;
   senior3FacilityLimit: number;
   mezzFacilitySize: number;
+  /** Whether the iterative solver converged within tolerance */
+  converged: boolean;
+  /** Number of iterations actually performed */
+  iterations: number;
+  /** Final absolute finance-cost delta when solver exited (for diagnostics) */
+  convergenceDelta: number;
 }
 
 function periodInterest(balance: number, rate: number, daysInPeriod: number, daysPerYear: number): number {
-  if (balance <= 0 || rate <= 0) return 0;
+  if (balance <= 0 || rate <= 0 || daysInPeriod <= 0 || daysPerYear <= 0) return 0;
   return balance * rate * daysInPeriod / daysPerYear;
+}
+
+/**
+ * Returns the line fee basis balance for a given facility configuration.
+ *   - 'peak-drawn'         (default): peak drawn balance from the prior solver iteration
+ *   - 'committed-limit':   the full committed/approved limit (conservative term-sheet convention)
+ *   - 'undrawn-commitment': undrawn portion = max(0, limit − currentDrawn)
+ */
+function resolveLineFeeBase(
+  facility: DebtFacility,
+  committedLimit: number,
+  currentDrawn: number,
+  peakDrawnPrev: number,
+): number {
+  const basis = facility.lineFeeBasis ?? 'peak-drawn';
+  if (basis === 'committed-limit') return committedLimit;
+  if (basis === 'undrawn-commitment') return Math.max(0, committedLimit - currentDrawn);
+  return peakDrawnPrev;
 }
 
 /**
@@ -178,8 +204,12 @@ export function solveFunding(
   let prevPeakSnr2Balance = 0;
   let prevPeakSnr3Balance = 0;
   let result: FundingResult = createEmptyResult(n);
+  let converged = false;
+  let iterationsRun = 0;
+  let finalDelta = Infinity;
 
   for (let iter = 0; iter < maxIterations; iter++) {
+    iterationsRun = iter + 1;
     const tdc = sum(monthlyCostsExcFinance)
       + prevSeniorFinCosts + prevMezzFinCosts
       + prevSenior2FinCosts + prevSenior3FinCosts;
@@ -201,9 +231,10 @@ export function solveFunding(
     const mezzDiff    = Math.abs(newMezzFinCosts    - prevMezzFinCosts);
     const senior2Diff = Math.abs(newSenior2FinCosts - prevSenior2FinCosts);
     const senior3Diff = Math.abs(newSenior3FinCosts - prevSenior3FinCosts);
+    finalDelta = Math.max(seniorDiff, mezzDiff, senior2Diff, senior3Diff);
 
-    if (seniorDiff < tolerance && mezzDiff < tolerance
-        && senior2Diff < tolerance && senior3Diff < tolerance) {
+    if (finalDelta < tolerance) {
+      converged = true;
       break;
     }
 
@@ -214,6 +245,18 @@ export function solveFunding(
     prevPeakSnrBalance  = result.seniorFacilitySize;
     prevPeakSnr2Balance = result.senior2FacilitySize;
     prevPeakSnr3Balance = result.senior3FacilitySize;
+  }
+
+  result.converged = converged;
+  result.iterations = iterationsRun;
+  result.convergenceDelta = finalDelta;
+
+  if (!converged) {
+    _fundingWarnings.push(
+      `Debt solver did not converge within ${maxIterations} iterations — ` +
+      `final delta $${Math.round(finalDelta).toLocaleString()} exceeds tolerance $${tolerance}. ` +
+      `Finance costs and facility sizes may be inaccurate; increase maxIterations or tolerance.`
+    );
   }
 
   // Apply financing actuals overlay (post-convergence, does not affect waterfall logic).
@@ -489,6 +532,8 @@ function runFundingWaterfall(
   let peakSnrBalance       = 0;
   let peakSnr2Balance      = 0;
   let peakSnr3Balance      = 0;
+  let peakEquityDrawn      = 0;
+  let peakEquityMonth      = 0;
 
   const snrAllInRate  = senior.margin  + senior.bbsy;
   const snr2AllInRate = senior2.margin + senior2.bbsy;
@@ -582,10 +627,13 @@ function runFundingWaterfall(
     }
     if (seniorActive) {
       let periodFees = 0;
-      // Line fee charged on peak drawn balance (from previous solver iteration).
-      // Converges to the actual peak debt, matching term sheet convention where
-      // the fee applies to the maximum amount drawn/committed during the facility term.
-      periodFees += periodInterest(peakSnrBalancePrev, senior.lineFeePercent, days, daysPerYear);
+      // Line fee basis: default 'peak-drawn' converges via the iterative solver.
+      //   Some term sheets use 'committed-limit' (charge on approved facility size) or
+      //   'undrawn-commitment' (charge only on the undrawn portion — commitment fee style).
+      //   Configure via seniorFacility.lineFeeBasis. KEEP DEFAULT BEHAVIOR UNLESS
+      //   TERM SHEET SPECIFIES OTHERWISE — see CLAUDE.md for methodology notes.
+      const snrLineFeeBase = resolveLineFeeBase(senior, seniorLimit, snrRunningBalance, peakSnrBalancePrev);
+      periodFees += periodInterest(snrLineFeeBase, senior.lineFeePercent, days, daysPerYear);
       if (i === snrStartIdx) {
         periodFees += seniorLimit * senior.establishmentFeePercent;
       }
@@ -615,7 +663,8 @@ function runFundingWaterfall(
     }
     if (senior2Active) {
       let periodFees = 0;
-      periodFees += periodInterest(peakSnr2BalancePrev, senior2.lineFeePercent, days, daysPerYear);
+      const snr2LineFeeBase = resolveLineFeeBase(senior2, senior2Limit, snr2RunningBalance, peakSnr2BalancePrev);
+      periodFees += periodInterest(snr2LineFeeBase, senior2.lineFeePercent, days, daysPerYear);
       if (i === snr2StartIdx) {
         periodFees += senior2Limit * senior2.establishmentFeePercent;
       }
@@ -645,7 +694,8 @@ function runFundingWaterfall(
     }
     if (senior3Active) {
       let periodFees = 0;
-      periodFees += periodInterest(peakSnr3BalancePrev, senior3.lineFeePercent, days, daysPerYear);
+      const snr3LineFeeBase = resolveLineFeeBase(senior3, senior3Limit, snr3RunningBalance, peakSnr3BalancePrev);
+      periodFees += periodInterest(snr3LineFeeBase, senior3.lineFeePercent, days, daysPerYear);
       if (i === snr3StartIdx) {
         periodFees += senior3Limit * senior3.establishmentFeePercent;
       }
@@ -1036,6 +1086,13 @@ function runFundingWaterfall(
     peakSnrBalance  = Math.max(peakSnrBalance,  snrRunningBalance);
     peakSnr2Balance = Math.max(peakSnr2Balance, snr2RunningBalance);
     peakSnr3Balance = Math.max(peakSnr3Balance, snr3RunningBalance);
+
+    // Peak equity outstanding (cumulative injections − repatriations at this period)
+    const equityOutstanding = cumulativeEquity - totalEqRepatriated;
+    if (equityOutstanding > peakEquityDrawn) {
+      peakEquityDrawn = equityOutstanding;
+      peakEquityMonth = i + 1;
+    }
   }
 
   return {
@@ -1096,6 +1153,8 @@ function runFundingWaterfall(
     totalAddl2Interest, totalAddl2Fees,
     totalAddl3Interest, totalAddl3Fees,
     peakDebt,
+    peakEquity: peakEquityDrawn,
+    peakEquityMonth,
     seniorFacilitySize:  peakSnrBalance,
     seniorFacilityLimit: hasSenior ? seniorLimit : 0,
     senior2FacilitySize: peakSnr2Balance,
@@ -1103,6 +1162,10 @@ function runFundingWaterfall(
     senior3FacilitySize: peakSnr3Balance,
     senior3FacilityLimit: hasSenior3 ? senior3Limit : 0,
     mezzFacilitySize: hasMezz ? mezzLimit : 0,
+    // Populated in solveFunding():
+    converged: false,
+    iterations: 0,
+    convergenceDelta: 0,
   };
 }
 
@@ -1134,9 +1197,11 @@ function createEmptyResult(n: number): FundingResult {
     totalAddl2Interest: 0, totalAddl2Fees: 0,
     totalAddl3Interest: 0, totalAddl3Fees: 0,
     peakDebt: 0,
+    peakEquity: 0, peakEquityMonth: 0,
     seniorFacilitySize: 0, seniorFacilityLimit: 0,
     senior2FacilitySize: 0, senior2FacilityLimit: 0,
     senior3FacilitySize: 0, senior3FacilityLimit: 0,
     mezzFacilitySize: 0,
+    converged: false, iterations: 0, convergenceDelta: Infinity,
   };
 }

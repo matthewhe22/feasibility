@@ -99,6 +99,15 @@ export type RevenueType =
   | 'Other Income'
   | '-';
 
+/**
+ * GST supply-type classification for revenue items.
+ *  - 'margin-scheme':   New residential premises sold under Division 75 (margin only)
+ *  - 'standard':        Standard-rated supply (commercial/retail/hotel) – GST on full price, ITC on costs
+ *  - 'input-taxed':     Input-taxed supply (long-term residential rental >60 days same tenant) – no GST, no ITC
+ *  - 'going-concern':   Going concern (GSTA s.38-325) – GST-free, but vendor+purchaser must both be registered
+ */
+export type GSTSupplyType = 'margin-scheme' | 'standard' | 'input-taxed' | 'going-concern';
+
 export interface RevenueLineItem {
   code: string;
   description: string;
@@ -111,13 +120,18 @@ export interface RevenueLineItem {
   settlementMonth: number;
   settlementSpan: number;
   gstIncluded: boolean;
+  /** GST supply classification. Defaults: gstIncluded=true → 'margin-scheme'; false → 'standard' for commercial, 'input-taxed' otherwise */
+  supplyType?: GSTSupplyType;
+  /** Subject to GST vendor-withholding under GSTA s.72-55 (new residential premises). Defaults to true for margin-scheme residential. */
+  withholdingApplies?: boolean;
   actuals?: number[]; // per-period actual revenue (0-based period index); overrides forecast for actual periods
 }
 
 
 
-// Rental and other income items are input-taxed under GSTA s.40-70 — no GST
-// is charged on income, and no ITC is claimable on costs to earn it.
+// Rental/other income items. Default treatment is input-taxed (GSTA s.40-70) with
+// no GST on income and no ITC on costs. Set supplyType='standard' for
+// short-term / holiday letting or hotel accommodation which is standard-rated.
 export interface RentalIncomeItem {
   code: string;
   description: string;
@@ -127,6 +141,8 @@ export interface RentalIncomeItem {
   sCurve: SCurveType;
   monthStart: number;
   monthSpan: number;
+  /** GST treatment of this income stream. Default 'input-taxed'. */
+  supplyType?: GSTSupplyType;
   actuals?: number[]; // per-period actual income (0-based period index); overrides forecast for actual periods
 }
 
@@ -143,6 +159,16 @@ export interface EquityConfig {
   drawdownPriority: number; // 1 = drawn first, higher = drawn later; equity default 3
 }
 
+/**
+ * Line fee calculation basis.
+ *  - 'peak-drawn':        Charge on the peak drawn balance (converged via iterative solver).
+ *                         Typical for facilities where the fee reflects the maximum drawn amount.
+ *  - 'committed-limit':   Charge on the full approved facility limit for every active period.
+ *                         Term-sheet convention where lender reserves capital on the full commitment.
+ *  - 'undrawn-commitment': Charge on the undrawn portion (limit - drawn) — commitment fee style.
+ */
+export type LineFeeBasis = 'peak-drawn' | 'committed-limit' | 'undrawn-commitment';
+
 export interface DebtFacility {
   name: string;
   facilityLimit: number;
@@ -158,6 +184,10 @@ export interface DebtFacility {
   ltcTarget: number;
   lvrTarget: number;
   drawdownPriority: number; // 1 = drawn first, higher = drawn later; senior default 1, mezz default 2
+  /** Line fee basis. Defaults to 'peak-drawn' (converges via solver). Some term sheets use 'committed-limit' or 'undrawn-commitment'. */
+  lineFeeBasis?: LineFeeBasis;
+  /** Whether the lender is a GST-exempt financial institution (GSTA s.40-60). Defaults to true. */
+  lenderIsGSTExempt?: boolean;
   // Per-period actual values (0-based index = period index).
   // In actual periods these override the model-calculated values for reporting;
   // the waterfall calculation itself is unchanged (no redistribution).
@@ -180,10 +210,16 @@ export interface AdminConfig {
   sCurveOptions: string[];
   manualSCurves: number[][]; // 3 manual s-curves, each array of monthly %
   buildSCurves: Record<number, number[]>; // keyed by build duration (12–60), monthly weights
-  /** Months to delay ITC recovery after the GST cost is incurred (0 = same-period, standard for feasibility) */
+  /** Months to delay ITC recovery after the GST cost is incurred (0 = same-period, standard for feasibility; 1-3 for realistic quarterly BAS lag) */
   itcRecoveryLagMonths?: number;
+  /** Whether GSTA s.72-55 vendor-withholding applies to new residential settlements. Defaults to false (assume net settlement modelled) */
+  applyGSTWithholding?: boolean;
+  /** Contingency reserve GST treatment. 'none' = no GST (reserve until spent on invoiced supplies), 'full' = apply gstRate on contingency (legacy) */
+  contingencyGSTMode?: 'none' | 'full';
   /** Equity drawdown mode: 'equity-first' draws all equity before any senior; 'pro-rata' draws equity and senior simultaneously at a fixed ratio */
   equityDrawdownMode?: 'equity-first' | 'pro-rata';
+  /** Annual DSCR target threshold (e.g. 1.25). Used for dashboard reporting only. */
+  dscrTarget?: number;
   /** Branding: custom application title shown in header and browser tab */
   appName?: string;
   /** Branding: base64-encoded logo image (data URL) displayed in header top-left */
@@ -208,16 +244,31 @@ export interface ProjectPreliminary {
   equityDistSpanMonths: number;
 }
 
+/**
+ * Stamp duty concession/surcharge applied to the QLD/NSW/VIC duty calculation.
+ *  - 'none':            Standard transfer duty (default)
+ *  - 'home-concession': 50% concession for owner-occupier residential (QLD Duties Act 2001 s.87)
+ *  - 'first-home':      First Home Owner Grant concession (full exemption)
+ *  - 'foreign-surcharge': Additional foreign acquirer surcharge on top of standard duty
+ */
+export type StampDutyConcession = 'none' | 'home-concession' | 'first-home' | 'foreign-surcharge';
+
 export interface LandPurchaseInputs {
   landPurchasePrice: number;
   prsvUplift: number;
   prsvMonth: number;
   prsvSpan: number;
+  /** Whether PRSV uplift is contingent (excluded from capital stack / TDC) or a firm commitment */
+  prsvIsContingent?: boolean;
   gstRate: number;
   gstApplicableLand: boolean;
   addGSTOnLandPrice: boolean;
   stampDutyState: string;
   stampDutyAmount: number;
+  /** Concession or surcharge applied to transfer duty. Default 'none' (standard rate). */
+  stampDutyConcession?: StampDutyConcession;
+  /** Whether the stamp duty value is manually entered (true) or derived from calculateStampDuty (false). */
+  stampDutyManual?: boolean;
   interestOnDeposit: number;
   profitShareToLandOwner: number;
   paymentStages: LandPaymentStage[];
@@ -280,6 +331,10 @@ export interface MonthlyCashflow {
   rentalIncome: number;
   otherIncome: number;
   gstOnRevenue: number;
+  /** GST on deposits received during presale period (BAS liability in period received, GSTA s.9-70) */
+  gstOnDeposits?: number;
+  /** GST withholding retained by purchaser at settlement (GSTA s.72-55). Cash reduction, remitted direct to ATO. */
+  gstWithholding?: number;
   // Funding
   landLoanDrawdown: number;
   landLoanRepayment: number;
@@ -464,6 +519,57 @@ export interface EquityReturnSummary {
   totalProfitShare: number;
 }
 
+/**
+ * Debt Service Coverage Ratio summary.
+ * DSCR = Operating Cashflow before Finance / Debt Service (interest + scheduled principal).
+ * Lenders typically require DSCR ≥ 1.25x.
+ */
+export interface DSCRSummary {
+  averageDSCR: number;
+  minimumDSCR: number;
+  targetDSCR: number; // from admin.dscrTarget
+  meetsTarget: boolean;
+  /** Peak aggregate debt balance reached across all facilities */
+  peakDebt: number;
+  /** Peak equity drawn (maximum cumulative equity injection) */
+  peakEquity: number;
+  /** Month number (1-based) where peak equity was reached */
+  peakEquityMonth: number;
+}
+
+/**
+ * GST & margin scheme compliance schedule — supports ATO audit defence for
+ * taxpayers applying Division 75 (margin scheme) and claiming ITCs on
+ * creditable acquisitions.
+ */
+export interface GSTCompliance {
+  gstRate: number;
+  /** Total sale price of margin-scheme supplies (gstIncluded residential) */
+  marginSchemeSupplies: number;
+  /** Land cost apportioned to margin-scheme supplies (reduces taxable margin) */
+  marginSchemeLandCost: number;
+  /** Net taxable margin (sale price − apportioned land cost) */
+  taxableMargin: number;
+  /** GST output on margin scheme = taxableMargin × 1/11 */
+  gstOnMarginSchemeSupplies: number;
+  /** Total sale price of standard-rated supplies */
+  standardRatedSupplies: number;
+  /** GST output on standard-rated supplies = price × 1/11 (embedded in sale price) */
+  gstOnStandardSupplies: number;
+  /** Total sale price of input-taxed supplies (no GST) */
+  inputTaxedSupplies: number;
+  /** Total sale price of going-concern supplies (GST-free) */
+  goingConcernSupplies: number;
+  /** Creditable acquisitions (ITC claimable) */
+  creditableAcquisitions: number;
+  /** Input tax credits claimable */
+  itcClaimable: number;
+  /** GST withheld by purchasers on residential settlements (remitted direct to ATO) */
+  gstWithholdingTotal: number;
+  /** Net GST payable to ATO = (GST outputs + withholdings) − ITC claimable */
+  netGSTPayable: number;
+}
+
 export interface DashboardData {
   feasibility: FeasibilitySummary;
   kpis: KPIs;
@@ -478,12 +584,16 @@ export interface DashboardData {
   };
   otherIndicators: {
     peakInterestHoldingCostPerMonth: number;
+    /** Number of months from project start until cumulative profit distributions exceed initial equity */
+    paybackPeriodMonths: number;
   };
   grvSummary: {
     totalApartmentGRV: number;
     grvSoldExchanged: number;
     unsoldGRV: number;
   };
+  dscr?: DSCRSummary;
+  gstCompliance?: GSTCompliance;
   cashflows: MonthlyCashflow[];
   warnings: string[]; // S-curve and other calculation warnings
 }

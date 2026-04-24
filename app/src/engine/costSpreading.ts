@@ -90,10 +90,12 @@ export function spreadCost(
   buildSCurves?: Record<number, number[]>,
 ): number[] {
   const result = new Array(periods.length).fill(0);
-  if (item.totalCosts === 0 || item.monthSpan <= 0) return result;
+  if (!Number.isFinite(item.totalCosts) || item.totalCosts === 0) return result;
+  if (!Number.isFinite(item.monthSpan) || item.monthSpan <= 0) return result;
+  if (!Number.isFinite(item.monthStart) || item.monthStart <= 0) return result;
 
   const startIdx = item.monthStart - 1; // Convert 1-based to 0-based
-  const span = item.monthSpan;
+  const span = Math.max(1, Math.floor(item.monthSpan));
 
   // If the item has per-period actuals, use them for actual periods and
   // redistribute the remaining budget over forecast periods.
@@ -163,10 +165,13 @@ export function spreadLandPayments(
 ): number[] {
   const result = new Array(periods.length).fill(0);
   for (const stage of stages) {
-    if (stage.amount === 0 || stage.monthSpan <= 0 || stage.monthStart <= 0) continue;
+    if (!Number.isFinite(stage.amount) || stage.amount === 0) continue;
+    if (!Number.isFinite(stage.monthSpan) || stage.monthSpan <= 0) continue;
+    if (!Number.isFinite(stage.monthStart) || stage.monthStart <= 0) continue;
     const startIdx = stage.monthStart - 1;
-    const perMonth = stage.amount / stage.monthSpan;
-    for (let i = 0; i < stage.monthSpan; i++) {
+    const span = Math.min(stage.monthSpan, periods.length);
+    const perMonth = stage.amount / span;
+    for (let i = 0; i < span; i++) {
       const idx = startIdx + i;
       if (idx >= 0 && idx < periods.length) {
         result[idx] += perMonth;

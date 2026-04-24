@@ -1,7 +1,11 @@
-import type { AdminConfig, MainInputs, DashboardData, MonthlyCashflow } from '../types';
+import type { AdminConfig, MainInputs, DashboardData, MonthlyCashflow, GSTCompliance, DSCRSummary } from '../types';
 import { generateTimeline } from './timeline';
 import { spreadCosts, spreadLandPayments, clearSCurveWarnings, getSCurveWarnings } from './costSpreading';
-import { spreadSettlements, spreadDeposits, spreadIncome, spreadBackEndCommissions, calculateSellingCommissions, totalGRV, totalNRV } from './revenue';
+import {
+  spreadSettlements, spreadDeposits, spreadIncome, spreadBackEndCommissions,
+  calculateSellingCommissions, totalGRV, totalNRV, resolveSupplyType,
+  clearRevenueWarnings, getRevenueWarnings,
+} from './revenue';
 import { solveFunding, clearFundingWarnings, getFundingWarnings } from './funding';
 import { sum, calculateIRR } from '../utils';
 
@@ -9,10 +13,19 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // Reset warnings for this run
   clearSCurveWarnings();
   clearFundingWarnings();
+  clearRevenueWarnings();
 
   const periods = generateTimeline(admin, inputs);
   const n = periods.length;
-  const gstRate = inputs.landPurchase.gstRate;
+  const rawGstRate = inputs.landPurchase.gstRate;
+  // Validate GST rate — must be >=0 and <1 (e.g. 0.10 for 10%).
+  // Clamp invalid values to 0.10 and emit a warning so the user can correct.
+  const localWarnings: string[] = [];
+  let gstRate = rawGstRate;
+  if (!Number.isFinite(gstRate) || gstRate < 0 || gstRate >= 1) {
+    localWarnings.push(`Invalid gstRate ${rawGstRate} — clamped to 0.10 (10%). Enter a decimal between 0 and 1.`);
+    gstRate = 0.10;
+  }
   const buildSCurves = admin.buildSCurves ?? {};
 
   // ===== 1. SPREAD COSTS =====
@@ -120,7 +133,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
 
   // ===== 2. SPREAD REVENUE =====
   const settlements = spreadSettlements(inputs.grvItems, periods);
-  const deposits = spreadDeposits(inputs.grvItems, periods);
+  const deposits = spreadDeposits(inputs.grvItems, periods, inputs.sellingCosts);
   const rentalInc = spreadIncome(inputs.rentalIncome, periods);
   const otherInc = spreadIncome(inputs.otherIncome, periods);
 
@@ -150,9 +163,13 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       }
     }
   }
-  // GST on contingency
-  for (let i = 0; i < n; i++) {
-    gstOnCosts[i] += contingency[i] * gstRate;
+  // Contingency GST mode: 'full' applies GST on reserve (legacy; assumes contingency
+  // will be spent on creditable acquisitions). 'none' defers GST until actual spend.
+  const contingencyGSTMode = admin.contingencyGSTMode ?? 'full';
+  if (contingencyGSTMode === 'full') {
+    for (let i = 0; i < n; i++) {
+      gstOnCosts[i] += contingency[i] * gstRate;
+    }
   }
   // GST on selling commissions (front-end at presale, back-end at settlement)
   for (let i = 0; i < n; i++) {
@@ -160,14 +177,21 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     gstOnCosts[i] += backEndCommByPeriod[i] * gstRate;
   }
 
-  // GST on revenue — Division 75 GSTA margin scheme.
-  // The margin = sale price − acquisition cost (GST-exclusive).  GST = margin × 1/11.
-  // Land cost is apportioned to taxable vs input-taxed supplies by their respective
-  // revenue proportions (GSTR 2006/1).  Deduction = landPrice × (nonGSTGRV / totalGRV);
-  // the residual land cost attributable to GST-taxable supplies reduces the margin.
-  // Items with gstIncluded: false are input-taxed or going-concern supplies (no GST collected).
-  // Land purchase cost is treated as GST-exclusive (addGSTOnLandPrice: false) — the
-  // margin scheme means no ITC is claimable on the land acquisition.
+  // GST on revenue — Division 75 GSTA margin scheme plus standard supplies.
+  //
+  // MARGIN SCHEME (Division 75 GSTA, GSTR 2006/1):
+  //   Applies to gstIncluded residential items — the "margin" = sale price − consideration
+  //   for the land acquisition. GST = margin × 1/11. Development and construction costs
+  //   give rise to ITCs on creditable acquisitions separately (not deducted from the margin).
+  //   Land cost is apportioned between taxable (margin-scheme) and non-taxable supplies
+  //   by revenue proportion — residual attributable to taxable supplies reduces the margin.
+  //   Reference: GSTR 2006/1 paras 76.3–76.5.
+  //
+  // STANDARD-RATED SUPPLIES (commercial/retail/hotel with gstIncluded=true marked as standard):
+  //   GST = sale price × 1/11, ITC on costs is fully claimable.
+  //
+  // INPUT-TAXED & GOING-CONCERN SUPPLIES (gstIncluded=false):
+  //   No GST on supply; no ITC attributable to these costs.
   const totalGRVAllItems = inputs.grvItems.reduce((s, g) => s + g.currentSalePrice, 0);
   const totalGSTIncludedGRV = inputs.grvItems
     .filter(g => g.gstIncluded && g.currentSalePrice > 0)
@@ -180,12 +204,52 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     ? 1 - marginSchemeDeduction / totalGSTIncludedGRV
     : 1;
 
+  // GST withholding (GSTA s.72-55) — purchaser of new residential premises withholds
+  // 1/11 of the GST-exclusive price and remits directly to ATO. Models the cash effect:
+  // developer receives net-of-withholding at settlement; ATO receives withholding.
+  const applyWithholding = admin.applyGSTWithholding === true;
+  const gstWithholding = new Array(n).fill(0);
+  const gstOnDeposits = new Array(n).fill(0);
+
   for (const item of inputs.grvItems) {
-    if (item.gstIncluded && item.currentSalePrice > 0) {
-      const gstAmount = item.currentSalePrice * gstRate / (1 + gstRate) * marginSchemeFactor;
-      const settleSpread = spreadSettlements([item], periods);
+    if (!Number.isFinite(item.currentSalePrice) || item.currentSalePrice <= 0) continue;
+    const supplyType = resolveSupplyType(item);
+    // Only margin-scheme and standard supplies collect GST.
+    if (supplyType !== 'margin-scheme' && supplyType !== 'standard') continue;
+    const isMarginScheme = supplyType === 'margin-scheme';
+    // Standard-rated: full 1/11; margin-scheme: applies only to the margin portion.
+    const effectiveFactor = isMarginScheme ? marginSchemeFactor : 1;
+    const gstAmount = item.currentSalePrice * gstRate / (1 + gstRate) * effectiveFactor;
+    const settleSpread = spreadSettlements([item], periods);
+    for (let i = 0; i < n; i++) {
+      const periodShare = settleSpread[i] / item.currentSalePrice;
+      gstOnRevenue[i] += periodShare * gstAmount;
+    }
+    // Withholding applies to new residential premises (margin-scheme) by default;
+    // commercial standard supplies do not trigger purchaser withholding.
+    const itemWithholds = item.withholdingApplies ?? isMarginScheme;
+    if (applyWithholding && itemWithholds) {
+      // Withholding = 1/11 of GST-exclusive price (or, under the margin scheme,
+      // 7% of contract price when vendor elects GSTR 2018/1). We use the 1/11 default.
+      const withholdAmount = item.currentSalePrice * gstRate / (1 + gstRate) * effectiveFactor;
       for (let i = 0; i < n; i++) {
-        gstOnRevenue[i] += settleSpread[i] / item.currentSalePrice * gstAmount;
+        const periodShare = settleSpread[i] / item.currentSalePrice;
+        gstWithholding[i] += periodShare * withholdAmount;
+      }
+    }
+    // Deposit GST — GST liability attaches when deposits are received (GSTA s.9-70).
+    // Allocate GST proportionally across the deposit spread so BAS position reflects
+    // when deposits are actually collected (not deferred to settlement).
+    if (item.preSaleExchangeMonth > 0 && item.preSaleSpan > 0) {
+      const configuredPct = inputs.sellingCosts[inputs.grvItems.indexOf(item)]?.depositPercent;
+      const depositPct = (typeof configuredPct === 'number' && configuredPct > 0) ? configuredPct : 0.1;
+      const depositGST = item.currentSalePrice * depositPct * gstRate / (1 + gstRate) * effectiveFactor;
+      const span = Math.max(1, item.preSaleSpan);
+      const perMonth = depositGST / span;
+      const startIdx = item.preSaleExchangeMonth - 1;
+      for (let i = 0; i < span; i++) {
+        const idx = startIdx + i;
+        if (idx >= 0 && idx < n) gstOnDeposits[idx] += perMonth;
       }
     }
   }
@@ -207,9 +271,15 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // ITC recovery: ATO refunds GST paid on costs each BAS cycle.
   // itcRecoveryLagMonths=0 (default) matches Excel same-period treatment.
   // Set to 1–3 for realistic quarterly BAS lag in lender-facing models.
+  //
+  // GST withholding: when applyGSTWithholding=true, purchasers of new residential
+  // premises withhold 1/11 of the price at settlement and remit directly to the ATO.
+  // The developer's cash inflow is therefore net of withholding — subtract it here.
   const itcLag = admin.itcRecoveryLagMonths ?? 0;
   const totalMonthlyRevenue = settlements.map((s, i) =>
-    s + rentalInc[i] + otherInc[i] + (i >= itcLag ? gstOnCosts[i - itcLag] : 0)
+    s + rentalInc[i] + otherInc[i]
+    + (i >= itcLag ? gstOnCosts[i - itcLag] : 0)
+    - gstWithholding[i]
   );
 
   const equityDrawdownMode = admin.equityDrawdownMode ?? 'equity-first';
@@ -277,12 +347,14 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     lettingFees: 0,
     otherFinancingCosts: otherFinCosts[i],
     gstOnCosts: gstOnCosts[i],
-    itcRecovery: gstOnCosts[i],
+    itcRecovery: (i >= itcLag) ? gstOnCosts[i - itcLag] : 0,
     grvSettlements: settlements[i],
     grvDeposits: deposits[i],
     rentalIncome: rentalInc[i],
     otherIncome: otherInc[i],
     gstOnRevenue: gstOnRevenue[i],
+    gstOnDeposits: gstOnDeposits[i],
+    gstWithholding: gstWithholding[i],
     landLoanDrawdown: funding.landLoanDrawdowns[i],
     landLoanRepayment: funding.landLoanRepayments[i],
     landLoanInterest: funding.landLoanInterest[i],
@@ -345,7 +417,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     cf.netCashflow =
       // Operating inflows
       cf.grvSettlements + cf.rentalIncome + cf.otherIncome
-      // ITC recovery: ATO refunds GST paid on costs (net effect = $0 on gstOnCosts)
+      // ITC recovery: ATO refunds GST paid on costs (net effect = $0 on gstOnCosts
+      // when itcLag=0; with lag, the offset happens in a later period)
       + cf.itcRecovery
       // Financing inflows (drawdowns + equity injections; capitalised amounts included here)
       + cf.landLoanDrawdown + cf.seniorDrawdown + cf.senior2Drawdown + cf.senior3Drawdown
@@ -357,6 +430,10 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       - cf.otherStandardCosts - cf.pmFees - cf.sellingCostsFrontEnd
       - cf.sellingCostsBackEnd - cf.otherFinancingCosts - cf.gstOnCosts
       - cf.gstOnRevenue
+      // GST withholding — purchaser withholds at settlement and remits to ATO.
+      // Developer's cash inflow is already net of withholding via monthlyRevenue,
+      // so this entry cancels out in the net cashflow.
+      - (cf.gstWithholding ?? 0)
       // Financing costs — always deducted (capitalised amounts cancel against their drawdown entry)
       - cf.landLoanInterest - cf.landLoanFees
       - cf.seniorInterest  - cf.seniorFees
@@ -396,14 +473,32 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // from the funding waterfall, which uses periodNetCash = revenue − gstOnRevenue − costs.
   const totalGSTOnRevenue = sum(gstOnRevenue);
 
-  const totalSeniorFinCosts   = funding.totalSeniorInterest  + funding.totalSeniorFees
-                              + funding.totalSenior2Interest + funding.totalSenior2Fees
-                              + funding.totalSenior3Interest + funding.totalSenior3Fees;
-  const totalLandLoanFinCosts = funding.totalLandLoanInterest + funding.totalLandLoanFees;
-  const totalMezzFinCosts     = funding.totalMezzInterest + funding.totalMezzFees;
-  const totalAddlFinCosts     = funding.totalAddl1Interest + funding.totalAddl1Fees
-                              + funding.totalAddl2Interest + funding.totalAddl2Fees
-                              + funding.totalAddl3Interest + funding.totalAddl3Fees;
+  // Lender GST exemption: debt facility fees are modelled as GST-free assuming
+  // the lender is an exempt financial institution (GSTA s.40-60). Non-bank lenders
+  // may charge GST-inclusive fees; when lenderIsGSTExempt === false, gross up
+  // the total fees by gstRate to reflect the additional cash cost (ITC not
+  // recoverable on financial supply acquisitions under s.11-15(2)(a)).
+  function feeUplift(facility: { lenderIsGSTExempt?: boolean } | undefined, fees: number): number {
+    if (!facility) return 0;
+    return facility.lenderIsGSTExempt === false ? fees * gstRate : 0;
+  }
+  const seniorFeeGSTUplift   = feeUplift(inputs.seniorFacility,  funding.totalSeniorFees);
+  const senior2FeeGSTUplift  = feeUplift(inputs.seniorFacility2, funding.totalSenior2Fees);
+  const senior3FeeGSTUplift  = feeUplift(inputs.seniorFacility3, funding.totalSenior3Fees);
+  const mezzFeeGSTUplift     = feeUplift(inputs.mezzanine,       funding.totalMezzFees);
+  const landFeeGSTUplift     = feeUplift(inputs.landLoan,        funding.totalLandLoanFees);
+  const addl1FeeGSTUplift    = feeUplift(inputs.additionalLoan1, funding.totalAddl1Fees);
+  const addl2FeeGSTUplift    = feeUplift(inputs.additionalLoan2, funding.totalAddl2Fees);
+  const addl3FeeGSTUplift    = feeUplift(inputs.additionalLoan3, funding.totalAddl3Fees);
+
+  const totalSeniorFinCosts   = funding.totalSeniorInterest  + funding.totalSeniorFees  + seniorFeeGSTUplift
+                              + funding.totalSenior2Interest + funding.totalSenior2Fees + senior2FeeGSTUplift
+                              + funding.totalSenior3Interest + funding.totalSenior3Fees + senior3FeeGSTUplift;
+  const totalLandLoanFinCosts = funding.totalLandLoanInterest + funding.totalLandLoanFees + landFeeGSTUplift;
+  const totalMezzFinCosts     = funding.totalMezzInterest + funding.totalMezzFees + mezzFeeGSTUplift;
+  const totalAddlFinCosts     = funding.totalAddl1Interest + funding.totalAddl1Fees + addl1FeeGSTUplift
+                              + funding.totalAddl2Interest + funding.totalAddl2Fees + addl2FeeGSTUplift
+                              + funding.totalAddl3Interest + funding.totalAddl3Fees + addl3FeeGSTUplift;
 
   // Standard costs = dev costs + other std
   const standardCosts = totalDevCosts + totalOtherStd;
@@ -443,9 +538,18 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
 
   const totalProfitAfterCoupon = totalProfit - loanCouponInterest - jvCouponInterest;
 
-  // NRV
+  // NRV — guard against negative values (e.g. selling costs exceed GRV) so LVR
+  // constraints remain meaningful. A non-positive NRV is reported with a warning
+  // and treated as 0 for downstream LVR math.
   const backEndSelling = commissions.backEnd;
-  const nrvValue = totalNRV(inputs.grvItems, gstRate, backEndSelling);
+  const rawNRV = totalNRV(inputs.grvItems, gstRate, backEndSelling);
+  const nrvValue = rawNRV > 0 ? rawNRV : 0;
+  if (rawNRV <= 0) {
+    localWarnings.push(
+      `Net Realisable Value is non-positive ($${Math.round(rawNRV).toLocaleString()}). ` +
+      `LVR constraints cannot be applied — check revenue inputs and selling commissions.`
+    );
+  }
 
   // Capital stack uses facility limit (committed amount) + accrued interest/fees
   // to match Excel reporting — not peak drawn balance.
@@ -522,7 +626,100 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const maxMonthlyInterest = Math.max(...cashflows.map(cf =>
     cf.seniorInterest + cf.senior2Interest + cf.senior3Interest
     + cf.landLoanInterest + cf.mezzInterest
+    + cf.addl1Interest + cf.addl2Interest + cf.addl3Interest
   ));
+
+  // ===== PAYBACK PERIOD =====
+  // First month where cumulative profit distributions + equity repatriations
+  // exceed cumulative equity injected.
+  let paybackPeriodMonths = 0;
+  {
+    let injected = 0;
+    let returned = 0;
+    for (let i = 0; i < cashflows.length; i++) {
+      injected += cashflows[i].equityInjection;
+      returned += cashflows[i].equityRepatriation + cashflows[i].profitDistribution;
+      if (injected > 0 && returned >= injected) {
+        paybackPeriodMonths = i + 1;
+        break;
+      }
+    }
+  }
+
+  // ===== DSCR (Debt Service Coverage Ratio) =====
+  // Monthly DSC = operating cashflow before finance / debt service (interest + fees + repayments).
+  // Annual DSCR is averaged over rolling 12-month windows where debt service > 0.
+  const monthlyOperating = cashflows.map(cf =>
+    cf.grvSettlements + cf.rentalIncome + cf.otherIncome
+    - cf.landCosts - cf.acquisitionCosts - cf.developmentCosts - cf.constructionCosts
+    - cf.contingency - cf.marketingCosts - cf.otherStandardCosts - cf.pmFees
+    - cf.sellingCostsFrontEnd - cf.sellingCostsBackEnd - cf.otherFinancingCosts
+  );
+  const monthlyDebtService = cashflows.map(cf =>
+    cf.landLoanInterest + cf.landLoanFees + cf.landLoanRepayment
+    + cf.seniorInterest + cf.seniorFees + cf.seniorRepayment
+    + cf.senior2Interest + cf.senior2Fees + cf.senior2Repayment
+    + cf.senior3Interest + cf.senior3Fees + cf.senior3Repayment
+    + cf.mezzInterest + cf.mezzFees + cf.mezzRepayment
+  );
+  const dscrRatios: number[] = [];
+  for (let i = 0; i < cashflows.length; i++) {
+    if (monthlyDebtService[i] > 1) {
+      const ratio = monthlyOperating[i] / monthlyDebtService[i];
+      if (Number.isFinite(ratio)) dscrRatios.push(ratio);
+    }
+  }
+  const dscrTarget = admin.dscrTarget ?? 1.25;
+  const averageDSCR = dscrRatios.length > 0 ? sum(dscrRatios) / dscrRatios.length : 0;
+  const minimumDSCR = dscrRatios.length > 0 ? Math.min(...dscrRatios) : 0;
+  const dscr: DSCRSummary = {
+    averageDSCR,
+    minimumDSCR,
+    targetDSCR: dscrTarget,
+    meetsTarget: minimumDSCR >= dscrTarget,
+    peakDebt: funding.peakDebt,
+    peakEquity: funding.peakEquity,
+    peakEquityMonth: funding.peakEquityMonth,
+  };
+
+  // ===== GST COMPLIANCE SCHEDULE =====
+  let marginSchemeSupplies = 0;
+  let standardRatedSupplies = 0;
+  let inputTaxedSupplies = 0;
+  let goingConcernSupplies = 0;
+  let gstOnStandardSupplies = 0;
+  for (const item of inputs.grvItems) {
+    if (!Number.isFinite(item.currentSalePrice) || item.currentSalePrice <= 0) continue;
+    const supplyType = resolveSupplyType(item);
+    if (supplyType === 'margin-scheme') marginSchemeSupplies += item.currentSalePrice;
+    else if (supplyType === 'standard') {
+      standardRatedSupplies += item.currentSalePrice;
+      gstOnStandardSupplies += item.currentSalePrice * gstRate / (1 + gstRate);
+    }
+    else if (supplyType === 'input-taxed') inputTaxedSupplies += item.currentSalePrice;
+    else if (supplyType === 'going-concern') goingConcernSupplies += item.currentSalePrice;
+  }
+  const taxableMargin = Math.max(0, marginSchemeSupplies - marginSchemeDeduction);
+  const gstOnMarginSchemeSupplies = marginSchemeSupplies > 0
+    ? marginSchemeSupplies * gstRate / (1 + gstRate) * marginSchemeFactor
+    : 0;
+  const gstWithholdingTotal = sum(gstWithholding);
+  const creditableAcquisitions = totalGSTOnCosts > 0 ? totalGSTOnCosts / gstRate : 0;
+  const gstCompliance: GSTCompliance = {
+    gstRate,
+    marginSchemeSupplies,
+    marginSchemeLandCost: marginSchemeDeduction,
+    taxableMargin,
+    gstOnMarginSchemeSupplies,
+    standardRatedSupplies,
+    gstOnStandardSupplies,
+    inputTaxedSupplies,
+    goingConcernSupplies,
+    creditableAcquisitions,
+    itcClaimable: totalGSTOnCosts,
+    gstWithholdingTotal,
+    netGSTPayable: (gstOnMarginSchemeSupplies + gstOnStandardSupplies + gstWithholdingTotal) - totalGSTOnCosts,
+  };
 
   // GRV Summary
   const totalAptGRV = inputs.grvItems
@@ -696,13 +893,21 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     },
     otherIndicators: {
       peakInterestHoldingCostPerMonth: maxMonthlyInterest,
+      paybackPeriodMonths,
     },
     grvSummary: {
       totalApartmentGRV: totalAptGRV,
       grvSoldExchanged: grvSoldExchanged,
       unsoldGRV: totalAptGRV - grvSoldExchanged,
     },
+    dscr,
+    gstCompliance,
     cashflows,
-    warnings: [...getSCurveWarnings(), ...getFundingWarnings()],
+    warnings: [
+      ...localWarnings,
+      ...getSCurveWarnings(),
+      ...getFundingWarnings(),
+      ...getRevenueWarnings(),
+    ],
   };
 }
