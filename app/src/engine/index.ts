@@ -107,7 +107,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     ...inputs.otherFinancingCosts,
   ];
   for (const item of nonPMCostItems) {
-    if (item.addGST !== false && item.addGST !== 0) {
+    if (item.addGST !== false) {
       prelimGSTOnCosts += item.totalCosts * gstRate;
     }
   }
@@ -155,8 +155,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     ...inputs.otherFinancingCosts,
   ];
   for (const item of allCostItems) {
-    // Treat undefined as true (apply GST) — false or 0 means GST-free
-    if (item.addGST !== false && item.addGST !== 0) {
+    // Treat undefined as true (apply GST) — explicit false means GST-free
+    if (item.addGST !== false) {
       const spread = spreadCosts([item], periods, admin.manualSCurves, buildSCurves);
       for (let i = 0; i < n; i++) {
         gstOnCosts[i] += spread[i] * gstRate;
