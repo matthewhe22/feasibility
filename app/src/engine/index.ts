@@ -107,7 +107,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     ...inputs.otherFinancingCosts,
   ];
   for (const item of nonPMCostItems) {
-    if (item.addGST !== false) {
+    if (item.addGST !== false && item.addGST !== 0) {
       prelimGSTOnCosts += item.totalCosts * gstRate;
     }
   }
@@ -155,8 +155,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     ...inputs.otherFinancingCosts,
   ];
   for (const item of allCostItems) {
-    // Treat undefined as true (apply GST) — explicit false means GST-free
-    if (item.addGST !== false) {
+    // Treat undefined as true (apply GST) — false or 0 means GST-free
+    if (item.addGST !== false && item.addGST !== 0) {
       const spread = spreadCosts([item], periods, admin.manualSCurves, buildSCurves);
       for (let i = 0; i < n; i++) {
         gstOnCosts[i] += spread[i] * gstRate;
@@ -299,7 +299,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // included in the PM fee base (matching Excel's GST+finance inclusive base).
   const prelimFunding = solveFunding(
     periods, monthlyCostsExcFinance, totalMonthlyRevenue, monthlyGSTNet, gstOnRevenue,
-    inputs, admin.daysPerYear, admin.tolerance, 50, equityDrawdownMode,
+    inputs, admin.daysPerYear, admin.tolerance, 100, equityDrawdownMode,
   );
   const prelimFinCosts =
     prelimFunding.totalSeniorInterest  + prelimFunding.totalSeniorFees +

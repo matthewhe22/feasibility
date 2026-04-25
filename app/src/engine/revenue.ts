@@ -73,13 +73,20 @@ export function spreadSettlements(items: RevenueLineItem[], periods: Period[]): 
 
     // Standard: even distribution across settlement span
     const startIdx = item.settlementMonth - 1;
-    const span = normaliseSpan(item.settlementSpan, n, `Revenue item ${item.code} settlement`);
-    const perMonth = item.currentSalePrice / span;
-    for (let i = 0; i < span; i++) {
-      const idx = startIdx + i;
-      if (idx >= 0 && idx < n) {
-        result[idx] += perMonth;
-      }
+    const rawSpan = normaliseSpan(item.settlementSpan, n, `Revenue item ${item.code} settlement`);
+    // Clip to periods remaining from startIdx so perMonth is computed over the
+    // actual number of slots that receive revenue — not a larger normalised span.
+    const effectiveSpan = Math.min(rawSpan, Math.max(0, n - startIdx));
+    if (effectiveSpan <= 0) {
+      _revenueWarnings.add(`Revenue item ${item.code}: settlement month ${item.settlementMonth} is beyond the timeline — revenue not spread.`);
+      continue;
+    }
+    if (effectiveSpan < rawSpan) {
+      _revenueWarnings.add(`Revenue item ${item.code}: settlement span clipped from ${rawSpan} to ${effectiveSpan} months to fit within timeline.`);
+    }
+    const perMonth = item.currentSalePrice / effectiveSpan;
+    for (let i = 0; i < effectiveSpan; i++) {
+      result[startIdx + i] += perMonth;
     }
   }
   return result;

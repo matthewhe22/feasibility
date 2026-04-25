@@ -370,7 +370,12 @@ function runFundingWaterfall(
     if (!sc) return s;
     return s + g.currentSalePrice * sc.salesCommission * (1 - sc.preCommissionPercent);
   }, 0);
-  const nrv = totalGRV - gstOnResidential - backEndSelling;
+  const frontEndSelling = inputs.grvItems.reduce((s, g, idx) => {
+    const sc = inputs.sellingCosts[idx];
+    if (!sc) return s;
+    return s + g.currentSalePrice * sc.salesCommission * sc.preCommissionPercent;
+  }, 0);
+  const nrv = totalGRV - gstOnResidential - backEndSelling - frontEndSelling;
 
   // ===== Facility limits (LTC / LVR) =====
   const seniorLtcLimit  = senior.ltcTarget  > 0 ? tdc * senior.ltcTarget  : Infinity;
@@ -723,6 +728,7 @@ function runFundingWaterfall(
       if (mezz.isCapitalised) {
         mzRunningBalance += mzInt;
         mzDrawdowns[i]   += mzInt;
+        totalMezzDrawn   += mzInt; // capitalised interest increases effective drawn amount
       } else {
         bankBalance -= mzInt;
       }
@@ -735,6 +741,7 @@ function runFundingWaterfall(
         if (mezz.isCapitalised) {
           mzRunningBalance += mzLineFee;
           mzDrawdowns[i]   += mzLineFee;
+          totalMezzDrawn   += mzLineFee; // capitalised fees also count toward limit
         } else {
           bankBalance -= mzLineFee;
         }
@@ -1044,8 +1051,9 @@ function runFundingWaterfall(
         bankBalance         -= repay;
       }
       if (bankBalance > 0) {
-        if (i < eqDistStartIdx) {
-          // Before the distribution window: hold surplus in the project account
+        if (i < eqDistStartIdx && i < n - 1) {
+          // Before the distribution window: hold surplus in the project account.
+          // Exception: at the final period, release held balance regardless of window.
           heldBankBalance += bankBalance;
           bankBalance      = 0;
         } else {
