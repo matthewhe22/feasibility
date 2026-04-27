@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { LoginPage } from './LoginPage';
 import { StatsPage } from './StatsPage';
 import { ProjectsPage } from './ProjectsPage';
+import { ProjectSetupPage } from './ProjectSetupPage';
 import { BrandingPage } from './BrandingPage';
 import { clearToken, isLoggedIn } from './api';
 
-type AdminTab = 'overview' | 'projects' | 'branding';
+type AdminTab = 'overview' | 'projects' | 'projectSetup' | 'branding';
 
 function NavItem({
   label, active, onClick,
@@ -46,6 +47,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
         <nav className="flex-1 p-3 space-y-1">
           <NavItem label="Overview" active={tab === 'overview'} onClick={() => setTab('overview')} />
           <NavItem label="Projects" active={tab === 'projects'} onClick={() => setTab('projects')} />
+          <NavItem label="Project Setup" active={tab === 'projectSetup'} onClick={() => setTab('projectSetup')} />
           <NavItem label="Branding" active={tab === 'branding'} onClick={() => setTab('branding')} />
         </nav>
 
@@ -77,6 +79,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 p-8 overflow-auto">
         {tab === 'overview' && <StatsPage />}
         {tab === 'projects' && <ProjectsPage />}
+        {tab === 'projectSetup' && <ProjectSetupPage />}
         {tab === 'branding' && <BrandingPage />}
         {/* Pass children through if we need extra content injection later */}
         {children}
