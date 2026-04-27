@@ -4,7 +4,7 @@ import { Analytics } from '@vercel/analytics/react';
 declare const __BUILD_TIME__: string;
 import { useStore } from './store/useStore';
 import { runCalculations } from './engine';
-import { createProject, saveProject, listProjects, loadBrandingSettings } from './db/projectDb';
+import { createProject, saveProject, listProjects, loadBrandingSettings, loadProjectList } from './db/projectDb';
 import { projectTestAdmin, projectTestInputs } from './utils/createTestProject';
 import { MainInputTab } from './components/inputs/MainInputTab';
 import { InternalDashboard } from './components/dashboards/InternalDashboard';
@@ -61,7 +61,7 @@ const TABS: { id: TabId; label: string }[] = [
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
-  const { activeTab, setActiveTab, admin, inputs, setAdmin, setInputs, setDashboardData, dashboardData, isCalculating, setIsCalculating, currentProjectId, setCurrentProjectId } = useStore();
+  const { activeTab, setActiveTab, admin, inputs, setAdmin, setInputs, setDashboardData, dashboardData, isCalculating, setIsCalculating, currentProjectId, setCurrentProjectId, setProjectList } = useStore();
   const [showProjectManager, setShowProjectManager] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
   const [dismissedWarnings, setDismissedWarnings] = useState(false);
@@ -94,6 +94,10 @@ function App() {
     loadBrandingSettings().then(b => {
       if (b) setAdmin(b);
     }).catch(() => {/* non-critical */});
+
+    // Load global project name list (used for project-name validation in
+    // ProjectManager and the version comparison feature).
+    loadProjectList().then(list => setProjectList(list)).catch(() => {/* non-critical */});
 
     // Always seed "Project Test" on startup (fire-and-forget; skipped if already exists)
     (async () => {

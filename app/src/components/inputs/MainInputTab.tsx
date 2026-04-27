@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useStore } from '../../store/useStore';
+import { saveProjectList } from '../../db/projectDb';
 import { CurrencyInput, PercentInput, NumberInput, TextInput, SectionHeader } from '../common/FormFields';
 import { FinancingInputs } from './FinancingInputs';
 import { formatCurrency, excelDateToDate, addMonths, endOfMonth } from '../../utils';
@@ -904,8 +905,88 @@ function ActualsSection() {
   );
 }
 
+function ProjectListManager() {
+  const { projectList, setProjectList, admin, setAdmin } = useStore();
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function persist(next: string[]) {
+    setProjectList(next);
+    setBusy(true);
+    try { await saveProjectList(next); } finally { setBusy(false); }
+  }
+
+  function handleAdd() {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    if (projectList.some(p => p.toLowerCase() === trimmed.toLowerCase())) {
+      setDraft('');
+      return;
+    }
+    persist([...projectList, trimmed]);
+    setDraft('');
+  }
+
+  function handleRemove(name: string) {
+    if (!confirm(`Remove "${name}" from the project list?\n\nNote: any saved projects with this name remain in the database — only the data-validation entry is removed.`)) return;
+    persist(projectList.filter(p => p !== name));
+    if (admin.projectName === name) setAdmin({ projectName: '' });
+  }
+
+  return (
+    <div className="bg-gray-50 border border-gray-200 rounded p-2 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-gray-700">Master Project List (data validation)</span>
+        <span className="text-[10px] text-gray-400">{projectList.length} project{projectList.length === 1 ? '' : 's'}</span>
+      </div>
+      <p className="text-[10px] text-gray-500 leading-tight">
+        Stored globally in the database and shared across all sessions. Project names selected when saving a feasibility version
+        must come from this list.
+      </p>
+      <div className="flex gap-1">
+        <input
+          type="text"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAdd(); } }}
+          placeholder="New project name…"
+          className="flex-1 text-xs border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          disabled={busy}
+        />
+        <button
+          type="button"
+          onClick={handleAdd}
+          disabled={busy || !draft.trim()}
+          className="text-xs bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium px-3 py-1 rounded"
+        >
+          Add
+        </button>
+      </div>
+      {projectList.length === 0 ? (
+        <p className="text-[11px] text-gray-400 italic">No projects yet — add one to enable the project-name dropdown.</p>
+      ) : (
+        <ul className="divide-y divide-gray-200 border border-gray-200 rounded bg-white max-h-40 overflow-y-auto">
+          {projectList.map(name => (
+            <li key={name} className="flex items-center justify-between px-2 py-1 text-xs">
+              <span className="text-gray-700 truncate" title={name}>{name}</span>
+              <button
+                type="button"
+                onClick={() => handleRemove(name)}
+                disabled={busy}
+                className="ml-2 shrink-0 text-[11px] text-red-600 hover:text-red-700 hover:underline disabled:opacity-50"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function MainInputTab() {
-  const { inputs, setInputs, admin, setAdmin } = useStore();
+  const { inputs, setInputs, admin, setAdmin, projectList } = useStore();
   const [section, setSection] = useState<string>('preliminary');
   const [selectedBuildDuration, setSelectedBuildDuration] = useState<number>(41);
   const csvInputRef = useRef<HTMLInputElement>(null);
@@ -1055,8 +1136,34 @@ export function MainInputTab() {
             >Clear All</button>
           </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-4 space-y-1.5">
-            <TextInput label="Project Name" value={admin.projectName}
-              onChange={v => setAdmin({ projectName: v })} />
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-600 w-56 shrink-0">Project Name</label>
+              {projectList.length > 0 ? (
+                <select
+                  value={projectList.includes(admin.projectName) ? admin.projectName : ''}
+                  onChange={e => setAdmin({ projectName: e.target.value })}
+                  className="w-48 px-2 py-1 text-xs border border-gray-300 rounded bg-yellow-50 focus:ring-1 focus:ring-blue-400"
+                >
+                  <option value="">— Select project —</option>
+                  {projectList.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              ) : (
+                <TextInput
+                  label=""
+                  value={admin.projectName}
+                  onChange={v => setAdmin({ projectName: v })}
+                  className="!gap-0"
+                />
+              )}
+              {admin.projectName && projectList.length > 0 && !projectList.includes(admin.projectName) && (
+                <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded" title="The current project name is not in the master list. Add it via the manager below to keep this saved version.">
+                  Not in list
+                </span>
+              )}
+            </div>
+            <ProjectListManager />
             <NumberInput label="Project Lots #" value={inputs.preliminary.projectLots}
               onChange={v => setInputs({ preliminary: { ...inputs.preliminary, projectLots: v } })} />
             <NumberInput label="Project GFA SqM" value={inputs.preliminary.projectGFA}

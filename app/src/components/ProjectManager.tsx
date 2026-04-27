@@ -31,12 +31,20 @@ interface Props {
   onLoad?: () => void;
 }
 
+/** Compose the user-visible record name from project + version. */
+function composeName(projectName: string, versionName: string): string {
+  const p = projectName.trim();
+  const v = versionName.trim();
+  if (p && v) return `${p} — ${v}`;
+  return p || v;
+}
+
 export function ProjectManager({ onClose, onLoad }: Props) {
-  const { admin, inputs, dashboardData, setAdmin, setInputs, setDashboardData, currentProjectId, setCurrentProjectId } = useStore();
+  const { admin, inputs, dashboardData, setAdmin, setInputs, setDashboardData, currentProjectId, setCurrentProjectId, projectList } = useStore();
 
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
-  const [saveName, setSaveName] = useState(admin.projectName || '');
-  const [saveDesc, setSaveDesc] = useState('');
+  const [saveProjectName, setSaveProjectName] = useState(admin.projectName || '');
+  const [saveVersionName, setSaveVersionName] = useState(admin.versionName || '');
   const currentId = currentProjectId;
   const setCurrentId = setCurrentProjectId;
   const [busy, setBusy] = useState(false);
@@ -51,18 +59,33 @@ export function ProjectManager({ onClose, onLoad }: Props) {
   // ── save / update ──────────────────────────────────────────────────────────
 
   async function handleSave() {
-    if (!saveName.trim()) { setMsg('Please enter a project name.'); return; }
+    const projectName = saveProjectName.trim();
+    const versionName = saveVersionName.trim();
+    if (!projectName) { setMsg('Please select a project name.'); return; }
+    if (projectList.length > 0 && !projectList.includes(projectName)) {
+      setMsg('Selected project is not in the master list. Add it via the Inputs tab first.');
+      return;
+    }
+    if (!versionName) { setMsg('Please enter a version name.'); return; }
+
+    // Persist project + version into admin so they travel with the record;
+    // compose a display name for the legacy `name` column.
+    const adminToSave = { ...admin, projectName, versionName };
+    const recordName = composeName(projectName, versionName);
+
     setBusy(true);
     try {
       if (currentId !== null) {
         await Promise.all([
-          saveProject(currentId, admin, inputs, dashboardData),
-          renameProject(currentId, saveName.trim(), saveDesc.trim()),
+          saveProject(currentId, adminToSave, inputs, dashboardData),
+          renameProject(currentId, recordName, versionName),
         ]);
+        setAdmin({ projectName, versionName });
         setMsg('Project updated.');
       } else {
-        const id = await createProject(saveName.trim(), saveDesc.trim(), admin, inputs, dashboardData);
+        const id = await createProject(recordName, versionName, adminToSave, inputs, dashboardData);
         setCurrentId(id);
+        setAdmin({ projectName, versionName });
         setMsg('Project saved.');
       }
       await refresh();
@@ -84,8 +107,8 @@ export function ProjectManager({ onClose, onLoad }: Props) {
       setInputs(rec.inputs);
       if (rec.dashboardData) setDashboardData(rec.dashboardData);
       setCurrentId(id);
-      setSaveName(rec.name);
-      setSaveDesc(rec.description);
+      setSaveProjectName(rec.admin.projectName ?? '');
+      setSaveVersionName(rec.admin.versionName ?? rec.description ?? '');
       setMsg(`Loaded "${rec.name}". Recalculating…`);
       onLoad?.();
     } catch (e) {
@@ -102,7 +125,7 @@ export function ProjectManager({ onClose, onLoad }: Props) {
     setBusy(true);
     try {
       await deleteProject(id);
-      if (currentId === id) { setCurrentId(null); setSaveName(''); setSaveDesc(''); }
+      if (currentId === id) { setCurrentId(null); setSaveProjectName(''); setSaveVersionName(''); }
       await refresh();
       setMsg('Project deleted.');
     } catch (e) {
@@ -135,7 +158,8 @@ export function ProjectManager({ onClose, onLoad }: Props) {
     if (!dashboardData) { setMsg('Run calculations first.'); return; }
     setBusy(true);
     try {
-      await exportToExcel(dashboardData, admin, saveName || admin.projectName || 'Feasibility');
+      const exportName = composeName(saveProjectName, saveVersionName) || admin.projectName || 'Feasibility';
+      await exportToExcel(dashboardData, admin, exportName);
       setMsg('Excel file downloaded.');
     } catch (e) {
       setMsg(String(e));
@@ -163,34 +187,59 @@ export function ProjectManager({ onClose, onLoad }: Props) {
             <h3 className="text-sm font-semibold text-gray-700 mb-3">
               {currentId !== null ? 'Update current project' : 'Save new project'}
             </h3>
-            <div className="flex gap-2 mb-2">
-              <input
-                className="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Project name"
-                value={saveName}
-                onChange={e => setSaveName(e.target.value)}
-              />
-              <input
-                className="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Description (optional)"
-                value={saveDesc}
-                onChange={e => setSaveDesc(e.target.value)}
-              />
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <div>
+                <label className="block text-[11px] text-gray-500 mb-0.5">Project name <span className="text-red-500">*</span></label>
+                {projectList.length > 0 ? (
+                  <select
+                    className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={projectList.includes(saveProjectName) ? saveProjectName : ''}
+                    onChange={e => setSaveProjectName(e.target.value)}
+                  >
+                    <option value="">— Select project —</option>
+                    {projectList.map(name => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm bg-gray-100 text-gray-500"
+                    placeholder="Add a project in Inputs → General first"
+                    value={saveProjectName}
+                    disabled
+                    readOnly
+                  />
+                )}
+              </div>
+              <div>
+                <label className="block text-[11px] text-gray-500 mb-0.5">Version name <span className="text-red-500">*</span></label>
+                <input
+                  className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g. Initial baseline, Post-review v2"
+                  value={saveVersionName}
+                  onChange={e => setSaveVersionName(e.target.value)}
+                />
+              </div>
             </div>
+            {projectList.length === 0 && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-2">
+                The master project list is empty. Open <strong>Inputs → 1. General</strong> and add at least one project name to enable saving new versions.
+              </p>
+            )}
             <div className="flex gap-2">
               <button
                 onClick={handleSave}
-                disabled={busy}
+                disabled={busy || !saveProjectName.trim() || !saveVersionName.trim()}
                 className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-1.5 rounded"
               >
                 {currentId !== null ? 'Update' : 'Save'}
               </button>
               {currentId !== null && (
                 <button
-                  onClick={() => { setCurrentId(null); setSaveName(''); setSaveDesc(''); }}
+                  onClick={() => { setCurrentId(null); setSaveVersionName(''); }}
                   className="border border-gray-300 text-gray-600 text-sm px-4 py-1.5 rounded hover:bg-gray-50"
                 >
-                  Save as new
+                  Save as new version
                 </button>
               )}
               <button

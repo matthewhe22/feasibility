@@ -65,7 +65,8 @@ function TableBox({ children, className = '' }: { children: React.ReactNode; cla
 
 function formatVersionLabel(rec: ProjectRecord): string {
   const updated = new Date(rec.updatedAt).toLocaleString('en-AU', { dateStyle: 'short', timeStyle: 'short' });
-  return rec.description ? `${updated} — ${rec.description}` : updated;
+  const version = rec.admin?.versionName ?? rec.description;
+  return version ? `${version} (${updated})` : updated;
 }
 
 function Table1FeasibilitySummary({
@@ -196,9 +197,14 @@ export function InternalDashboard() {
     listProjects()
       .then(all => {
         if (cancelled) return;
-        const matches = all.filter(p =>
-          p.name === admin.projectName && p.id != null && p.id !== currentProjectId
-        );
+        // Strict project-match: only show versions whose admin.projectName
+        // equals the current project's name. Falls back to record name for
+        // legacy records that pre-date the projectName/versionName split.
+        const matches = all.filter(p => {
+          if (p.id == null || p.id === currentProjectId) return false;
+          const recProject = p.admin?.projectName ?? p.name;
+          return recProject === admin.projectName;
+        });
         setVersions(matches);
       })
       .catch(() => { if (!cancelled) setVersions([]); });

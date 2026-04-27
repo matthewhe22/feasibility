@@ -54,6 +54,10 @@ interface AppState {
   /** ID of the currently loaded/saved project (null if unsaved session). */
   currentProjectId: number | null;
   setCurrentProjectId: (id: number | null) => void;
+
+  /** Global master list of project names. Hydrated from DB on startup; used as data validation when creating new projects. */
+  projectList: string[];
+  setProjectList: (list: string[]) => void;
 }
 
 const defaultAdmin: AdminConfig = {
@@ -160,6 +164,11 @@ export const useStore = create<AppState>()(
 
       currentProjectId: null,
       setCurrentProjectId: (id) => set({ currentProjectId: id }),
+
+      // projectList is rehydrated from the DB on startup (App.tsx) — no need
+      // to persist it in localStorage.
+      projectList: [],
+      setProjectList: (list) => set({ projectList: list }),
     }),
     {
       name: 'feasibility-store',
