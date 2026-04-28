@@ -400,8 +400,7 @@ export function ProjectDocs() {
           <p>
             The model contains a circular dependency: finance costs (interest + fees) depend on the
             facility size, the facility size depends on Total Development Cost (TDC) via LTC constraints,
-            and TDC includes finance costs. The Excel model resolves this via a VBA macro; this app uses
-            an iterative convergence loop.
+            and TDC includes finance costs. 
           </p>
           <SubSection title="Algorithm">
             <ol className="list-decimal pl-5 space-y-1">
