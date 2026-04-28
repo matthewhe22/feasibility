@@ -80,10 +80,10 @@ export function ExternalDashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-green-50">
-                    <th className="px-2 py-1 text-left">Description</th>
-                    <th className="px-2 py-1 text-right">Total</th>
-                    <th className="px-2 py-1 text-right">JV Partner</th>
-                    <th className="px-2 py-1 text-right">Developer</th>
+                    <th scope="col" className="px-2 py-1 text-left">Description</th>
+                    <th scope="col" className="px-2 py-1 text-right">Total</th>
+                    <th scope="col" className="px-2 py-1 text-right">JV Partner</th>
+                    <th scope="col" className="px-2 py-1 text-right">Developer</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -105,7 +105,7 @@ export function ExternalDashboard() {
           <Box>
             <Header>Table 4 - Capital Stack</Header>
             <table className="w-full text-xs">
-              <thead><tr className="bg-green-50"><th className="px-2 py-1 text-left"></th><th className="px-2 py-1 text-right">LTC</th><th className="px-2 py-1 text-right">LVR</th><th className="px-2 py-1 text-right">Total</th></tr></thead>
+              <thead><tr className="bg-green-50"><th scope="col" className="px-2 py-1 text-left"></th><th scope="col" className="px-2 py-1 text-right">LTC</th><th scope="col" className="px-2 py-1 text-right">LVR</th><th scope="col" className="px-2 py-1 text-right">Total</th></tr></thead>
               <tbody>
                 <tr className="border-b"><td className="px-2 py-0.5">Senior (Facility)</td><td className="px-2 py-0.5 text-right">{formatPercent(cs.seniorLTC)}</td><td className="px-2 py-0.5 text-right">{formatPercent(cs.seniorLVR)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(cs.seniorAmount)}</td></tr>
                 <tr className="border-b"><td className="px-2 py-0.5">Mezzanine</td><td className="px-2 py-0.5 text-right">{formatPercent(cs.mezzLTC)}</td><td className="px-2 py-0.5 text-right">{formatPercent(cs.mezzLVR)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(cs.mezzAmount)}</td></tr>
@@ -119,7 +119,7 @@ export function ExternalDashboard() {
           <Box>
             <Header>Table 5 - Debt Summary</Header>
             <table className="w-full text-xs">
-              <thead><tr className="bg-green-50"><th className="px-2 py-1 text-left"></th><th className="px-2 py-1 text-right">Principal</th><th className="px-2 py-1 text-right">Interest</th><th className="px-2 py-1 text-right">Total</th></tr></thead>
+              <thead><tr className="bg-green-50"><th scope="col" className="px-2 py-1 text-left"></th><th scope="col" className="px-2 py-1 text-right">Principal</th><th scope="col" className="px-2 py-1 text-right">Interest</th><th scope="col" className="px-2 py-1 text-right">Total</th></tr></thead>
               <tbody>
                 <tr className="border-b"><td className="px-2 py-0.5">Senior</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.seniorPrincipal)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.seniorInterest)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.seniorTotal)}</td></tr>
                 <tr className="border-b"><td className="px-2 py-0.5">Mezzanine</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.mezzPrincipal)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.mezzInterest)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.mezzTotal)}</td></tr>

@@ -188,25 +188,25 @@ export function ProjectCashflow() {
         <p className="text-xs text-gray-500">Monthly cashflow detail across all periods</p>
       </div>
 
-      <div className="overflow-x-auto border border-gray-200 rounded">
+      <div className="overflow-auto border border-gray-200 rounded max-h-[75vh]">
         <table className="text-[10px] whitespace-nowrap border-collapse">
-          <thead>
+          <thead className="sticky top-0 z-10">
             {/* Period number row */}
             <tr className="bg-gray-700 text-white">
-              <th className="px-2 py-1 text-left sticky left-0 bg-gray-700 z-20 min-w-[160px]">Period</th>
-              <th className="px-2 py-1 text-right font-bold bg-gray-600 min-w-[80px]">Total</th>
+              <th scope="col" className="px-2 py-1 text-left sticky left-0 bg-gray-700 z-20 min-w-[160px]">Period</th>
+              <th scope="col" className="px-2 py-1 text-right font-bold bg-gray-600 min-w-[80px]">Total</th>
               {cf.map(c => (
-                <th key={c.period.periodNumber} className="px-1.5 py-1 text-center min-w-[72px]">
+                <th scope="col" key={c.period.periodNumber} className="px-1.5 py-1 text-center min-w-[72px]">
                   {c.period.periodNumber}
                 </th>
               ))}
             </tr>
             {/* Month label row */}
             <tr className="bg-gray-600 text-gray-200">
-              <th className="px-2 py-1 text-left sticky left-0 bg-gray-600 z-20">Month</th>
-              <th className="px-2 py-1 bg-gray-500"></th>
+              <th scope="col" className="px-2 py-1 text-left sticky left-0 bg-gray-600 z-20">Month</th>
+              <th scope="col" className="px-2 py-1 bg-gray-500"></th>
               {cf.map(c => (
-                <th key={c.period.periodNumber} className="px-1.5 py-1 text-center font-normal">
+                <th scope="col" key={c.period.periodNumber} className="px-1.5 py-1 text-center font-normal">
                   {c.period.label}
                 </th>
               ))}
