@@ -57,7 +57,40 @@ export function computeDrawdownSequence(inputs: MainInputs): DrawdownSequenceEnt
     ...(a2 && a2.facilityLimit > 0 && a2.startMonth > 0 ? [{ type: 'additional2' as DrawdownFacilityType, name: a2.name, priority: a2.drawdownPriority ?? 5 }] : []),
     ...(a3 && a3.facilityLimit > 0 && a3.startMonth > 0 ? [{ type: 'additional3' as DrawdownFacilityType, name: a3.name, priority: a3.drawdownPriority ?? 5 }] : []),
   ];
-  return entries.sort((a, b) => a.priority - b.priority);
+  // Sort by priority, then by a deterministic facility-type order for ties.
+  // This guarantees draw-down order is reproducible across runs even when two
+  // facilities share the same priority (e.g. additional1 + additional2 both at 5).
+  return entries.sort((a, b) =>
+    a.priority - b.priority || DRAWDOWN_TYPE_ORDER[a.type] - DRAWDOWN_TYPE_ORDER[b.type],
+  );
+}
+
+/**
+ * Deterministic tie-breaker order for facilities sharing the same priority value.
+ * Senior debt first → mezzanine → equity → additional loans. Using `satisfies`
+ * makes adding a new DrawdownFacilityType a compile-time error here, so the
+ * exhaustive ordering can never silently drop a facility.
+ */
+const DRAWDOWN_TYPE_ORDER = {
+  senior: 0,
+  senior2: 1,
+  senior3: 2,
+  mezz: 3,
+  equity: 4,
+  equityJV: 5,
+  additional1: 6,
+  additional2: 7,
+  additional3: 8,
+} as const satisfies Record<DrawdownFacilityType, number>;
+
+/**
+ * Compile-time exhaustiveness assertion — call from the default branch of a
+ * switch over DrawdownFacilityType to guarantee TypeScript flags missing cases.
+ * If a new facility type is added without handling, this throws at runtime AND
+ * fails the typecheck (because `value` would not be `never`).
+ */
+export function assertNeverDrawdown(value: never): never {
+  throw new Error(`Unhandled DrawdownFacilityType: ${JSON.stringify(value)}`);
 }
 
 export interface FundingResult {

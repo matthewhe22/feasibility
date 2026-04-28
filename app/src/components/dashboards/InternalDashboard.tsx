@@ -287,10 +287,10 @@ export function InternalDashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-blue-50 text-blue-800">
-                    <th className="px-2 py-1 text-left">Description</th>
-                    <th className="px-2 py-1 text-right">Total</th>
-                    <th className="px-2 py-1 text-right">JV Partner</th>
-                    <th className="px-2 py-1 text-right">Developer</th>
+                    <th scope="col" className="px-2 py-1 text-left">Description</th>
+                    <th scope="col" className="px-2 py-1 text-right">Total</th>
+                    <th scope="col" className="px-2 py-1 text-right">JV Partner</th>
+                    <th scope="col" className="px-2 py-1 text-right">Developer</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -347,10 +347,10 @@ export function InternalDashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-blue-50 text-blue-800">
-                    <th className="px-2 py-1 text-left">Capital Stack</th>
-                    <th className="px-2 py-1 text-right">LTC</th>
-                    <th className="px-2 py-1 text-right" title="Loan-to-Value Ratio. Denominator is NRV — Gross Realization Value net of GST on residential and selling costs. Matches term sheet convention: LTV based on valuation net of GST and selling costs.">LVR (NRV)</th>
-                    <th className="px-2 py-1 text-right">Total</th>
+                    <th scope="col" className="px-2 py-1 text-left">Capital Stack</th>
+                    <th scope="col" className="px-2 py-1 text-right">LTC</th>
+                    <th scope="col" className="px-2 py-1 text-right" title="Loan-to-Value Ratio. Denominator is NRV — Gross Realization Value net of GST on residential and selling costs. Matches term sheet convention: LTV based on valuation net of GST and selling costs.">LVR (NRV)</th>
+                    <th scope="col" className="px-2 py-1 text-right">Total</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -404,10 +404,10 @@ export function InternalDashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-blue-50 text-blue-800">
-                    <th className="px-2 py-1 text-left"></th>
-                    <th className="px-2 py-1 text-right">Principal</th>
-                    <th className="px-2 py-1 text-right">Interest</th>
-                    <th className="px-2 py-1 text-right">Total</th>
+                    <th scope="col" className="px-2 py-1 text-left"></th>
+                    <th scope="col" className="px-2 py-1 text-right">Principal</th>
+                    <th scope="col" className="px-2 py-1 text-right">Interest</th>
+                    <th scope="col" className="px-2 py-1 text-right">Total</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -457,12 +457,12 @@ export function InternalDashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-blue-50 text-blue-800">
-                    <th className="px-2 py-1 text-left"></th>
-                    <th className="px-2 py-1 text-right">Senior #1</th>
-                    <th className="px-2 py-1 text-right">Senior #2</th>
-                    <th className="px-2 py-1 text-right">Senior #3</th>
-                    <th className="px-2 py-1 text-right">Mezzanine</th>
-                    <th className="px-2 py-1 text-right">Land Loan</th>
+                    <th scope="col" className="px-2 py-1 text-left"></th>
+                    <th scope="col" className="px-2 py-1 text-right">Senior #1</th>
+                    <th scope="col" className="px-2 py-1 text-right">Senior #2</th>
+                    <th scope="col" className="px-2 py-1 text-right">Senior #3</th>
+                    <th scope="col" className="px-2 py-1 text-right">Mezzanine</th>
+                    <th scope="col" className="px-2 py-1 text-right">Land Loan</th>
                   </tr>
                 </thead>
                 <tbody>

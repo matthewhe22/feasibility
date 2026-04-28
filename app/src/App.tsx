@@ -18,23 +18,36 @@ import { ProjectManager } from './components/ProjectManager';
 
 // ── Error Boundary ────────────────────────────────────────────────────────────
 
+interface BoundaryProps {
+  children: ReactNode;
+  /** Label shown to the user when the boundary catches. Defaults to "Component". */
+  label?: string;
+  /** Optional callback fired when an error is caught (e.g. for telemetry). */
+  onError?: (err: Error) => void;
+}
+
 class DashboardErrorBoundary extends Component<
-  { children: ReactNode },
+  BoundaryProps,
   { error: Error | null }
 > {
-  state = { error: null };
+  state: { error: Error | null } = { error: null };
   static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error) {
+    if (this.props.onError) this.props.onError(error);
+    else console.error('UI error caught by boundary:', error);
+  }
   render() {
     if (this.state.error) {
+      const label = this.props.label ?? 'Component';
       return (
-        <div className="p-8 text-center">
-          <p className="text-red-600 font-semibold text-sm mb-2">Dashboard error</p>
-          <p className="text-xs text-gray-500 font-mono">{(this.state.error as Error).message}</p>
+        <div role="alert" className="p-8 text-center">
+          <p className="text-red-600 font-semibold text-sm mb-2">{label} error</p>
+          <p className="text-xs text-gray-500 font-mono break-all max-w-2xl mx-auto">{this.state.error.message}</p>
           <button
-            className="mt-4 text-xs text-blue-600 underline"
+            className="mt-4 text-xs text-blue-600 underline focus:outline-none focus:ring-2 focus:ring-blue-400 rounded px-2 py-1"
             onClick={() => this.setState({ error: null })}
           >
-            Dismiss
+            Dismiss and retry
           </button>
         </div>
       );
@@ -231,16 +244,65 @@ function App() {
         </div>
       )}
 
-      {/* S-curve warnings banner */}
-      {!dismissedWarnings && dashboardData?.warnings && dashboardData.warnings.length > 0 && (
-        <div className="bg-yellow-50 border-b border-yellow-300 px-4 py-2 flex items-start justify-between">
+      {/* Solver convergence error banner — shown when iterative debt solver fails to converge.
+          Distinct from advisory warnings: this means finance costs / facility sizes are unreliable. */}
+      {dashboardData?.solver && dashboardData.solver.converged === false && (
+        <div
+          role="alert"
+          className="bg-red-50 border-b border-red-300 px-4 py-2 flex items-start justify-between"
+        >
           <div>
-            <span className="text-yellow-800 text-xs font-semibold">S-Curve Warning: </span>
+            <span className="text-red-800 text-xs font-semibold">Debt solver did not converge: </span>
+            <span className="text-red-700 text-xs font-mono">
+              {dashboardData.solver.iterations} of {dashboardData.solver.maxIterations} iterations,
+              final delta ${Math.round(dashboardData.solver.finalDelta).toLocaleString()} &gt; tolerance ${dashboardData.solver.tolerance}.
+              Finance costs and facility sizes may be inaccurate.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Calculation warnings banner (S-curve, GST, revenue, funding, etc).
+          Errors and warnings are grouped; users see severity + category to triage. */}
+      {!dismissedWarnings && dashboardData?.warningsDetail && dashboardData.warningsDetail.length > 0 && (
+        <div
+          role="status"
+          className="bg-yellow-50 border-b border-yellow-300 px-4 py-2 flex items-start justify-between"
+        >
+          <div className="flex-1 min-w-0">
+            <span className="text-yellow-800 text-xs font-semibold">
+              {dashboardData.warningsDetail.length} calculation {dashboardData.warningsDetail.length === 1 ? 'warning' : 'warnings'}:
+            </span>
+            <ul className="mt-0.5 space-y-0.5">
+              {dashboardData.warningsDetail.slice(0, 6).map((w, i) => (
+                <li key={i} className={`text-xs font-mono ${w.severity === 'error' ? 'text-red-700' : 'text-yellow-700'}`}>
+                  <span className="uppercase font-semibold mr-2">[{w.category}]</span>{w.message}
+                </li>
+              ))}
+              {dashboardData.warningsDetail.length > 6 && (
+                <li className="text-xs text-yellow-700 italic">…and {dashboardData.warningsDetail.length - 6} more (see Checks tab)</li>
+              )}
+            </ul>
+          </div>
+          <button
+            onClick={() => setDismissedWarnings(true)}
+            aria-label="Dismiss calculation warnings"
+            className="text-yellow-600 text-xs underline ml-4 shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+      {/* Fallback: legacy plain-string warnings (rendered only if structured warnings absent) */}
+      {!dismissedWarnings && !dashboardData?.warningsDetail && dashboardData?.warnings && dashboardData.warnings.length > 0 && (
+        <div role="status" className="bg-yellow-50 border-b border-yellow-300 px-4 py-2 flex items-start justify-between">
+          <div>
+            <span className="text-yellow-800 text-xs font-semibold">Warning: </span>
             {dashboardData.warnings.map((w, i) => (
               <span key={i} className="text-yellow-700 text-xs font-mono block">{w}</span>
             ))}
           </div>
-          <button onClick={() => setDismissedWarnings(true)} className="text-yellow-600 text-xs underline ml-4 shrink-0">Dismiss</button>
+          <button onClick={() => setDismissedWarnings(true)} aria-label="Dismiss warnings" className="text-yellow-600 text-xs underline ml-4 shrink-0">Dismiss</button>
         </div>
       )}
 
@@ -263,9 +325,10 @@ function App() {
         </div>
       </nav>
 
-      {/* Content */}
+      {/* Content. Re-key the boundary on tab change so an error in one tab does
+          not poison subsequent tabs — the boundary remounts with a fresh state. */}
       <main className="flex-1 p-4 overflow-auto">
-        <DashboardErrorBoundary>
+        <DashboardErrorBoundary key={activeTab} label={`Tab "${activeTab}"`}>
           {activeTab === 'input' && <MainInputTab />}
           {activeTab === 'internalDash' && <InternalDashboard />}
           {activeTab === 'externalDash' && <ExternalDashboard />}
@@ -286,10 +349,12 @@ function App() {
       </footer>
       <Analytics />
       {showProjectManager && (
-        <ProjectManager
-          onClose={() => setShowProjectManager(false)}
-          onLoad={calculate}
-        />
+        <DashboardErrorBoundary label="Project Manager">
+          <ProjectManager
+            onClose={() => setShowProjectManager(false)}
+            onLoad={calculate}
+          />
+        </DashboardErrorBoundary>
       )}
     </div>
   );

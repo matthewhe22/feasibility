@@ -1,4 +1,7 @@
-import type { AdminConfig, MainInputs, DashboardData, MonthlyCashflow, GSTCompliance, DSCRSummary } from '../types';
+import type {
+  AdminConfig, MainInputs, DashboardData, MonthlyCashflow,
+  GSTCompliance, DSCRSummary, CalculationWarning, SolverDiagnostics,
+} from '../types';
 import { generateTimeline } from './timeline';
 import { spreadCosts, spreadLandPayments, clearSCurveWarnings, getSCurveWarnings, buildCostVariance } from './costSpreading';
 import {
@@ -192,17 +195,30 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   //
   // INPUT-TAXED & GOING-CONCERN SUPPLIES (gstIncluded=false):
   //   No GST on supply; no ITC attributable to these costs.
-  const totalGRVAllItems = inputs.grvItems.reduce((s, g) => s + g.currentSalePrice, 0);
+  // Use Number.isFinite + > 0 guards so that NaN/negative/Infinity sale prices in
+  // user-supplied data cannot poison the GST margin-scheme math (NaN propagates).
+  const totalGRVAllItems = inputs.grvItems.reduce(
+    (s, g) => s + (Number.isFinite(g.currentSalePrice) && g.currentSalePrice > 0 ? g.currentSalePrice : 0),
+    0,
+  );
   const totalGSTIncludedGRV = inputs.grvItems
-    .filter(g => g.gstIncluded && g.currentSalePrice > 0)
+    .filter(g => g.gstIncluded && Number.isFinite(g.currentSalePrice) && g.currentSalePrice > 0)
     .reduce((s, g) => s + g.currentSalePrice, 0);
-  const nonGSTGRV = totalGRVAllItems - totalGSTIncludedGRV;
+  const nonGSTGRV = Math.max(0, totalGRVAllItems - totalGSTIncludedGRV);
+  const landPriceFinite = Number.isFinite(inputs.landPurchase.landPurchasePrice)
+    ? Math.max(0, inputs.landPurchase.landPurchasePrice)
+    : 0;
   const marginSchemeDeduction = totalGRVAllItems > 0
-    ? inputs.landPurchase.landPurchasePrice * nonGSTGRV / totalGRVAllItems
+    ? landPriceFinite * nonGSTGRV / totalGRVAllItems
     : 0;
   const marginSchemeFactor = totalGSTIncludedGRV > 0
-    ? 1 - marginSchemeDeduction / totalGSTIncludedGRV
+    ? Math.max(0, 1 - marginSchemeDeduction / totalGSTIncludedGRV)
     : 1;
+  if (totalGRVAllItems === 0 && inputs.grvItems.length > 0) {
+    localWarnings.push(
+      'All GRV items have zero or invalid sale prices — GST/margin-scheme calculations skipped.',
+    );
+  }
 
   // GST withholding (GSTA s.72-55) — purchaser of new residential premises withholds
   // 1/11 of the GST-exclusive price and remits directly to ATO. Models the cash effect:
@@ -925,6 +941,38 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       ...getFundingWarnings(),
       ...getRevenueWarnings(),
     ],
+    warningsDetail: ((): CalculationWarning[] => {
+      const out: CalculationWarning[] = [];
+      for (const m of localWarnings) {
+        const cat: CalculationWarning['category'] =
+          m.toLowerCase().includes('gst') ? 'gst'
+          : m.toLowerCase().includes('net realisable') ? 'revenue'
+          : 'general';
+        out.push({ message: m, severity: 'warning', category: cat });
+      }
+      for (const m of getSCurveWarnings()) {
+        out.push({ message: m, severity: 'warning', category: 'sCurve' });
+      }
+      for (const m of getFundingWarnings()) {
+        const isSolver = m.toLowerCase().includes('solver');
+        out.push({
+          message: m,
+          severity: isSolver ? 'error' : 'warning',
+          category: isSolver ? 'solver' : 'funding',
+        });
+      }
+      for (const m of getRevenueWarnings()) {
+        out.push({ message: m, severity: 'warning', category: 'revenue' });
+      }
+      return out;
+    })(),
+    solver: ((): SolverDiagnostics => ({
+      converged: funding.converged,
+      iterations: funding.iterations,
+      maxIterations: 50,
+      finalDelta: funding.convergenceDelta,
+      tolerance: admin.tolerance,
+    }))(),
     costVariance: buildCostVariance(
       [
         ...inputs.developmentCosts,
