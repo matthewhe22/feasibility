@@ -250,7 +250,6 @@ export function InternalDashboard() {
     <div>
       <div className="text-center mb-4">
         <h2 className="text-lg font-bold text-blue-800">Internal Feasibility Dashboard</h2>
-        <p className="text-xs text-gray-500">Checks: OK</p>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
