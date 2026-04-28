@@ -214,9 +214,6 @@ export function ProjectDocs() {
               label="PM Fee per period"
               formula="PMFee[t] = pmFeeRate × (devCosts[t] + constructionCosts[t] + marketingCosts[t] + otherCosts[t] + landCosts[t] + sellingCosts[t])"
             />
-            <WarningBox>
-              <strong>Known gap (GAP B):</strong> The Excel reference model computes PM fees on a wider base that includes GST-inclusive costs and finance costs, yielding ~$23.2M vs this app's ~$18.3M. This difference is a known open item.
-            </WarningBox>
           </SubSection>
           <SubSection title="Selling cost timing">
             <p>Selling commissions are split into front-end (at presale exchange) and back-end (at settlement):</p>
