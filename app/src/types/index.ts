@@ -202,6 +202,8 @@ export interface AdminConfig {
   projectName: string;
   /** Free-text version label for the saved project (e.g. "Initial baseline", "Post review v2"). Used by the dashboard version-comparison feature. */
   versionName?: string;
+  /** Short version/revision tag displayed in the app header (e.g. "1.0", "rev 3"). */
+  projectVersion?: string;
   modelStartDate: number;
   monthsPerPeriod: number;
   lastActualsPeriod: number;
