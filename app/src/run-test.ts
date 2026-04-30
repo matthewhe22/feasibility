@@ -10,8 +10,8 @@ import {
   defaultPMFees, defaultSellingCosts, defaultGRVItems, defaultRentalIncome,
   defaultOtherIncome, defaultEquityDeveloper, defaultEquityJV, defaultEquityPreferred,
   defaultEquityAdditional, defaultLandLoan, defaultMezzanine, defaultSeniorFacility,
-  defaultSeniorFacility2, defaultSeniorFacility3, defaultResidualStock,
-  defaultAdditionalLoan, defaultOtherFinancingCosts,
+  defaultSeniorFacility2, defaultResidualStock,
+  defaultOtherFinancingCosts,
 } from './store/defaults';
 
 const admin: AdminConfig = {
@@ -83,11 +83,7 @@ const inputs: MainInputs = {
   mezzanine: defaultMezzanine,
   seniorFacility: defaultSeniorFacility,
   seniorFacility2: defaultSeniorFacility2,
-  seniorFacility3: defaultSeniorFacility3,
   residualStockFacility: defaultResidualStock,
-  additionalLoan1: { ...defaultAdditionalLoan, name: 'Additional Loan #1' },
-  additionalLoan2: { ...defaultAdditionalLoan, name: 'Additional Loan #2' },
-  additionalLoan3: { ...defaultAdditionalLoan, name: 'Additional Loan #3' },
   otherFinancingCosts: defaultOtherFinancingCosts,
 };
 

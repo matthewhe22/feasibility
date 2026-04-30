@@ -25,9 +25,7 @@ import {
   defaultMezzanine,
   defaultSeniorFacility,
   defaultSeniorFacility2,
-  defaultSeniorFacility3,
   defaultResidualStock,
-  defaultAdditionalLoan,
   defaultOtherFinancingCosts,
 } from './defaults';
 import { cloneStandardBuildSCurves } from '../engine/sCurves';
@@ -133,11 +131,7 @@ const defaultInputs: MainInputs = {
   mezzanine: defaultMezzanine,
   seniorFacility: defaultSeniorFacility,
   seniorFacility2: defaultSeniorFacility2,
-  seniorFacility3: defaultSeniorFacility3,
   residualStockFacility: defaultResidualStock,
-  additionalLoan1: { ...defaultAdditionalLoan, name: 'Additional Loan #1' },
-  additionalLoan2: { ...defaultAdditionalLoan, name: 'Additional Loan #2' },
-  additionalLoan3: { ...defaultAdditionalLoan, name: 'Additional Loan #3' },
   otherFinancingCosts: defaultOtherFinancingCosts,
 };
 
@@ -205,7 +199,21 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'feasibility-store',
-      version: 1,
+      // v2 = removed seniorFacility3 + additionalLoan1/2/3 from MainInputs.
+      // The migrate fn drops those keys if they exist in the persisted payload.
+      version: 2,
+      migrate: (persisted, version) => {
+        const p = persisted as Record<string, unknown> | null;
+        if (!p || typeof p !== 'object') return p;
+        if (version < 2 && p.inputs && typeof p.inputs === 'object') {
+          const inputs = p.inputs as Record<string, unknown>;
+          delete inputs.seniorFacility3;
+          delete inputs.additionalLoan1;
+          delete inputs.additionalLoan2;
+          delete inputs.additionalLoan3;
+        }
+        return p;
+      },
       // Debounce localStorage writes to coalesce rapid keystrokes into a single
       // serialization+write. 250 ms is imperceptible to users but eliminates
       // dozens of redundant writes per second when typing into input fields.
@@ -220,14 +228,18 @@ export const useStore = create<AppState>()(
       }),
       // Deep-merge persisted inputs/admin with current defaults so that newly
       // added fields (e.g. equityJV, equityPreferred) are never undefined when
-      // loading an older persisted state.
+      // loading an older persisted state. Drop legacy facility keys defensively
+      // (in case migrate is bypassed by a stale schema version on disk).
       merge: (persisted, current) => {
         const p = persisted as Partial<AppState>;
+        const legacyKeys = ['seniorFacility3', 'additionalLoan1', 'additionalLoan2', 'additionalLoan3'];
+        const cleanInputs = { ...(p.inputs ?? {}) } as Record<string, unknown>;
+        for (const k of legacyKeys) delete cleanInputs[k];
         return {
           ...current,
           ...p,
           admin: { ...current.admin, ...(p.admin ?? {}) },
-          inputs: { ...current.inputs, ...(p.inputs ?? {}) },
+          inputs: { ...current.inputs, ...cleanInputs } as typeof current.inputs,
         };
       },
     },

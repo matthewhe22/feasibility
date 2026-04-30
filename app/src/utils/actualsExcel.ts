@@ -344,7 +344,7 @@ export async function downloadActualsTemplate(
   // ── Financing actuals rows (one section per active facility) ──
   const hasAnyFinancing = [
     inputs.landLoan, inputs.seniorFacility, inputs.seniorFacility2,
-    inputs.seniorFacility3, inputs.mezzanine,
+    inputs.mezzanine,
   ].some(f => f && f.facilityLimit > 0);
 
   if (hasAnyFinancing) {
@@ -352,7 +352,6 @@ export async function downloadActualsTemplate(
     addFinancingFacilityRows(ws, inputs.landLoan,        'LAND', numPeriods);
     addFinancingFacilityRows(ws, inputs.seniorFacility,  'SNR',  numPeriods);
     addFinancingFacilityRows(ws, inputs.seniorFacility2, 'SNR2', numPeriods);
-    addFinancingFacilityRows(ws, inputs.seniorFacility3, 'SNR3', numPeriods);
     addFinancingFacilityRows(ws, inputs.mezzanine,       'MEZZ', numPeriods);
   }
 
@@ -522,7 +521,6 @@ export function applyActualsToInputs(
     landLoan:           applyToFacility(inputs.landLoan,        'LAND'),
     seniorFacility:     applyToFacility(inputs.seniorFacility,  'SNR'),
     seniorFacility2:    applyToFacility(inputs.seniorFacility2, 'SNR2'),
-    seniorFacility3:    applyToFacility(inputs.seniorFacility3, 'SNR3'),
     mezzanine:          applyToFacility(inputs.mezzanine,       'MEZZ'),
   };
 

@@ -692,7 +692,6 @@ function ActualsSection() {
       landLoan:        clearFacility(inputs.landLoan),
       seniorFacility:  clearFacility(inputs.seniorFacility),
       seniorFacility2: clearFacility(inputs.seniorFacility2),
-      seniorFacility3: clearFacility(inputs.seniorFacility3),
       mezzanine:       clearFacility(inputs.mezzanine),
     });
     setUploadStatus(null);
@@ -884,12 +883,6 @@ function ActualsSection() {
               facility={inputs.seniorFacility2}
               actualPeriods={currentMonth}
               onChange={f => setInputs({ seniorFacility2: f })}
-            />
-            <FinancingActualsEditor
-              label={inputs.seniorFacility3?.name || 'Senior Facility #3'}
-              facility={inputs.seniorFacility3}
-              actualPeriods={currentMonth}
-              onChange={f => setInputs({ seniorFacility3: f })}
             />
             <FinancingActualsEditor
               label={inputs.mezzanine?.name || 'Mezzanine'}
@@ -1388,9 +1381,6 @@ export function MainInputTab() {
                   mezzanine: { ...zeroDebt, name: 'Mezzanine' },
                   seniorFacility: { ...zeroDebt, name: 'Senior Facility' },
                   residualStockFacility: { ...zeroDebt, name: 'Residual Stock' },
-                  additionalLoan1: { ...zeroDebt, name: 'Additional Loan #1' },
-                  additionalLoan2: { ...zeroDebt, name: 'Additional Loan #2' },
-                  additionalLoan3: { ...zeroDebt, name: 'Additional Loan #3' },
                 });
               }}
               className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"

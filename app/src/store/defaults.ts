@@ -320,24 +320,6 @@ export const defaultSeniorFacility2: DebtFacility = {
   drawdownPriority: 5,
 };
 
-export const defaultSeniorFacility3: DebtFacility = {
-  name: 'Senior Facility #3',
-  facilityLimit: 0,
-  startMonth: 33,
-  maturityMonth: 33,
-  interestRate: 0.03,
-  bbsy: 0.0196,
-  margin: 0.03,
-  establishmentFeePercent: 0.005,
-  lineFeePercent: 0.03,
-  interestPaymentFrequency: 0,
-  lenderIsGSTExempt: true,
-  isCapitalised: true,
-  ltcTarget: 0.75,
-  lvrTarget: 0.70,
-  drawdownPriority: 6,
-};
-
 export const defaultResidualStock: DebtFacility = {
   name: 'Residual Stock Facility',
   facilityLimit: 0,
@@ -354,24 +336,6 @@ export const defaultResidualStock: DebtFacility = {
   ltcTarget: 0.84,
   lvrTarget: 0.754,
   drawdownPriority: 4,
-};
-
-export const defaultAdditionalLoan: DebtFacility = {
-  name: 'Additional Loan',
-  facilityLimit: 0,
-  startMonth: 0,
-  maturityMonth: 0,
-  interestRate: 0,
-  bbsy: 0,
-  margin: 0,
-  establishmentFeePercent: 0,
-  lineFeePercent: 0,
-  interestPaymentFrequency: 0,
-  lenderIsGSTExempt: true,
-  isCapitalised: true,
-  ltcTarget: 0,
-  lvrTarget: 0,
-  drawdownPriority: 5,
 };
 
 // ===== OTHER FINANCING COSTS =====

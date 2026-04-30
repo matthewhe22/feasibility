@@ -223,29 +223,9 @@ export function FinancingInputs() {
               onChange={(f) => setInputs({ seniorFacility2: f })}
             />
             <DebtSection
-              title="Senior Facility #3"
-              facility={inputs.seniorFacility3}
-              onChange={(f) => setInputs({ seniorFacility3: f })}
-            />
-            <DebtSection
               title="Residual Stock Facility"
               facility={inputs.residualStockFacility}
               onChange={(f) => setInputs({ residualStockFacility: f })}
-            />
-            <DebtSection
-              title="Additional Loan #1"
-              facility={inputs.additionalLoan1}
-              onChange={(f) => setInputs({ additionalLoan1: f })}
-            />
-            <DebtSection
-              title="Additional Loan #2"
-              facility={inputs.additionalLoan2}
-              onChange={(f) => setInputs({ additionalLoan2: f })}
-            />
-            <DebtSection
-              title="Additional Loan #3"
-              facility={inputs.additionalLoan3}
-              onChange={(f) => setInputs({ additionalLoan3: f })}
             />
           </div>
         </div>

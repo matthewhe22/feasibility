@@ -154,17 +154,6 @@ const CASHFLOW_SECTIONS: {
     ],
   },
   {
-    header: 'SENIOR FACILITY #3',
-    headerFill: CLR.senior,
-    rows: [
-      { label: 'Senior #3 Drawdown',  getValue: c => c.senior3Drawdown },
-      { label: 'Senior #3 Repayment', getValue: c => c.senior3Repayment },
-      { label: 'Senior #3 Interest',  getValue: c => c.senior3Interest },
-      { label: 'Senior #3 Line fee',  getValue: c => c.senior3Fees },
-      { label: 'Senior #3 Balance',   getValue: c => c.senior3Balance, bold: true, subtotalFill: CLR.seniorSub },
-    ],
-  },
-  {
     header: 'MEZZANINE FACILITY',
     headerFill: CLR.mezz,
     rows: [
@@ -392,9 +381,6 @@ function buildSummarySheet(ws: ExcelJS.Worksheet, data: DashboardData, projectNa
     ['Senior Facility #2', cs.senior2Amount, ''],
     ['  LTC',              cs.senior2LTC,    ''],
     ['  LVR',              cs.senior2LVR,    ''],
-    ['Senior Facility #3', cs.senior3Amount, ''],
-    ['  LTC',              cs.senior3LTC,    ''],
-    ['  LVR',              cs.senior3LVR,    ''],
     ['Mezzanine',          cs.mezzAmount,    ''],
     ['  LTC',              cs.mezzLTC,       ''],
     ['  LVR',              cs.mezzLVR,       ''],
@@ -423,9 +409,6 @@ function buildSummarySheet(ws: ExcelJS.Worksheet, data: DashboardData, projectNa
     ['Senior #2 Principal',        ds.senior2Principal],
     ['Senior #2 Interest & Fees',  ds.senior2Interest],
     ['Senior #2 Total',            ds.senior2Total],
-    ['Senior #3 Principal',        ds.senior3Principal],
-    ['Senior #3 Interest & Fees',  ds.senior3Interest],
-    ['Senior #3 Total',            ds.senior3Total],
     ['Mezz Principal',             ds.mezzPrincipal],
     ['Mezz Interest & Fees',       ds.mezzInterest],
     ['Mezz Total',                 ds.mezzTotal],
@@ -442,9 +425,6 @@ function buildSummarySheet(ws: ExcelJS.Worksheet, data: DashboardData, projectNa
     ['Senior #2 Margin',        dr.senior2Margin,       ''],
     ['Senior #2 BBSY',          dr.senior2BBSY,         ''],
     ['Senior #2 All-In',        dr.senior2AllIn,        ''],
-    ['Senior #3 Margin',        dr.senior3Margin,       ''],
-    ['Senior #3 BBSY',          dr.senior3BBSY,         ''],
-    ['Senior #3 All-In',        dr.senior3AllIn,        ''],
     ['Mezz All-In',             dr.mezzAllIn,           ''],
     ['Land Loan All-In',        dr.landAllIn,           ''],
   ].map(([l, v]) => [l as string, v as number]), row);
