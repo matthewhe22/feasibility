@@ -200,14 +200,21 @@ function App() {
             <div className="pencil-wordmark text-2xl leading-none">{admin.appName ? appTitle : 'Pencil'}</div>
             <div className="pencil-tagline mt-1">Feasibility · Engine</div>
           </div>
-          <div className="ml-6 pencil-num text-xs text-gray-400">
-            {admin.projectName || 'Property Development Feasibility'}
-          </div>
+          {(admin.projectName || admin.projectVersion) && (
+            <div className="ml-8 pl-8 border-l border-[#CFC7B5]">
+              <div className="pencil-project-name">
+                {admin.projectName || 'Untitled Project'}
+              </div>
+              <div className="pencil-project-version">
+                {admin.projectVersion ? `v${admin.projectVersion}` : 'Draft'}
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex gap-2">
           <button
             onClick={() => setShowProjectManager(true)}
-            className="pencil-num text-xs px-4 py-2 border border-[#3a3e44] hover:bg-[#1A1D21] transition text-[#F4F1EA]"
+            className="pencil-btn-secondary"
           >
             Projects
           </button>
@@ -215,7 +222,7 @@ function App() {
             href="/admin"
             target="_blank"
             rel="noopener noreferrer"
-            className="pencil-num text-xs px-4 py-2 border border-[#3a3e44] hover:bg-[#1A1D21] transition text-[#F4F1EA] inline-flex items-center gap-1.5"
+            className="pencil-btn-secondary"
             title="Open the Admin Portal in a new tab"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -228,7 +235,7 @@ function App() {
           <button
             onClick={calculate}
             disabled={isCalculating}
-            className="pencil-num text-xs px-5 py-2 bg-[#C48A3C] text-[#0E1012] font-semibold hover:bg-[#D89A47] disabled:opacity-60 transition"
+            className="pencil-btn-primary"
           >
             {isCalculating ? 'Calculating…' : 'Run Calculations'}
           </button>
@@ -292,16 +299,14 @@ function App() {
       )}
 
       {/* Pencil tab row */}
-      <nav className="bg-white border-b border-[#CFC7B5] sticky top-0 z-10">
+      <nav className="bg-white border-b border-[#CFC7B5] sticky top-0 z-10 shadow-sm">
         <div className="flex px-6">
           {TABS.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as Parameters<typeof setActiveTab>[0])}
-              className={`pencil-tab px-5 py-3 border-b-2 transition-colors ${
-                activeTab === tab.id
-                  ? 'pencil-tab-active'
-                  : 'border-transparent text-[#6A6558] hover:text-[#0E1012]'
+              className={`pencil-tab px-5 py-3 border-b-2 border-transparent transition-colors ${
+                activeTab === tab.id ? 'pencil-tab-active' : ''
               }`}
             >
               {tab.label}
