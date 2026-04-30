@@ -43,15 +43,15 @@ const CLR = {
 function style(
   cell: ExcelJS.Cell,
   opts: {
-    fill?: string;
-    fontColor?: string;
-    bold?: boolean;
-    italic?: boolean;
-    size?: number;
-    numFmt?: string;
-    hAlign?: ExcelJS.Alignment['horizontal'];
-    wrapText?: boolean;
-    border?: boolean;
+    fill?: string | undefined;
+    fontColor?: string | undefined;
+    bold?: boolean | undefined;
+    italic?: boolean | undefined;
+    size?: number | undefined;
+    numFmt?: string | undefined;
+    hAlign?: ExcelJS.Alignment['horizontal'] | undefined;
+    wrapText?: boolean | undefined;
+    border?: boolean | undefined;
   } = {},
 ) {
   if (opts.fill) {

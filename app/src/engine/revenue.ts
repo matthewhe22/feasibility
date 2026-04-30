@@ -42,7 +42,7 @@ export function spreadSettlements(items: RevenueLineItem[], periods: Period[]): 
       // Actual periods: use uploaded values
       let actualTotal = 0;
       for (let i = 0; i < n; i++) {
-        if (periods[i].isActual) {
+        if (periods[i]?.isActual) {
           const actual = item.actuals[i] ?? 0;
           result[i] += actual;
           actualTotal += actual;
@@ -57,7 +57,7 @@ export function spreadSettlements(items: RevenueLineItem[], periods: Period[]): 
         const forecastEntries: { idx: number; weight: number }[] = [];
         for (let i = 0; i < span; i++) {
           const idx = startIdx + i;
-          if (idx >= 0 && idx < n && !periods[idx].isActual) {
+          if (idx >= 0 && idx < n && !periods[idx]?.isActual) {
             forecastEntries.push({ idx, weight: 1 }); // uniform: each slot has equal weight
           }
         }
@@ -103,6 +103,7 @@ export function spreadDeposits(
   const result = new Array(n).fill(0);
   for (let idx = 0; idx < items.length; idx++) {
     const item = items[idx];
+    if (!item) continue;
     if (!Number.isFinite(item.currentSalePrice) || item.currentSalePrice <= 0) continue;
     if (!Number.isFinite(item.preSaleExchangeMonth) || item.preSaleExchangeMonth <= 0) continue;
     if (!Number.isFinite(item.preSaleSpan) || item.preSaleSpan <= 0) continue;
@@ -133,7 +134,7 @@ export function calculateSellingCommissions(
   for (let i = 0; i < grvItems.length && i < sellingCosts.length; i++) {
     const grv = grvItems[i];
     const sc = sellingCosts[i];
-    if (!sc || grv.currentSalePrice === 0) continue;
+    if (!grv || !sc || grv.currentSalePrice === 0) continue;
 
     const totalCommission = grv.currentSalePrice * sc.salesCommission;
     const fe = totalCommission * sc.preCommissionPercent;
@@ -156,7 +157,8 @@ export function spreadBackEndCommissions(
   for (let i = 0; i < grvItems.length && i < sellingCosts.length; i++) {
     const grv = grvItems[i];
     const sc = sellingCosts[i];
-    if (!sc || !Number.isFinite(grv.currentSalePrice) || grv.currentSalePrice <= 0) continue;
+    if (!grv || !sc) continue;
+    if (!Number.isFinite(grv.currentSalePrice) || grv.currentSalePrice <= 0) continue;
     if (!Number.isFinite(grv.settlementMonth) || grv.settlementMonth <= 0) continue;
 
     const totalCommission = grv.currentSalePrice * sc.salesCommission;
@@ -192,7 +194,7 @@ export function spreadIncome(items: RentalIncomeItem[], periods: Period[]): numb
       // Actual periods: use uploaded values
       let actualTotal = 0;
       for (let i = 0; i < n; i++) {
-        if (periods[i].isActual) {
+        if (periods[i]?.isActual) {
           const actual = item.actuals[i] ?? 0;
           result[i] += actual;
           actualTotal += actual;
@@ -204,7 +206,7 @@ export function spreadIncome(items: RentalIncomeItem[], periods: Period[]): numb
         const forecastIdxs: number[] = [];
         for (let i = 0; i < monthSpan; i++) {
           const idx = startIdx + i;
-          if (idx >= 0 && idx < n && !periods[idx].isActual) {
+          if (idx >= 0 && idx < n && !periods[idx]?.isActual) {
             forecastIdxs.push(idx);
           }
         }

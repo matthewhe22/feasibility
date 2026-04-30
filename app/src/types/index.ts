@@ -70,7 +70,7 @@ export interface CostLineItem {
   addGST: boolean;
   ctd: number;
   ctc: number;
-  actuals?: number[]; // per-period actual spend (0-based period index); overrides forecast for actual periods
+  actuals?: number[] | undefined; // per-period actual spend (0-based period index); overrides forecast for actual periods
 }
 
 export interface ConstructionCostItem extends CostLineItem {
@@ -124,7 +124,7 @@ export interface RevenueLineItem {
   supplyType?: GSTSupplyType;
   /** Subject to GST vendor-withholding under GSTA s.72-55 (new residential premises). Defaults to true for margin-scheme residential. */
   withholdingApplies?: boolean;
-  actuals?: number[]; // per-period actual revenue (0-based period index); overrides forecast for actual periods
+  actuals?: number[] | undefined; // per-period actual revenue (0-based period index); overrides forecast for actual periods
 }
 
 
@@ -143,7 +143,7 @@ export interface RentalIncomeItem {
   monthSpan: number;
   /** GST treatment of this income stream. Default 'input-taxed'. */
   supplyType?: GSTSupplyType;
-  actuals?: number[]; // per-period actual income (0-based period index); overrides forecast for actual periods
+  actuals?: number[] | undefined; // per-period actual income (0-based period index); overrides forecast for actual periods
 }
 
 // ===== FINANCING =====
@@ -191,10 +191,10 @@ export interface DebtFacility {
   // Per-period actual values (0-based index = period index).
   // In actual periods these override the model-calculated values for reporting;
   // the waterfall calculation itself is unchanged (no redistribution).
-  actualsDrawdown?: number[];
-  actualsRepayment?: number[];
-  actualsInterest?: number[];
-  actualsFees?: number[]; // combined line fee + establishment fee for the period
+  actualsDrawdown?: number[] | undefined;
+  actualsRepayment?: number[] | undefined;
+  actualsInterest?: number[] | undefined;
+  actualsFees?: number[] | undefined; // combined line fee + establishment fee for the period
 }
 
 // ===== ADMIN =====
@@ -223,13 +223,13 @@ export interface AdminConfig {
   /** Annual DSCR target threshold (e.g. 1.25). Used for dashboard reporting only. */
   dscrTarget?: number;
   /** Branding: custom application title shown in header and browser tab */
-  appName?: string;
+  appName?: string | undefined;
   /** Branding: base64-encoded logo image (data URL) displayed in header top-left */
-  logoDataUrl?: string;
+  logoDataUrl?: string | undefined;
   /** Branding: base64-encoded favicon image (data URL) applied to browser tab */
-  faviconDataUrl?: string;
+  faviconDataUrl?: string | undefined;
   /** Branding: CSS colour for the page background (e.g. '#f3f4f6') */
-  appBgColor?: string;
+  appBgColor?: string | undefined;
 }
 
 // ===== MAIN INPUTS =====

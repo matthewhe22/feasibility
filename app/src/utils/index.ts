@@ -77,6 +77,23 @@ export function sum(arr: number[]): number {
   return arr.reduce((a, b) => a + b, 0);
 }
 
+/**
+ * Safe numeric array indexing — returns the element or 0 when out of bounds.
+ * Lets per-period engine math compile cleanly under `noUncheckedIndexedAccess`
+ * without sprinkling `?? 0` across hundreds of array reads.
+ */
+export function at(arr: number[], i: number): number {
+  return arr[i] ?? 0;
+}
+
+/**
+ * Safe array indexing for non-numeric arrays — returns the element or undefined.
+ * Forces callers to handle the missing case explicitly.
+ */
+export function get<T>(arr: ReadonlyArray<T>, i: number): T | undefined {
+  return arr[i];
+}
+
 // IRR calculation using Newton-Raphson method
 export function calculateIRR(cashflows: number[], guess = 0.1, maxIter = 1000, tolerance = 1e-7): number {
   if (cashflows.length === 0) return 0;
@@ -94,9 +111,10 @@ export function calculateIRR(cashflows: number[], guess = 0.1, maxIter = 1000, t
     let npv = 0;
     let dnpv = 0;
     for (let t = 0; t < cashflows.length; t++) {
+      const cft = cashflows[t] ?? 0;
       const factor = Math.pow(1 + rate, t);
-      npv += cashflows[t] / factor;
-      dnpv -= (t * cashflows[t]) / (factor * (1 + rate));
+      npv += cft / factor;
+      dnpv -= (t * cft) / (factor * (1 + rate));
     }
 
     if (Math.abs(npv) < tolerance) break;

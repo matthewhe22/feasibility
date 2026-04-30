@@ -267,31 +267,31 @@ function applyFinancingActualsOverlay(
   let anyActuals = false;
 
   for (let i = 0; i < periods.length; i++) {
-    if (!periods[i].isActual) continue;
+    if (!periods[i]?.isActual) continue;
 
     // Land loan
-    if (landLoan.actualsDrawdown?.[i]  != null) { result.landLoanDrawdowns[i]  = landLoan.actualsDrawdown[i];  anyActuals = true; }
-    if (landLoan.actualsRepayment?.[i] != null) { result.landLoanRepayments[i] = landLoan.actualsRepayment[i]; anyActuals = true; }
-    if (landLoan.actualsInterest?.[i]  != null) { result.landLoanInterest[i]   = landLoan.actualsInterest[i];  anyActuals = true; }
-    if (landLoan.actualsFees?.[i]      != null) { result.landLoanFees[i]       = landLoan.actualsFees[i];      anyActuals = true; }
+    const llD = landLoan.actualsDrawdown?.[i];  if (llD  != null) { result.landLoanDrawdowns[i]  = llD;  anyActuals = true; }
+    const llR = landLoan.actualsRepayment?.[i]; if (llR != null) { result.landLoanRepayments[i] = llR;  anyActuals = true; }
+    const llI = landLoan.actualsInterest?.[i];  if (llI != null) { result.landLoanInterest[i]   = llI;  anyActuals = true; }
+    const llF = landLoan.actualsFees?.[i];      if (llF != null) { result.landLoanFees[i]       = llF;  anyActuals = true; }
 
     // Senior 1
-    if (senior.actualsDrawdown?.[i]  != null) { result.seniorDrawdowns[i]  = senior.actualsDrawdown[i];  anyActuals = true; }
-    if (senior.actualsRepayment?.[i] != null) { result.seniorRepayments[i] = senior.actualsRepayment[i]; anyActuals = true; }
-    if (senior.actualsInterest?.[i]  != null) { result.seniorInterest[i]   = senior.actualsInterest[i];  anyActuals = true; }
-    if (senior.actualsFees?.[i]      != null) { result.seniorFees[i]       = senior.actualsFees[i];      anyActuals = true; }
+    const s1D = senior.actualsDrawdown?.[i];  if (s1D != null) { result.seniorDrawdowns[i]  = s1D; anyActuals = true; }
+    const s1R = senior.actualsRepayment?.[i]; if (s1R != null) { result.seniorRepayments[i] = s1R; anyActuals = true; }
+    const s1I = senior.actualsInterest?.[i];  if (s1I != null) { result.seniorInterest[i]   = s1I; anyActuals = true; }
+    const s1F = senior.actualsFees?.[i];      if (s1F != null) { result.seniorFees[i]       = s1F; anyActuals = true; }
 
     // Senior 2
-    if (senior2.actualsDrawdown?.[i]  != null) { result.senior2Drawdowns[i]  = senior2.actualsDrawdown[i];  anyActuals = true; }
-    if (senior2.actualsRepayment?.[i] != null) { result.senior2Repayments[i] = senior2.actualsRepayment[i]; anyActuals = true; }
-    if (senior2.actualsInterest?.[i]  != null) { result.senior2Interest[i]   = senior2.actualsInterest[i];  anyActuals = true; }
-    if (senior2.actualsFees?.[i]      != null) { result.senior2Fees[i]       = senior2.actualsFees[i];      anyActuals = true; }
+    const s2D = senior2.actualsDrawdown?.[i];  if (s2D != null) { result.senior2Drawdowns[i]  = s2D; anyActuals = true; }
+    const s2R = senior2.actualsRepayment?.[i]; if (s2R != null) { result.senior2Repayments[i] = s2R; anyActuals = true; }
+    const s2I = senior2.actualsInterest?.[i];  if (s2I != null) { result.senior2Interest[i]   = s2I; anyActuals = true; }
+    const s2F = senior2.actualsFees?.[i];      if (s2F != null) { result.senior2Fees[i]       = s2F; anyActuals = true; }
 
     // Mezzanine
-    if (mezz.actualsDrawdown?.[i]  != null) { result.mezzDrawdowns[i]  = mezz.actualsDrawdown[i];  anyActuals = true; }
-    if (mezz.actualsRepayment?.[i] != null) { result.mezzRepayments[i] = mezz.actualsRepayment[i]; anyActuals = true; }
-    if (mezz.actualsInterest?.[i]  != null) { result.mezzInterest[i]   = mezz.actualsInterest[i];  anyActuals = true; }
-    if (mezz.actualsFees?.[i]      != null) { result.mezzFees[i]       = mezz.actualsFees[i];      anyActuals = true; }
+    const mzD = mezz.actualsDrawdown?.[i];  if (mzD != null) { result.mezzDrawdowns[i]  = mzD; anyActuals = true; }
+    const mzR = mezz.actualsRepayment?.[i]; if (mzR != null) { result.mezzRepayments[i] = mzR; anyActuals = true; }
+    const mzI = mezz.actualsInterest?.[i];  if (mzI != null) { result.mezzInterest[i]   = mzI; anyActuals = true; }
+    const mzF = mezz.actualsFees?.[i];      if (mzF != null) { result.mezzFees[i]       = mzF; anyActuals = true; }
   }
 
   // Recompute running totals from the overlaid arrays so dashboard figures reflect actuals.
@@ -459,7 +459,7 @@ function runFundingWaterfall(
 
   // ===== SINGLE PASS =====
   for (let i = 0; i < n; i++) {
-    const days         = periods[i].daysInPeriod;
+    const days         = periods[i]?.daysInPeriod ?? 0;
     // seniorActive: facility is within its committed term → line fees charged + drawdowns allowed.
     // seniorDrawActive: drawdowns allowed beyond maturity (extension period) but no more line fees.
     const seniorActive      = hasSenior  && i >= snrStartIdx  && i <= snrEndIdx;
@@ -523,7 +523,7 @@ function runFundingWaterfall(
     llBalance[i] = llRunningBalance;
 
     // ── 5. Operating costs ─────────────────────────────────────────────────────
-    bankBalance -= monthlyCostsExcFinance[i];
+    bankBalance -= monthlyCostsExcFinance[i] ?? 0;
 
     // ── 6. Interest & fees on all senior facilities and mezz ──────────────────
 
@@ -663,7 +663,7 @@ function runFundingWaterfall(
     }
 
     // ── 8. Revenue ────────────────────────────────────────────────────────────
-    bankBalance += monthlyRevenue[i] - gstOnRevenue[i];
+    bankBalance += (monthlyRevenue[i] ?? 0) - (gstOnRevenue[i] ?? 0);
 
     // ── 9. Gap fill ────────────────────────────────────────────────────────────
     if (bankBalance < 0) {

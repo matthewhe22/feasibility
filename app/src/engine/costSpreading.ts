@@ -45,7 +45,7 @@ export function getSCurveWeights(
   }
   const buildMatch = sCurve.match(/^(\d+) Month Build$/);
   if (buildMatch) {
-    const buildMonths = parseInt(buildMatch[1]);
+    const buildMonths = parseInt(buildMatch[1] ?? '0');
     // Check user-defined curve first
     if (buildSCurves) {
       const userCurve = buildSCurves[buildMonths];
@@ -102,7 +102,7 @@ export function spreadCost(
   if (item.actuals && item.actuals.some(v => v != null && v > 0)) {
     let actualTotal = 0;
     for (let i = 0; i < periods.length; i++) {
-      if (periods[i].isActual) {
+      if (periods[i]?.isActual) {
         const actual = item.actuals[i] ?? 0;
         result[i] = actual;
         actualTotal += actual;
@@ -116,8 +116,8 @@ export function spreadCost(
       const forecastEntries: { periodIdx: number; weight: number }[] = [];
       for (let wi = 0; wi < allWeights.length; wi++) {
         const periodIdx = startIdx + wi;
-        if (periodIdx >= 0 && periodIdx < periods.length && !periods[periodIdx].isActual) {
-          forecastEntries.push({ periodIdx, weight: allWeights[wi] });
+        if (periodIdx >= 0 && periodIdx < periods.length && !periods[periodIdx]?.isActual) {
+          forecastEntries.push({ periodIdx, weight: allWeights[wi] ?? 0 });
         }
       }
       const weightSum = forecastEntries.reduce((s, e) => s + e.weight, 0);
@@ -135,7 +135,7 @@ export function spreadCost(
   for (let i = 0; i < weights.length; i++) {
     const periodIdx = startIdx + i;
     if (periodIdx >= 0 && periodIdx < periods.length) {
-      result[periodIdx] = item.totalCosts * weights[i];
+      result[periodIdx] = item.totalCosts * (weights[i] ?? 0);
     }
   }
   return result;
@@ -152,7 +152,7 @@ export function spreadCosts(
   for (const item of items) {
     const spread = spreadCost(item, periods, manualSCurves, buildSCurves);
     for (let i = 0; i < result.length; i++) {
-      result[i] += spread[i];
+      result[i] += spread[i] ?? 0;
     }
   }
   return result;
@@ -167,7 +167,7 @@ export function computeCtdCtc(item: CostLineItem, periods: Period[]): { ctd: num
   let ctd = 0;
   if (item.actuals) {
     for (let i = 0; i < periods.length; i++) {
-      if (periods[i].isActual) ctd += item.actuals[i] ?? 0;
+      if (periods[i]?.isActual) ctd += item.actuals[i] ?? 0;
     }
   }
   return { ctd, ctc: Math.max(0, item.totalCosts - ctd) };
