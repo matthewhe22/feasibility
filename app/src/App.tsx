@@ -200,13 +200,13 @@ function App() {
             <div className="pencil-wordmark text-2xl leading-none">{admin.appName ? appTitle : 'Pencil'}</div>
             <div className="pencil-tagline mt-1">Feasibility · Engine</div>
           </div>
-          {(admin.projectName || admin.projectVersion) && (
+          {(admin.projectName || admin.versionName || admin.projectVersion) && (
             <div className="ml-8 pl-8 border-l border-[#CFC7B5]">
               <div className="pencil-project-name">
                 {admin.projectName || 'Untitled Project'}
               </div>
               <div className="pencil-project-version">
-                {admin.projectVersion ? `v${admin.projectVersion}` : 'Draft'}
+                {admin.versionName || (admin.projectVersion ? `v${admin.projectVersion}` : 'Draft')}
               </div>
             </div>
           )}
