@@ -12,6 +12,7 @@ import {
   parseActualsFile,
   applyActualsToInputs,
 } from '../../utils/actualsExcel';
+import { downloadSCurveTemplate, parseSCurveFile } from '../../utils/sCurveExcel';
 import type { CostLineItem, RevenueLineItem, DebtFacility } from '../../types';
 
 // ── Manual S-Curve Editor ─────────────────────────────────────────────────────
@@ -909,6 +910,7 @@ export function MainInputTab() {
   const [section, setSection] = useState<string>('preliminary');
   const [selectedBuildDuration, setSelectedBuildDuration] = useState<number>(41);
   const csvInputRef = useRef<HTMLInputElement>(null);
+  const xlsxInputRef = useRef<HTMLInputElement>(null);
 
   const sections = [
     { id: 'preliminary', label: '1. General' },
@@ -1015,8 +1017,50 @@ export function MainInputTab() {
       alert(`Imported ${Object.keys(parsed).length} build S-curve(s): ${Object.keys(parsed).map(k => `${k} Month`).join(', ')}`);
     };
     reader.readAsText(file);
-    // Reset input so same file can be re-uploaded
     e.target.value = '';
+  };
+
+  // Excel upload for all S-curves (manual + build)
+  const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const result = await parseSCurveFile(file);
+      let summary: string[] = [];
+
+      const nextAdmin: Partial<typeof admin> = {};
+
+      if (result.manualSCurves) {
+        nextAdmin.manualSCurves = result.manualSCurves;
+        const filled = result.manualSCurves.filter(c => c.some(v => v > 0)).length;
+        summary.push(`${filled} manual S-curve(s) imported`);
+      }
+      if (result.buildSCurves) {
+        nextAdmin.buildSCurves = { ...(admin.buildSCurves ?? {}), ...result.buildSCurves };
+        summary.push(`${Object.keys(result.buildSCurves).length} build S-curve(s) imported: ${Object.keys(result.buildSCurves).map(k => `${k}mo`).join(', ')}`);
+      }
+
+      if (summary.length === 0) {
+        alert('No S-curve data found in the uploaded file.');
+        return;
+      }
+
+      setAdmin(nextAdmin);
+
+      const msg = ['S-curves imported successfully:', ...summary, ...(result.warnings.length ? ['', 'Warnings:', ...result.warnings] : [])].join('\n');
+      alert(msg);
+    } catch (err) {
+      alert(`Failed to parse S-curve file:\n${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      await downloadSCurveTemplate(admin);
+    } catch (err) {
+      alert(`Failed to generate template:\n${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   return (
@@ -1426,6 +1470,16 @@ export function MainInputTab() {
         <div>
           <SectionHeader number="5" title="S-Curve Distributions">
             <button
+              onClick={handleDownloadTemplate}
+              className="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-0.5 rounded flex items-center gap-1"
+              title="Download all S-curves as Excel template"
+            >↓ Excel</button>
+            <button
+              onClick={() => xlsxInputRef.current?.click()}
+              className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded flex items-center gap-1"
+              title="Upload S-curves from Excel file"
+            >↑ Excel</button>
+            <button
               onClick={() => { if (confirm('Clear all Manual S-Curve weights?')) setAdmin({ manualSCurves: [[], [], []], buildSCurves: {} }); }}
               className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
             >Clear All</button>
@@ -1458,17 +1512,41 @@ export function MainInputTab() {
               Durations without user-defined weights use a parabolic bell approximation.
             </p>
 
-            {/* CSV Upload */}
-            <div className="flex items-center gap-3 mb-4">
+            {/* Upload / Download toolbar */}
+            <div className="flex flex-wrap items-center gap-2 mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
+              {/* Excel download */}
+              <button
+                onClick={handleDownloadTemplate}
+                className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded font-medium flex items-center gap-1"
+              >
+                <span>↓</span> Download Excel Template
+              </button>
+              <span className="text-xs text-gray-500">Download current S-curves as .xlsx to edit &amp; re-upload</span>
+
+              <span className="text-gray-300 mx-1">|</span>
+
+              {/* Excel upload */}
+              <button
+                onClick={() => xlsxInputRef.current?.click()}
+                className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded font-medium flex items-center gap-1"
+              >
+                <span>↑</span> Upload Excel (.xlsx)
+              </button>
+              <input
+                ref={xlsxInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={handleExcelUpload}
+              />
+
+              {/* CSV upload (legacy) */}
               <button
                 onClick={() => csvInputRef.current?.click()}
-                className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded font-medium"
+                className="text-xs bg-gray-500 hover:bg-gray-600 text-white px-3 py-1.5 rounded font-medium flex items-center gap-1"
               >
-                Upload from CSV
+                <span>↑</span> Upload CSV
               </button>
-              <span className="text-xs text-gray-400">
-                CSV format: header row with "Month, 12 Month Build, 13 Month Build, ..." — one weight per row per month
-              </span>
               <input
                 ref={csvInputRef}
                 type="file"
@@ -1476,6 +1554,8 @@ export function MainInputTab() {
                 className="hidden"
                 onChange={handleCSVImport}
               />
+              <span className="text-xs text-gray-400 hidden sm:inline">CSV: "Month, 12 Month Build, ..." format</span>
+
               <button
                 onClick={() => {
                   if (confirm('Clear all build S-curve data? Curves will revert to parabolic fallback.')) {
