@@ -67,9 +67,10 @@ interface ProfessionalResearch {
  *    publications (Rawlinsons, T&T ICMS, RLB, AIQS). Always-on, no API key.
  *
  * 2. **Live AI research** (optional) — POSTs to /api/benchmarks/research, which
- *    uses Claude with the web_search tool to fetch current public-QS data and
- *    return a tailored band with cited URLs. Requires ANTHROPIC_API_KEY on the
- *    server. Falls back gracefully if not configured.
+ *    uses Google Gemini with web search to fetch current public-QS data and
+ *    return a tailored band with cited URLs. Requires a Gemini API key in the
+ *    Admin Portal (free tier from aistudio.google.com). Falls back gracefully
+ *    if not configured.
  *
  * Every benchmark — static or live — is shown with a visible source citation.
  */
@@ -544,7 +545,7 @@ function LiveResearchPanel({
     <div className="mt-4 pt-3 border-t border-blue-200">
       <div className="flex items-center gap-2 mb-2">
         <p className="text-[10px] font-bold uppercase tracking-wide text-purple-700">
-          Live AI research (Claude with web search)
+          Live AI research (Gemini with web search)
         </p>
         <button
           type="button"
@@ -555,7 +556,7 @@ function LiveResearchPanel({
           {loading ? 'Researching…' : 'Research live benchmarks'}
         </button>
         <span className="text-[10px] text-gray-500 italic ml-auto">
-          Requires <code>ANTHROPIC_API_KEY</code> on the server.
+          Uses Admin → AI Settings (Gemini API key)
         </span>
       </div>
 
@@ -564,8 +565,8 @@ function LiveResearchPanel({
           <span className="font-semibold">Live research failed:</span> {error}
           {error.toLowerCase().includes('not configured') && (
             <span className="block mt-1 text-red-600">
-              The static benchmark above remains available. To enable live research, set
-              the <code>ANTHROPIC_API_KEY</code> environment variable on the deployment.
+              The static benchmark above remains available. To enable live research, add a Gemini
+              API key in Admin → AI Settings (free tier from aistudio.google.com/apikey).
             </span>
           )}
         </div>

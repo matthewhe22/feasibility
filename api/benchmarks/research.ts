@@ -7,48 +7,41 @@ import { resolveActiveSettings } from '../_lib/aiSettings';
 /**
  * POST /api/benchmarks/research
  *
- * Research current Australian construction or professional-fee benchmarks for
- * a given project profile, using Google Gemini with built-in web search.
+ * Research current Australian construction-cost, professional-fee, or GRV
+ * (gross-realisable-value sale-price) benchmarks for a given project profile,
+ * using Google Gemini with built-in web search.
  *
- * Body:
- * {
- *   mode: 'construction' | 'professional',
- *   buildingType: string,
- *   storeys: number,
- *   state: string,         // e.g. 'NSW', 'QLD'
- *   finishQuality: string, // 'budget' | 'standard' | 'premium' | 'luxury'
- *   siteComplexity: string,
- *   gfa?: number,
- *   units?: number,
- *   contractValue?: number  // only used for `professional`
- * }
+ * Body (mode='construction' | 'professional'):
+ * { mode, buildingType, storeys, state, finishQuality, siteComplexity, gfa?, units?, contractValue? }
  *
- * Response:
- * {
- *   summary: string,
- *   rateLow?: number, rateHigh?: number,
- *   totalLow?: number, totalHigh?: number,
- *   feeBreakdown?: Array<{discipline, percentLow, percentHigh, dollarLow, dollarHigh}>,
- *   sources: Array<{title, url, snippet?}>,
- *   model: string,
- *   timestamp: string
- * }
+ * Body (mode='grv'):
+ * { mode: 'grv', assetType, state, locationGrade, quality, targetYear,
+ *   units?, totalSaleableArea?, unitArea? }
  */
 
 interface ResearchRequest {
-  mode: 'construction' | 'professional';
-  buildingType: string;
-  storeys: number;
+  mode: 'construction' | 'professional' | 'grv';
+  // Cost-side fields
+  buildingType?: string;
+  storeys?: number;
   state: string;
-  finishQuality: string;
-  siteComplexity: string;
+  finishQuality?: string;
+  siteComplexity?: string;
   gfa?: number;
   units?: number;
   contractValue?: number;
+  // GRV-side fields
+  assetType?: string;
+  locationGrade?: string;
+  quality?: string;
+  targetYear?: number;
+  totalSaleableArea?: number;
+  unitArea?: number;
 }
 
 interface ResearchResult {
   summary: string;
+  // Cost / construction
   rateLow?: number;
   rateHigh?: number;
   totalLow?: number;
@@ -60,12 +53,24 @@ interface ResearchResult {
     dollarLow?: number;
     dollarHigh?: number;
   }>;
+  // GRV
+  pricingBasis?: string;
+  perUnitLow?: number;
+  perUnitHigh?: number;
+  breakdown?: Array<{
+    label: string;
+    perUnitLow: number;
+    perUnitHigh: number;
+    pricingBasis?: string;
+    note?: string;
+  }>;
+  // Common
   sources: Array<{ title: string; url: string; snippet?: string }>;
   model: string;
   timestamp: string;
 }
 
-const SYSTEM_PROMPT = `You are an Australian quantity surveyor and construction-cost researcher.
+const SYSTEM_PROMPT_COST = `You are an Australian quantity surveyor and construction-cost researcher.
 Your job is to look up current (2024-2026) construction-cost benchmarks for Australian
 property development feasibility models, citing public Quantity Surveyor publications and
 reports.
@@ -101,16 +106,68 @@ If recent data is genuinely unavailable for a niche asset class, return your bes
 with a clear "low confidence" note in summary, and explain in the summary why precision is
 limited.`;
 
+const SYSTEM_PROMPT_GRV = `You are an Australian property valuation analyst and sales-research specialist.
+Your job is to look up current Australian sale-price benchmarks (Gross Realisable Value)
+for property development feasibility models, citing public market-research publications.
+
+Trusted sources you should prefer (in order):
+
+  Residential
+   - CoreLogic — Hedonic Home Value Index (monthly)
+   - Domain Group — House / Apartment Price Reports (quarterly)
+   - PropTrack (REA Group) — Home Price Index (monthly)
+   - ABS Residential Property Price Indexes: Eight Capital Cities
+   - Knight Frank Australia — Prime Residential Index
+   - Charter Keck Cramer — Apartment Insights
+   - Urbis — Apartment Essentials reports
+   - HIA-CoreLogic — Residential Land Report
+
+  Commercial / Office / Retail / Industrial
+   - JLL Research Australia — Capital Markets reports
+   - Knight Frank Capital Markets — Sector Spotlights
+   - Colliers International — Capital Markets / Office / Retail Insights
+   - Cushman & Wakefield — Marketbeat
+   - CBRE Australia — ViewPoint / Capital Markets
+   - Savills Australia — Spotlight reports
+
+  Hotels
+   - JLL Hotels & Hospitality — Australia
+   - Colliers Hotels — Outlook
+   - HVS Australia — Australia Hotel Valuation Index
+   - STR Australia — performance data
+
+You MUST:
+  1. Search for recent data — use your web search capability. If the user asks for
+     a future or historical year (target year ≠ current), apply published trend /
+     escalation rates from the same sources to project the price.
+  2. Cite every numeric claim with a specific source name + URL.
+  3. Use the appropriate pricing basis for the asset class:
+       - Apartments / units → AUD per m² of saleable internal area (GST-incl., margin scheme)
+       - Townhouses / detached houses → AUD per dwelling (GST-incl., margin scheme)
+       - Land → AUD per m² of titled land
+       - Office / retail / industrial → AUD per m² of NLA (GST-excl., going-concern)
+       - Hotels → AUD per key (GST-excl., going-concern)
+     State the GST treatment in the summary.
+  4. Adjust for state/city (Sydney, Melbourne, Brisbane, Perth, Adelaide, Canberra,
+     Hobart, Darwin), location grade (CBD-prestige / CBD / inner-ring / middle-ring /
+     outer-ring / regional), and quality (budget / standard / premium / luxury).
+  5. Return ONLY valid JSON matching the requested schema — no preamble, no commentary.
+
+If recent data is genuinely unavailable, return your best estimate with a clear "low
+confidence" note in summary and explain why precision is limited.`;
+
 function buildUserPrompt(req: ResearchRequest): string {
+  if (req.mode === 'grv') return buildGRVPrompt(req);
+
   const lines = [
     `Research current (2024-2026) Australian benchmark costs for the project below.`,
     ``,
     `MODE: ${req.mode}`,
-    `Building type: ${req.buildingType}`,
-    `Storeys: ${req.storeys}`,
+    `Building type: ${req.buildingType ?? '(not specified)'}`,
+    `Storeys: ${req.storeys ?? '(not specified)'}`,
     `State / city region: ${req.state}`,
-    `Finish quality: ${req.finishQuality}`,
-    `Site complexity: ${req.siteComplexity}`,
+    `Finish quality: ${req.finishQuality ?? '(not specified)'}`,
+    `Site complexity: ${req.siteComplexity ?? '(not specified)'}`,
   ];
   if (req.gfa)           lines.push(`Gross Floor Area: ${req.gfa.toLocaleString('en-AU')} m²`);
   if (req.units)         lines.push(`Number of units / lots / keys: ${req.units}`);
@@ -141,6 +198,41 @@ function buildUserPrompt(req: ResearchRequest): string {
   return lines.join('\n');
 }
 
+function buildGRVPrompt(req: ResearchRequest): string {
+  const lines = [
+    `Research the Australian sale-price benchmark (Gross Realisable Value) for the asset described below.`,
+    ``,
+    `MODE: grv`,
+    `Asset type: ${req.assetType ?? '(not specified)'}`,
+    `State / city region: ${req.state}`,
+    `Sub-market / location grade: ${req.locationGrade ?? '(not specified)'}`,
+    `Quality / finish grade: ${req.quality ?? '(not specified)'}`,
+    `Target valuation year: ${req.targetYear ?? new Date().getFullYear()} (apply trend / escalation if not current)`,
+  ];
+  if (req.units)             lines.push(`Number of units / lots / keys: ${req.units}`);
+  if (req.totalSaleableArea) lines.push(`Total saleable area: ${req.totalSaleableArea.toLocaleString('en-AU')} m²`);
+  if (req.unitArea)          lines.push(`Average unit area: ${req.unitArea.toLocaleString('en-AU')} m² per unit`);
+  lines.push(``);
+  lines.push(`Look up current (or projected to ${req.targetYear ?? new Date().getFullYear()}) sale-price ranges for this asset class in this Australian sub-market. Use CoreLogic / Domain / PropTrack / ABS / Knight Frank / JLL / Colliers / Cushman & Wakefield / CBRE / Savills / Charter Keck Cramer / Urbis / HVS / STR. State explicitly in summary the pricing basis (e.g. "AUD per m² of saleable internal area, GST-incl. margin scheme") and the GST treatment used.`);
+  lines.push(``);
+  lines.push(`If the target year is in the future or past, apply published trend / annual-growth rates (from the same sources) to project the price linearly. Note in summary the annual growth rate used and the source.`);
+  lines.push(``);
+  lines.push(`Cite at least 2 distinct sources with URLs.`);
+  lines.push(``);
+  lines.push(`Return JSON only, matching this schema:`);
+  lines.push(`{`);
+  lines.push(`  "summary": "2-4 sentence narrative including source citations, pricing basis, GST treatment, and any escalation applied",`);
+  lines.push(`  "pricingBasis": "e.g. AUD per m² of saleable internal area",`);
+  lines.push(`  "perUnitLow": <number>,`);
+  lines.push(`  "perUnitHigh": <number>,`);
+  lines.push(`  "totalLow": <number or 0>,   // perUnit × area-or-units, when computable`);
+  lines.push(`  "totalHigh": <number or 0>,`);
+  lines.push(`  "breakdown": [ { "label": "Studio / 1-bed / 2-bed / Penthouse", "perUnitLow": <n>, "perUnitHigh": <n>, "pricingBasis": "...", "note": "..." } ],   // optional sub-segment table`);
+  lines.push(`  "sources": [ { "title": "...", "url": "...", "snippet": "..." } ]`);
+  lines.push(`}`);
+  return lines.join('\n');
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   setCors(res);
   if (req.method === 'OPTIONS') return res.status(204).end();
@@ -161,11 +253,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch {
     return res.status(400).json({ error: 'Invalid JSON body' });
   }
-  if (!body || (body.mode !== 'construction' && body.mode !== 'professional')) {
-    return res.status(400).json({ error: 'mode must be "construction" or "professional"' });
+  if (!body || (body.mode !== 'construction' && body.mode !== 'professional' && body.mode !== 'grv')) {
+    return res.status(400).json({ error: 'mode must be "construction", "professional", or "grv"' });
   }
-  if (!body.buildingType || !body.state || !body.finishQuality || !body.siteComplexity) {
-    return res.status(400).json({ error: 'buildingType, state, finishQuality, and siteComplexity are required' });
+  if (!body.state) {
+    return res.status(400).json({ error: 'state is required' });
+  }
+  if (body.mode === 'grv') {
+    if (!body.assetType || !body.locationGrade || !body.quality) {
+      return res.status(400).json({ error: 'assetType, locationGrade, and quality are required for grv mode' });
+    }
+  } else if (!body.buildingType || !body.finishQuality || !body.siteComplexity) {
+    return res.status(400).json({ error: 'buildingType, finishQuality, and siteComplexity are required for construction/professional modes' });
   }
 
   const client = new GoogleGenerativeAI(apiKey);
@@ -174,7 +273,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const genModel = client.getGenerativeModel({
       model,
-      systemInstruction: SYSTEM_PROMPT,
+      systemInstruction: body.mode === 'grv' ? SYSTEM_PROMPT_GRV : SYSTEM_PROMPT_COST,
     });
 
     const response = await genModel.generateContent(buildUserPrompt(body));
@@ -182,13 +281,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const text = response.response.text();
     let parsed: ResearchResult | null = null;
 
+    // Strip markdown fences if Gemini wrapped the JSON.
+    const cleaned = text
+      .replace(/^\s*```(?:json)?\s*/i, '')
+      .replace(/\s*```\s*$/i, '')
+      .trim();
+
     try {
-      parsed = JSON.parse(text) as ResearchResult;
+      parsed = JSON.parse(cleaned) as ResearchResult;
     } catch {
-      return res.status(502).json({
-        error: 'AI response did not contain valid JSON.',
-        raw: text,
-      });
+      // Last-ditch — extract first {...} block
+      const m = cleaned.match(/\{[\s\S]*\}/);
+      if (m) {
+        try { parsed = JSON.parse(m[0]) as ResearchResult; } catch { /* ignore */ }
+      }
+      if (!parsed) {
+        return res.status(502).json({
+          error: 'AI response did not contain valid JSON.',
+          raw: text,
+        });
+      }
     }
 
     parsed.model = model;

@@ -3,6 +3,7 @@ import { useStore } from '../../store/useStore';
 import { CurrencyInput, PercentInput, NumberInput, SectionHeader } from '../common/FormFields';
 import { FinancingInputs } from './FinancingInputs';
 import { CostReferenceCard } from './CostReferenceCard';
+import { GRVReferenceCard } from './GRVReferenceCard';
 import { formatCurrency, excelDateToDate, addMonths, endOfMonth } from '../../utils';
 import { calculateStampDuty, STAMP_DUTY_STATES, type StampDutyState } from '../../utils/stampDuty';
 import type { State as BenchmarkState } from '../../utils/costBenchmarks';
@@ -1495,6 +1496,12 @@ export function MainInputTab() {
             >Clear All</button>
           </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
+            <GRVReferenceCard
+              defaultUnits={inputs.preliminary.projectLots}
+              defaultSaleableArea={inputs.preliminary.projectGFA}
+              defaultState={inputs.landPurchase.stampDutyState as BenchmarkState}
+              currentTotalGRV={inputs.grvItems.reduce((s, i) => s + i.currentSalePrice, 0)}
+            />
             <GRVTable items={inputs.grvItems}
               onChange={items => setInputs({ grvItems: items })} />
           </div>
