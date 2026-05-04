@@ -72,9 +72,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Validate apiKey shape (don't log the value)
-    if (body.apiKey !== undefined && body.apiKey !== '' && !/^sk-ant-/.test(body.apiKey)) {
+    // Gemini API keys are alphanumeric strings (no specific prefix required)
+    if (body.apiKey !== undefined && body.apiKey !== '' && body.apiKey.length < 20) {
       return res.status(400).json({
-        error: 'API key must start with "sk-ant-". Get one from https://console.anthropic.com/.',
+        error: 'API key appears too short. Get a free Gemini API key from https://aistudio.google.com/apikey',
       });
     }
 
