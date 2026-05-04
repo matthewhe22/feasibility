@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Anthropic from '@anthropic-ai/sdk';
 import { setCors } from '../_lib/auth';
+import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
+import { resolveActiveSettings } from '../_lib/aiSettings';
 
 /**
  * POST /api/benchmarks/research
@@ -195,12 +197,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  const supabase = isSupabaseConfigured() ? getAdminSupabase() : null;
+  const active = await resolveActiveSettings(supabase);
+  if (!active) {
     return res.status(503).json({
-      error: 'AI research is not configured on this deployment. Set ANTHROPIC_API_KEY in the server environment to enable live benchmark research.',
+      error: 'AI research is not configured. An admin can set the API key and model in the Admin Portal → AI Settings, or set the ANTHROPIC_API_KEY env var on the server.',
     });
   }
+  const apiKey = active.apiKey;
 
   let body: ResearchRequest;
   try {
@@ -216,28 +220,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const client = new Anthropic({ apiKey });
-  const model  = 'claude-opus-4-7';
+  const model  = active.model;
   const schema = body.mode === 'construction' ? RESPONSE_SCHEMA_CONSTRUCTION : RESPONSE_SCHEMA_PROFESSIONAL;
 
-  try {
-    const stream = client.messages.stream({
-      model,
-      max_tokens: 64000,
-      thinking: { type: 'adaptive' },
-      output_config: {
-        effort: 'high',
-        format: { type: 'json_schema', schema },
+  // Per-model parameter rules:
+  //  - effort is supported on Opus 4.5+, Opus 4.6+, Opus 4.7, Sonnet 4.6 — errors on Haiku 4.5.
+  //  - adaptive thinking is supported on Opus 4.6+, Opus 4.7, Sonnet 4.6.
+  //  - Haiku 4.5: skip both effort and thinking; rely on plain settings.
+  const supportsEffort   = model === 'claude-opus-4-7' || model === 'claude-opus-4-6' || model === 'claude-sonnet-4-6';
+  const supportsThinking = supportsEffort;
+  // Haiku 4.5 max output is 64K; others are 64K+; 64K is safe for all.
+  const maxTokens = 64000;
+
+  // Build the request — only attach `thinking` and `effort` for models that accept them.
+  const outputConfig: Record<string, unknown> = { format: { type: 'json_schema', schema } };
+  if (supportsEffort) outputConfig.effort = 'high';
+
+  const requestParams: Record<string, unknown> = {
+    model,
+    max_tokens: maxTokens,
+    output_config: outputConfig,
+    tools: [{ type: 'web_search_20260209', name: 'web_search' }],
+    system: [
+      {
+        type: 'text',
+        text: SYSTEM_PROMPT,
+        cache_control: { type: 'ephemeral' },
       },
-      tools: [{ type: 'web_search_20260209', name: 'web_search' }],
-      system: [
-        {
-          type: 'text',
-          text: SYSTEM_PROMPT,
-          cache_control: { type: 'ephemeral' },
-        },
-      ],
-      messages: [{ role: 'user', content: buildUserPrompt(body) }],
-    });
+    ],
+    messages: [{ role: 'user', content: buildUserPrompt(body) }],
+  };
+  if (supportsThinking) requestParams.thinking = { type: 'adaptive' };
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const stream = client.messages.stream(requestParams as any);
 
     const finalMessage = await stream.finalMessage();
 
@@ -262,11 +279,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     parsed.model = model;
     parsed.timestamp = new Date().toISOString();
+    (parsed as ResearchResult & { configSource?: string }).configSource = active.source;
 
     return res.status(200).json(parsed);
   } catch (err) {
     if (err instanceof Anthropic.AuthenticationError) {
-      return res.status(500).json({ error: 'ANTHROPIC_API_KEY is invalid.' });
+      return res.status(500).json({
+        error: `Anthropic API key is invalid (source: ${active.source}). Update it in the Admin Portal → AI Settings.`,
+      });
     }
     if (err instanceof Anthropic.RateLimitError) {
       return res.status(429).json({ error: 'Anthropic API rate limit reached. Try again shortly.' });
