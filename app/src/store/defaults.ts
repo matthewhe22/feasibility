@@ -113,6 +113,25 @@ export const defaultDevelopmentCosts: CostLineItem[] = [
   dc('2076', 'Wet Lease Rent', 0),
 ];
 
+// Helper for blank placeholder cost rows. Empty values keep them out of totals
+// until the user fills them in. Sequential codes are assigned by the caller.
+function placeholder(code: string, costType: CostLineItem['costType']): CostLineItem {
+  return {
+    code, description: '', costType,
+    units: 0, baseRate: 0, totalCosts: 0,
+    sCurve: 'Evenly Split', monthStart: 1, monthSpan: 1,
+    addGST: true, ctd: 0, ctc: 0,
+  };
+}
+
+function placeholders(
+  startCode: number,
+  count: number,
+  costType: CostLineItem['costType'],
+): CostLineItem[] {
+  return Array.from({ length: count }, (_, i) => placeholder(String(startCode + i), costType));
+}
+
 // ===== CONSTRUCTION COSTS =====
 export const defaultConstructionCosts: CostLineItem[] = [
   {
@@ -121,6 +140,7 @@ export const defaultConstructionCosts: CostLineItem[] = [
     sCurve: '41 Month Build', monthStart: 33, monthSpan: 41,
     addGST: true, ctd: 0, ctc: 585805180,
   },
+  ...placeholders(4002, 10, 'Total Construction Costs'),
 ];
 
 // ===== MARKETING =====
@@ -131,6 +151,7 @@ export const defaultMarketingCosts: CostLineItem[] = [
     sCurve: 'Evenly Split', monthStart: 13, monthSpan: 61,
     addGST: true, ctd: 4243905, ctc: 1937913,
   },
+  ...placeholders(3002, 10, 'Marketing & Advertising'),
 ];
 
 // ===== OTHER STANDARD COSTS =====
@@ -139,6 +160,7 @@ export const defaultOtherStandardCosts: CostLineItem[] = [
   { code: '5002', description: 'Bank Fees *** NO GST ***', costType: 'Other Standard Costs', units: 1, baseRate: 1000, totalCosts: 1000, sCurve: 'Manual S-curve 1', monthStart: 2, monthSpan: 72, addGST: false, ctd: 0, ctc: 1000 },
   { code: '5003', description: 'KPI *** NO GST ***', costType: 'Other Standard Costs', units: 1, baseRate: 1479100, totalCosts: 1479100, sCurve: 'Manual S-curve 1', monthStart: 2, monthSpan: 72, addGST: false, ctd: 0, ctc: 1479100 },
   { code: '5004', description: 'Land Tax *** NO GST ***', costType: 'Other Standard Costs', units: 1, baseRate: 4866443, totalCosts: 4866443, sCurve: 'Manual S-curve 1', monthStart: 2, monthSpan: 72, addGST: false, ctd: 0, ctc: 4866443 },
+  ...placeholders(5005, 10, 'Other Standard Costs'),
 ];
 
 // ===== PM FEES =====
@@ -382,4 +404,5 @@ export const defaultOtherFinancingCosts: CostLineItem[] = [
     sCurve: 'Evenly Split', monthStart: 16, monthSpan: 15,
     addGST: false, ctd: 0, ctc: 15687080,
   },
+  ...placeholders(16002, 10, 'Other Financing Costs').map(p => ({ ...p, addGST: false })),
 ];

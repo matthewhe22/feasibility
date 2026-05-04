@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { setCors } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
 import { resolveActiveSettings } from '../_lib/aiSettings';
@@ -8,8 +8,7 @@ import { resolveActiveSettings } from '../_lib/aiSettings';
  * POST /api/benchmarks/research
  *
  * Research current Australian construction or professional-fee benchmarks for
- * a given project profile, using Claude with the server-side web_search tool
- * and stream the result back as JSON.
+ * a given project profile, using Google Gemini with built-in web search.
  *
  * Body:
  * {
@@ -85,7 +84,7 @@ Trusted sources you should prefer (in order):
   - State Government cost guides (e.g. ABS Producer Price Indexes — Output of construction)
 
 You MUST:
-  1. Use the web_search tool to find recent (2024-2026) data — do not rely on memory.
+  1. Search for recent (2024-2026) data — use your web search capability.
   2. Cite every numeric claim with a specific source name + URL.
   3. Express construction rates in AUD per m² of GFA, ex-GST, "head contractor lump sum"
      (excluding land, statutory contributions, finance, marketing, professional services,
@@ -101,71 +100,6 @@ You MUST:
 If recent data is genuinely unavailable for a niche asset class, return your best estimate
 with a clear "low confidence" note in summary, and explain in the summary why precision is
 limited.`;
-
-const RESPONSE_SCHEMA_CONSTRUCTION = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    summary: { type: 'string', description: '1-3 sentence narrative explanation including any caveats. Cite source names inline.' },
-    rateLow:  { type: 'number', description: 'Recommended low-end $/m² GFA (AUD, ex-GST)' },
-    rateHigh: { type: 'number', description: 'Recommended high-end $/m² GFA (AUD, ex-GST)' },
-    totalLow:  { type: 'number', description: 'Total construction cost AUD low-end (rate × GFA). 0 if GFA not provided.' },
-    totalHigh: { type: 'number', description: 'Total construction cost AUD high-end (rate × GFA). 0 if GFA not provided.' },
-    sources: {
-      type: 'array',
-      description: 'Each source actually used to derive the numbers above.',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          title:   { type: 'string' },
-          url:     { type: 'string' },
-          snippet: { type: 'string', description: 'Short excerpt or paraphrase of the cited line item.' },
-        },
-        required: ['title', 'url'],
-      },
-    },
-  },
-  required: ['summary', 'rateLow', 'rateHigh', 'sources'],
-};
-
-const RESPONSE_SCHEMA_PROFESSIONAL = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    summary: { type: 'string' },
-    feeBreakdown: {
-      type: 'array',
-      description: 'Per-discipline professional-fee benchmark rows.',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          discipline:  { type: 'string', description: 'e.g. "Architect", "Structural Engineer", "Quantity Surveyor"' },
-          percentLow:  { type: 'number', description: 'Low end as decimal — e.g. 0.04 for 4%' },
-          percentHigh: { type: 'number', description: 'High end as decimal' },
-          dollarLow:   { type: 'number', description: 'percentLow × contractValue. 0 if contractValue is 0.' },
-          dollarHigh:  { type: 'number', description: 'percentHigh × contractValue. 0 if contractValue is 0.' },
-        },
-        required: ['discipline', 'percentLow', 'percentHigh'],
-      },
-    },
-    sources: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          title:   { type: 'string' },
-          url:     { type: 'string' },
-          snippet: { type: 'string' },
-        },
-        required: ['title', 'url'],
-      },
-    },
-  },
-  required: ['summary', 'feeBreakdown', 'sources'],
-};
 
 function buildUserPrompt(req: ResearchRequest): string {
   const lines = [
@@ -183,12 +117,27 @@ function buildUserPrompt(req: ResearchRequest): string {
   if (req.contractValue) lines.push(`Construction contract value: A$${req.contractValue.toLocaleString('en-AU')}`);
   lines.push(``);
   if (req.mode === 'construction') {
-    lines.push(`Use web_search to look up current per-m² rates for this asset class in this Australian city/state. Adjust the published "base" rate by state location, height/storey premium, finish quality, and site complexity. Return the recommended low-high band in $/m² GFA (ex-GST, head contractor lump sum) and the implied total in AUD. Cite at least 2 distinct sources.`);
+    lines.push(`Search for and look up current per-m² rates for this asset class in this Australian city/state. Adjust the published "base" rate by state location, height/storey premium, finish quality, and site complexity. Return the recommended low-high band in $/m² GFA (ex-GST, head contractor lump sum) and the implied total in AUD. Cite at least 2 distinct sources with URLs.`);
+    lines.push(``);
+    lines.push(`Return JSON only, matching this schema:`);
+    lines.push(`{`);
+    lines.push(`  "summary": "1-3 sentence narrative including source citations",`);
+    lines.push(`  "rateLow": <number>,`);
+    lines.push(`  "rateHigh": <number>,`);
+    lines.push(`  "totalLow": <number or 0>,`);
+    lines.push(`  "totalHigh": <number or 0>,`);
+    lines.push(`  "sources": [ { "title": "...", "url": "...", "snippet": "..." } ]`);
+    lines.push(`}`);
   } else {
-    lines.push(`Use web_search to look up current professional-fee benchmarks for this project type expressed as % of construction contract value. Provide a row per discipline (architect, interior designer, structural, civil, MEPH, façade, geotech, acoustic, fire, wind, QS, building surveyor, town planner, ESD, project manager, superintendent, vertical transport, traffic, DDA), each with low and high % bounds. If contract value is provided, also compute the dollar bounds. Cite at least 2 distinct sources.`);
+    lines.push(`Search for and look up current professional-fee benchmarks for this project type expressed as % of construction contract value. Provide rows per discipline (architect, interior designer, structural, civil, MEPH, façade, geotech, acoustic, fire, wind, QS, building surveyor, town planner, ESD, project manager, superintendent, vertical transport, traffic, DDA), each with low and high % bounds. If contract value is provided, also compute the dollar bounds. Cite at least 2 distinct sources with URLs.`);
+    lines.push(``);
+    lines.push(`Return JSON only, matching this schema:`);
+    lines.push(`{`);
+    lines.push(`  "summary": "1-3 sentence narrative including source citations",`);
+    lines.push(`  "feeBreakdown": [ { "discipline": "...", "percentLow": <decimal>, "percentHigh": <decimal>, "dollarLow": <number or 0>, "dollarHigh": <number or 0> } ],`);
+    lines.push(`  "sources": [ { "title": "...", "url": "...", "snippet": "..." } ]`);
+    lines.push(`}`);
   }
-  lines.push(``);
-  lines.push(`Return ONLY the JSON. No prose outside JSON.`);
   return lines.join('\n');
 }
 
@@ -201,7 +150,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const active = await resolveActiveSettings(supabase);
   if (!active) {
     return res.status(503).json({
-      error: 'AI research is not configured. An admin can set the API key and model in the Admin Portal → AI Settings, or set the ANTHROPIC_API_KEY env var on the server.',
+      error: 'AI research is not configured. An admin can set the API key and model in the Admin Portal → AI Settings, or set the GEMINI_API_KEY env var on the server.',
     });
   }
   const apiKey = active.apiKey;
@@ -219,61 +168,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'buildingType, state, finishQuality, and siteComplexity are required' });
   }
 
-  const client = new Anthropic({ apiKey });
-  const model  = active.model;
-  const schema = body.mode === 'construction' ? RESPONSE_SCHEMA_CONSTRUCTION : RESPONSE_SCHEMA_PROFESSIONAL;
-
-  // Per-model parameter rules:
-  //  - effort is supported on Opus 4.5+, Opus 4.6+, Opus 4.7, Sonnet 4.6 — errors on Haiku 4.5.
-  //  - adaptive thinking is supported on Opus 4.6+, Opus 4.7, Sonnet 4.6.
-  //  - Haiku 4.5: skip both effort and thinking; rely on plain settings.
-  const supportsEffort   = model === 'claude-opus-4-7' || model === 'claude-opus-4-6' || model === 'claude-sonnet-4-6';
-  const supportsThinking = supportsEffort;
-  // Haiku 4.5 max output is 64K; others are 64K+; 64K is safe for all.
-  const maxTokens = 64000;
-
-  // Build the request — only attach `thinking` and `effort` for models that accept them.
-  const outputConfig: Record<string, unknown> = { format: { type: 'json_schema', schema } };
-  if (supportsEffort) outputConfig.effort = 'high';
-
-  const requestParams: Record<string, unknown> = {
-    model,
-    max_tokens: maxTokens,
-    output_config: outputConfig,
-    tools: [{ type: 'web_search_20260209', name: 'web_search' }],
-    system: [
-      {
-        type: 'text',
-        text: SYSTEM_PROMPT,
-        cache_control: { type: 'ephemeral' },
-      },
-    ],
-    messages: [{ role: 'user', content: buildUserPrompt(body) }],
-  };
-  if (supportsThinking) requestParams.thinking = { type: 'adaptive' };
+  const client = new GoogleGenerativeAI(apiKey);
+  const model = active.model;
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const stream = client.messages.stream(requestParams as any);
+    const genModel = client.getGenerativeModel({
+      model,
+      systemInstruction: SYSTEM_PROMPT,
+    });
 
-    const finalMessage = await stream.finalMessage();
+    const response = await genModel.generateContent(buildUserPrompt(body));
 
+    const text = response.response.text();
     let parsed: ResearchResult | null = null;
-    for (const block of finalMessage.content) {
-      if (block.type === 'text') {
-        try {
-          parsed = JSON.parse(block.text) as ResearchResult;
-          break;
-        } catch {
-          // fall through and try the next text block
-        }
-      }
-    }
 
-    if (!parsed) {
+    try {
+      parsed = JSON.parse(text) as ResearchResult;
+    } catch {
       return res.status(502).json({
         error: 'AI response did not contain valid JSON.',
-        raw: finalMessage.content,
+        raw: text,
       });
     }
 
@@ -283,18 +197,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json(parsed);
   } catch (err) {
-    if (err instanceof Anthropic.AuthenticationError) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+
+    if (msg.includes('API key') || msg.includes('authentication') || msg.includes('401')) {
       return res.status(500).json({
-        error: `Anthropic API key is invalid (source: ${active.source}). Update it in the Admin Portal → AI Settings.`,
+        error: `Google Gemini API key is invalid (source: ${active.source}). Update it in the Admin Portal → AI Settings. Get a free key at https://aistudio.google.com/apikey`,
       });
     }
-    if (err instanceof Anthropic.RateLimitError) {
-      return res.status(429).json({ error: 'Anthropic API rate limit reached. Try again shortly.' });
+    if (msg.includes('rate') || msg.includes('429')) {
+      return res.status(429).json({
+        error: 'Google Gemini API rate limit reached (free tier: 60 req/min, 1500 req/day). Try again shortly.'
+      });
     }
-    if (err instanceof Anthropic.APIError) {
-      return res.status(502).json({ error: `Anthropic API error ${err.status}: ${err.message}` });
-    }
-    const msg = err instanceof Error ? err.message : 'Unknown error';
+
     return res.status(500).json({ error: `Live benchmark research failed: ${msg}` });
   }
 }

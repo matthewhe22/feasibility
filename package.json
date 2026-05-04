@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.88.0",
+    "@google/generative-ai": "^0.21.0",
     "@supabase/supabase-js": "^2.103.0",
     "@vercel/node": "^5.0.2",
     "jsonwebtoken": "^9.0.2"

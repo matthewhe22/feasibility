@@ -14,7 +14,7 @@ export function AISettingsPage() {
 
   const [keyInput, setKeyInput] = useState('');
   const [showKey, setShowKey] = useState(false);
-  const [model, setModel] = useState<AIModelId>('claude-opus-4-7');
+  const [model, setModel] = useState<AIModelId>('gemini-2-0-flash');
   const [enabled, setEnabled] = useState(true);
 
   const [saving, setSaving] = useState(false);
@@ -54,7 +54,7 @@ export function AISettingsPage() {
   };
 
   const handleRemoveKey = async () => {
-    if (!confirm('Remove the stored Anthropic API key? Live AI research will fall back to the ANTHROPIC_API_KEY env var (if set) — otherwise it will be disabled.')) return;
+    if (!confirm('Remove the stored Google Gemini API key? Live AI research will fall back to the GEMINI_API_KEY env var (if set) — otherwise it will be disabled.')) return;
     setSaving(true);
     setSaveMsg(null);
     try {
@@ -135,10 +135,10 @@ export function AISettingsPage() {
 
       <div className="space-y-6">
         {/* API Key */}
-        <Card title="Anthropic API Key">
+        <Card title="Google Gemini API Key (Free)">
           <p className="text-xs text-gray-400 mb-3">
-            Get a key from <a className="text-blue-400 underline" target="_blank" rel="noopener" href="https://console.anthropic.com/">console.anthropic.com</a>.
-            Keys are stored encrypted in the database and only ever read on the server — they are never sent to the browser.
+            Get a free key from <a className="text-blue-400 underline" target="_blank" rel="noopener" href="https://aistudio.google.com/apikey">aistudio.google.com/apikey</a>.
+            Free tier: 60 requests/minute, 1500 requests/day. Keys are stored encrypted in the database and only ever read on the server — they are never sent to the browser.
           </p>
 
           {settings.hasStoredKey && (
@@ -165,7 +165,7 @@ export function AISettingsPage() {
               type={showKey ? 'text' : 'password'}
               value={keyInput}
               onChange={e => setKeyInput(e.target.value)}
-              placeholder="sk-ant-..."
+              placeholder="(paste your Gemini API key)"
               autoComplete="off"
               spellCheck={false}
               className="flex-1 text-sm bg-gray-700 border border-gray-600 text-white rounded px-3 py-2 font-mono focus:outline-none focus:border-blue-500"
@@ -178,9 +178,6 @@ export function AISettingsPage() {
               {showKey ? 'Hide' : 'Show'}
             </button>
           </div>
-          {keyInput && !/^sk-ant-/.test(keyInput.trim()) && (
-            <p className="text-xs text-amber-400 mt-1">Keys should start with <code>sk-ant-</code>.</p>
-          )}
         </Card>
 
         {/* Model selector */}
@@ -256,7 +253,7 @@ function Header() {
     <div className="mb-6">
       <h2 className="text-xl font-bold text-white">AI Settings</h2>
       <p className="text-gray-400 text-sm mt-0.5">
-        Configure the Anthropic API key and model used by the live "Research benchmarks" button on cost-reference cards.
+        Configure the Google Gemini API key (free tier available) and model used by the live "Research benchmarks" button on cost-reference cards.
       </p>
     </div>
   );
@@ -274,7 +271,7 @@ function StatusBanner({ settings }: { settings: AISettings }) {
   if (settings.source === 'env') {
     return (
       <p className="text-sm text-blue-300 bg-blue-900/40 border border-blue-700 rounded px-4 py-2.5 mb-6">
-        Using fallback <code className="font-mono">ANTHROPIC_API_KEY</code> environment variable.
+        Using fallback <code className="font-mono">GEMINI_API_KEY</code> environment variable.
         Set a stored key below to manage it from this UI (the env var will then be ignored).
       </p>
     );
@@ -307,9 +304,8 @@ function ModelOption({
   onSelect: () => void;
 }) {
   const tierColors: Record<typeof option.tier, string> = {
-    opus:   'bg-purple-900/40 border-purple-700 text-purple-300',
-    sonnet: 'bg-blue-900/40   border-blue-700   text-blue-300',
-    haiku:  'bg-emerald-900/40 border-emerald-700 text-emerald-300',
+    flash: 'bg-blue-900/40   border-blue-700   text-blue-300',
+    pro:   'bg-purple-900/40 border-purple-700 text-purple-300',
   };
   return (
     <label

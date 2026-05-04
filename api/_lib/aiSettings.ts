@@ -16,58 +16,48 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 export const AI_SETTINGS_SENTINEL = '__ai_settings__';
 
 export type AIModelId =
-  | 'claude-opus-4-7'
-  | 'claude-opus-4-6'
-  | 'claude-sonnet-4-6'
-  | 'claude-haiku-4-5';
+  | 'gemini-2-0-flash'
+  | 'gemini-1-5-pro'
+  | 'gemini-1-5-flash';
 
 export interface AIModelOption {
   id: AIModelId;
   label: string;
-  tier: 'opus' | 'sonnet' | 'haiku';
+  tier: 'flash' | 'pro';
   contextWindow: string;
   inputPricePerMillion: number;
   outputPricePerMillion: number;
   recommendedFor: string;
 }
 
-/** Models the admin can pick from. Pricing in USD per million tokens. */
+/** Models the admin can pick from. Pricing in USD per million tokens (free tier: 60 req/min, 1500 req/day). */
 export const ALLOWED_MODELS: AIModelOption[] = [
   {
-    id: 'claude-opus-4-7',
-    label: 'Claude Opus 4.7 — most capable',
-    tier: 'opus',
+    id: 'gemini-2-0-flash',
+    label: 'Gemini 2.0 Flash — recommended (free tier)',
+    tier: 'flash',
     contextWindow: '1M',
-    inputPricePerMillion: 5,
-    outputPricePerMillion: 25,
-    recommendedFor: 'Highest quality research, deep reasoning. Default.',
+    inputPricePerMillion: 0,
+    outputPricePerMillion: 0,
+    recommendedFor: 'Fastest, free tier. Best for cost benchmarks. Built-in web search.',
   },
   {
-    id: 'claude-opus-4-6',
-    label: 'Claude Opus 4.6 — previous Opus',
-    tier: 'opus',
-    contextWindow: '1M',
-    inputPricePerMillion: 5,
-    outputPricePerMillion: 25,
-    recommendedFor: 'Same price as 4.7; slightly less capable.',
-  },
-  {
-    id: 'claude-sonnet-4-6',
-    label: 'Claude Sonnet 4.6 — balanced',
-    tier: 'sonnet',
-    contextWindow: '1M',
-    inputPricePerMillion: 3,
-    outputPricePerMillion: 15,
-    recommendedFor: 'Best speed/cost balance for most benchmark lookups.',
-  },
-  {
-    id: 'claude-haiku-4-5',
-    label: 'Claude Haiku 4.5 — fastest, cheapest',
-    tier: 'haiku',
-    contextWindow: '200K',
-    inputPricePerMillion: 1,
+    id: 'gemini-1-5-pro',
+    label: 'Gemini 1.5 Pro — most capable',
+    tier: 'pro',
+    contextWindow: '2M',
+    inputPricePerMillion: 1.25,
     outputPricePerMillion: 5,
-    recommendedFor: 'Lowest cost; quality lower than Sonnet/Opus.',
+    recommendedFor: 'Highest quality reasoning (paid tier).',
+  },
+  {
+    id: 'gemini-1-5-flash',
+    label: 'Gemini 1.5 Flash — balanced',
+    tier: 'flash',
+    contextWindow: '1M',
+    inputPricePerMillion: 0.075,
+    outputPricePerMillion: 0.3,
+    recommendedFor: 'Fast and cheaper alternative to Pro (paid tier).',
   },
 ];
 
@@ -95,7 +85,7 @@ export async function loadAISettings(
 
   return {
     apiKey: typeof ai.apiKey === 'string' ? ai.apiKey : '',
-    model: (ai.model as AIModelId) ?? 'claude-opus-4-7',
+    model: (ai.model as AIModelId) ?? 'gemini-2-0-flash',
     enabled: ai.enabled !== false,
   };
 }
@@ -153,12 +143,12 @@ export async function resolveActiveSettings(
       return { apiKey: stored.apiKey, model: stored.model, source: 'stored' };
     }
   }
-  const envKey = process.env.ANTHROPIC_API_KEY?.trim();
+  const envKey = process.env.GEMINI_API_KEY?.trim();
   if (envKey) {
-    const envModel = process.env.ANTHROPIC_MODEL?.trim() as AIModelId | undefined;
+    const envModel = process.env.GEMINI_MODEL?.trim() as AIModelId | undefined;
     return {
       apiKey: envKey,
-      model: ALLOWED_MODELS.some(m => m.id === envModel) ? (envModel as AIModelId) : 'claude-opus-4-7',
+      model: ALLOWED_MODELS.some(m => m.id === envModel) ? (envModel as AIModelId) : 'gemini-2-0-flash',
       source: 'env',
     };
   }

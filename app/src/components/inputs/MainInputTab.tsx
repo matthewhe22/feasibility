@@ -338,9 +338,11 @@ function ActualCostsEditor({ label, items, onChange }: {
   );
 }
 
-function CostLineTable({ items, onChange }: {
+function CostLineTable({ items, onChange, defaultCostType }: {
   items: CostLineItem[];
   onChange: (items: CostLineItem[]) => void;
+  /** Used for new placeholder rows when the table is empty. */
+  defaultCostType?: CostLineItem['costType'];
 }) {
   const updateItem = (idx: number, field: keyof CostLineItem, value: any) => {
     const updated = [...items];
@@ -349,6 +351,31 @@ function CostLineTable({ items, onChange }: {
       updated[idx].totalCosts = updated[idx].units * updated[idx].baseRate;
     }
     onChange(updated);
+  };
+
+  const deleteRow = (idx: number) => {
+    onChange(items.filter((_, i) => i !== idx));
+  };
+
+  const addRows = (count: number) => {
+    const existingCodes = items.map(i => parseInt(i.code, 10)).filter(n => !isNaN(n));
+    const startCode = existingCodes.length > 0 ? Math.max(...existingCodes) + 1 : 1;
+    const costType = items[0]?.costType ?? defaultCostType ?? 'Other Standard Costs';
+    const newRows: CostLineItem[] = Array.from({ length: count }, (_, i) => ({
+      code: String(startCode + i),
+      description: '',
+      costType,
+      units: 0,
+      baseRate: 0,
+      totalCosts: 0,
+      sCurve: 'Evenly Split',
+      monthStart: 1,
+      monthSpan: 1,
+      addGST: true,
+      ctd: 0,
+      ctc: 0,
+    }));
+    onChange([...items, ...newRows]);
   };
 
   const total = items.reduce((s, i) => s + i.totalCosts, 0);
@@ -368,17 +395,18 @@ function CostLineTable({ items, onChange }: {
               <th className="px-2 py-1 text-right w-16">Start</th>
               <th className="px-2 py-1 text-right w-16">Span</th>
               <th className="px-2 py-1 text-center w-14">GST</th>
+              <th className="px-2 py-1 text-center w-10"></th>
             </tr>
           </thead>
           <tbody>
             {items.map((item, idx) => (
-              <tr key={item.code} className={`border-b border-gray-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+              <tr key={`${item.code}-${idx}`} className={`border-b border-gray-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                 <td className="px-2 py-0.5 text-gray-500">{item.code}</td>
                 <td className="px-2 py-0.5">
                   <input
-                    type="text" value={item.description}
+                    type="text" value={item.description} placeholder="(new line item)"
                     onChange={e => updateItem(idx, 'description', e.target.value)}
-                    className="w-full bg-transparent text-xs border-0 p-0 focus:ring-0"
+                    className="w-full bg-transparent text-xs border-0 p-0 focus:ring-0 placeholder:text-gray-300 placeholder:italic"
                   />
                 </td>
                 <td className="px-1 py-0.5">
@@ -432,6 +460,16 @@ function CostLineTable({ items, onChange }: {
                     className="w-3 h-3"
                   />
                 </td>
+                <td className="px-1 py-0.5 text-center">
+                  <button
+                    type="button"
+                    onClick={() => deleteRow(idx)}
+                    title="Delete this row"
+                    className="text-[10px] text-gray-400 hover:text-red-600 hover:bg-red-50 px-1.5 py-0.5 rounded"
+                  >
+                    ×
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -439,10 +477,26 @@ function CostLineTable({ items, onChange }: {
             <tr className="bg-gray-100 font-bold border-t-2 border-gray-400">
               <td colSpan={4} className="px-2 py-1">Total</td>
               <td className="px-2 py-1 text-right font-mono">{formatCurrency(total)}</td>
-              <td colSpan={4}></td>
+              <td colSpan={5}></td>
             </tr>
           </tfoot>
         </table>
+      </div>
+      <div className="flex items-center gap-2 mt-2">
+        <button
+          type="button"
+          onClick={() => addRows(1)}
+          className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded"
+        >
+          + Add row
+        </button>
+        <button
+          type="button"
+          onClick={() => addRows(10)}
+          className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 border border-blue-300 px-2 py-1 rounded"
+        >
+          + Add 10 rows
+        </button>
       </div>
     </div>
   );
@@ -1263,6 +1317,7 @@ export function MainInputTab() {
               defaultState={inputs.landPurchase.stampDutyState as BenchmarkState}
             />
             <CostLineTable items={inputs.developmentCosts}
+              defaultCostType="Development Costs"
               onChange={items => setInputs({ developmentCosts: items })} />
           </div>
         </div>
@@ -1291,6 +1346,7 @@ export function MainInputTab() {
               defaultState={inputs.landPurchase.stampDutyState as BenchmarkState}
             />
             <CostLineTable items={inputs.constructionCosts}
+              defaultCostType="Total Construction Costs"
               onChange={items => setInputs({ constructionCosts: items })} />
             <PercentInput label="Construction Contingency %" value={inputs.constructionContingencyPercent}
               onChange={v => setInputs({ constructionContingencyPercent: v })} />
@@ -1309,6 +1365,7 @@ export function MainInputTab() {
           </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
             <CostLineTable items={inputs.marketingCosts}
+              defaultCostType="Marketing & Advertising"
               onChange={items => setInputs({ marketingCosts: items })} />
           </div>
         </div>
@@ -1325,6 +1382,7 @@ export function MainInputTab() {
           </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
             <CostLineTable items={inputs.otherStandardCosts}
+              defaultCostType="Other Standard Costs"
               onChange={items => setInputs({ otherStandardCosts: items })} />
           </div>
         </div>
@@ -1348,6 +1406,7 @@ export function MainInputTab() {
               defaultState={inputs.landPurchase.stampDutyState as BenchmarkState}
             />
             <CostLineTable items={inputs.pmFees}
+              defaultCostType="Development & Project Management Fees"
               onChange={items => setInputs({ pmFees: items })} />
           </div>
         </div>
@@ -1483,6 +1542,7 @@ export function MainInputTab() {
           </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
             <CostLineTable items={inputs.otherFinancingCosts}
+              defaultCostType="Other Financing Costs"
               onChange={items => setInputs({ otherFinancingCosts: items })} />
           </div>
         </div>
