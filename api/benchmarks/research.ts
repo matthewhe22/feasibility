@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { setCors } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
-import { resolveActiveSettings } from '../_lib/aiSettings';
+import { resolveActiveSettings, toGeminiApiModel } from '../_lib/aiSettings';
 
 /**
  * POST /api/benchmarks/research
@@ -269,10 +269,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const client = new GoogleGenerativeAI(apiKey);
   const model = active.model;
+  const apiModelName = toGeminiApiModel(model);
 
   try {
     const genModel = client.getGenerativeModel({
-      model,
+      model: apiModelName,
       systemInstruction: body.mode === 'grv' ? SYSTEM_PROMPT_GRV : SYSTEM_PROMPT_COST,
     });
 
@@ -318,9 +319,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         error: `Google Gemini API key is invalid (source: ${active.source}). Update it in the Admin Portal → AI Settings. Get a free key at https://aistudio.google.com/apikey`,
       });
     }
-    if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('rate') || msg.includes('429') || errCode === 429) {
+    if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('rate limit') || errCode === 429) {
       return res.status(429).json({
         error: 'Google Gemini API rate limit reached (free tier: 60 req/min, 1500 req/day). Try again shortly.'
+      });
+    }
+    if (msg.includes('NOT_FOUND') || msg.includes('not found') || msg.includes('404') || errCode === 404) {
+      return res.status(502).json({
+        error: `Gemini model "${apiModelName}" was not found (404). The selected model may have been renamed or retired by Google. Try a different model in Admin → AI Settings, or check https://ai.google.dev/gemini-api/docs/models for current model IDs.`,
       });
     }
 

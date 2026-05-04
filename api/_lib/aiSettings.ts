@@ -20,6 +20,20 @@ export type AIModelId =
   | 'gemini-1-5-pro'
   | 'gemini-1-5-flash';
 
+/**
+ * Map our internal model IDs (dash-separated, TS-friendly) to the actual
+ * Gemini API model names (dot-separated). Google's API expects e.g.
+ * "gemini-2.0-flash", not "gemini-2-0-flash" — passing the wrong one yields
+ * a 404 NotFound from the SDK.
+ */
+export function toGeminiApiModel(id: AIModelId): string {
+  switch (id) {
+    case 'gemini-2-0-flash': return 'gemini-2.0-flash';
+    case 'gemini-1-5-pro':   return 'gemini-1.5-pro';
+    case 'gemini-1-5-flash': return 'gemini-1.5-flash';
+  }
+}
+
 export interface AIModelOption {
   id: AIModelId;
   label: string;
