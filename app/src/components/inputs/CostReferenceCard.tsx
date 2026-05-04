@@ -19,27 +19,59 @@ import { formatCurrency, formatMillions, formatPercent } from '../../utils';
 type Mode = 'construction' | 'professional';
 
 interface CostReferenceCardProps {
-  /** What kind of benchmark to surface — drives which panel renders. */
   mode: Mode;
-  /** Currently-modelled GFA (m²) — pre-fills the input and used for total $ calc. */
   defaultGFA?: number;
-  /** Currently-modelled total construction cost — used for variance vs benchmark. */
   currentTotal?: number;
-  /** Currently-modelled rate ($/m²) — used for variance vs benchmark. */
   currentRate?: number;
-  /** Currently-modelled lot/key/space count — for per-unit cross-check. */
   defaultUnits?: number;
-  /** Default state from project (e.g. inputs.landPurchase.stampDutyState). */
   defaultState?: State;
 }
 
+/* ── Live AI research types ─────────────────────────────────────────────── */
+
+interface ResearchSource {
+  title: string;
+  url: string;
+  snippet?: string;
+}
+
+interface ConstructionResearch {
+  summary: string;
+  rateLow: number;
+  rateHigh: number;
+  totalLow?: number;
+  totalHigh?: number;
+  sources: ResearchSource[];
+  model: string;
+  timestamp: string;
+}
+
+interface ProfessionalResearch {
+  summary: string;
+  feeBreakdown: Array<{
+    discipline: string;
+    percentLow: number;
+    percentHigh: number;
+    dollarLow?: number;
+    dollarHigh?: number;
+  }>;
+  sources: ResearchSource[];
+  model: string;
+  timestamp: string;
+}
+
 /**
- * Cost benchmark / reference card. Uses curated public-QS data
- * (Rawlinsons / Turner & Townsend / RLB / AIQS) to suggest a construction $/m²
- * range or a professional-fee % range, given key project metrics.
+ * Cost benchmark / reference card. Two data sources are available side-by-side:
  *
- * Sits inline in the inputs page so users can sense-check their entered rates
- * before running the model.
+ * 1. **Static benchmark** (default) — built-in curated data from public QS
+ *    publications (Rawlinsons, T&T ICMS, RLB, AIQS). Always-on, no API key.
+ *
+ * 2. **Live AI research** (optional) — POSTs to /api/benchmarks/research, which
+ *    uses Claude with the web_search tool to fetch current public-QS data and
+ *    return a tailored band with cited URLs. Requires ANTHROPIC_API_KEY on the
+ *    server. Falls back gracefully if not configured.
+ *
+ * Every benchmark — static or live — is shown with a visible source citation.
  */
 export function CostReferenceCard({
   mode,
@@ -60,8 +92,14 @@ export function CostReferenceCard({
   const [gfa, setGfa] = useState<number>(defaultGFA);
   const [units, setUnits] = useState<number>(defaultUnits);
 
-  // Professional-mode controlled input — total construction contract value used for % fees
+  // Professional-mode controlled input
   const [contractValue, setContractValue] = useState<number>(currentTotal ?? 0);
+
+  // Live AI research state
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [liveConstruction, setLiveConstruction] = useState<ConstructionResearch | null>(null);
+  const [liveProfessional, setLiveProfessional] = useState<ProfessionalResearch | null>(null);
 
   const benchmark = useMemo(() => {
     if (mode !== 'construction') return null;
@@ -79,9 +117,44 @@ export function CostReferenceCard({
     return (refRate - benchmark.rateMid) / benchmark.rateMid;
   }, [benchmark, currentRate, currentTotal, gfa]);
 
+  const runLiveResearch = async () => {
+    setLiveLoading(true);
+    setLiveError(null);
+    setLiveConstruction(null);
+    setLiveProfessional(null);
+    try {
+      const body = {
+        mode,
+        buildingType: CONSTRUCTION_BENCHMARKS.find(b => b.buildingType === buildingType)?.label ?? buildingType,
+        storeys,
+        state,
+        finishQuality: finish,
+        siteComplexity,
+        gfa: gfa || undefined,
+        units: units || undefined,
+        contractValue: mode === 'professional' ? (contractValue || currentTotal || undefined) : undefined,
+      };
+      const r = await fetch('/api/benchmarks/research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ error: r.statusText }));
+        throw new Error(err.error || `HTTP ${r.status}`);
+      }
+      const data = await r.json();
+      if (mode === 'construction') setLiveConstruction(data as ConstructionResearch);
+      else setLiveProfessional(data as ProfessionalResearch);
+    } catch (e) {
+      setLiveError(e instanceof Error ? e.message : 'Live research request failed.');
+    } finally {
+      setLiveLoading(false);
+    }
+  };
+
   return (
     <div className="mb-4 border border-blue-200 bg-blue-50 rounded">
-      {/* Header — collapsible */}
       <button
         type="button"
         onClick={() => setExpanded(e => !e)}
@@ -92,13 +165,12 @@ export function CostReferenceCard({
           {mode === 'construction' ? ' — Construction $/m²' : ' — Professional Fees % of Construction'}
         </span>
         <span className="text-[10px] text-blue-600 ml-auto">
-          AI-curated from Rawlinsons, Turner &amp; Townsend, RLB, AIQS
+          Static QS data + optional live AI research
         </span>
       </button>
 
       {expanded && (
         <div className="px-3 pb-3 pt-1 border-t border-blue-200 bg-white rounded-b">
-          {/* Required metrics explainer */}
           <RequiredMetricsPanel mode={mode} />
 
           {mode === 'construction' && (
@@ -124,17 +196,30 @@ export function CostReferenceCard({
               defaultTotal={currentTotal ?? 0}
             />
           )}
+
+          {/* Live AI research */}
+          <LiveResearchPanel
+            mode={mode}
+            loading={liveLoading}
+            error={liveError}
+            constructionResult={liveConstruction}
+            professionalResult={liveProfessional}
+            onRun={runLiveResearch}
+            gfa={gfa}
+            contractValue={mode === 'professional' ? (contractValue || currentTotal || 0) : 0}
+          />
+
+          <Disclaimer />
         </div>
       )}
     </div>
   );
 }
 
-/* ─────────────────────── Required-metrics explainer ────────────────────── */
+/* ── Required-metrics explainer ─────────────────────────────────────────── */
 
 function RequiredMetricsPanel({ mode }: { mode: Mode }) {
   const [open, setOpen] = useState(false);
-
   const filtered = mode === 'professional'
     ? REQUIRED_METRICS.filter(m => !m.name.toLowerCase().includes('finish'))
     : REQUIRED_METRICS;
@@ -162,7 +247,7 @@ function RequiredMetricsPanel({ mode }: { mode: Mode }) {
   );
 }
 
-/* ─────────────────────── Construction panel ────────────────────── */
+/* ── Construction panel ─────────────────────────────────────────────────── */
 
 interface ConstructionPanelProps {
   buildingType: BuildingType;     setBuildingType: (b: BuildingType) => void;
@@ -181,7 +266,9 @@ interface ConstructionPanelProps {
 function ConstructionBenchmarkPanel(p: ConstructionPanelProps) {
   return (
     <>
-      {/* Inputs grid */}
+      <p className="text-[10px] font-bold uppercase tracking-wide text-blue-700 mb-1">
+        Static benchmark (built-in)
+      </p>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3 text-[11px]">
         <Field label="Building type">
           <select
@@ -256,49 +343,52 @@ function ConstructionBenchmarkPanel(p: ConstructionPanelProps) {
         </Field>
       </div>
 
-      {/* Result */}
       {!p.benchmark ? (
         <p className="text-[11px] italic text-gray-500">Enter a GFA to see a benchmark range.</p>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
-          <ResultBox
-            title="Recommended $/m² range"
-            primary={`$${p.benchmark.rateLow.toLocaleString()} – $${p.benchmark.rateHigh.toLocaleString()}`}
-            secondary={`Mid: $${p.benchmark.rateMid.toLocaleString()} /m²`}
-          />
-          <ResultBox
-            title="Recommended total construction"
-            primary={`${formatMillions(p.benchmark.totalLow)} – ${formatMillions(p.benchmark.totalHigh)}`}
-            secondary={`Mid: ${formatMillions(p.benchmark.totalMid)}`}
-          />
-          <ResultBox
-            title="Your model vs benchmark"
-            primary={
-              p.currentTotal
-                ? formatMillions(p.currentTotal)
-                : (p.currentRate ? `$${p.currentRate.toLocaleString()} /m²` : '—')
-            }
-            secondary={
-              p.variancePct !== null
-                ? `${p.variancePct >= 0 ? '+' : ''}${formatPercent(p.variancePct)} vs mid`
-                : 'set rate to compare'
-            }
-            tone={
-              p.variancePct === null
-                ? 'neutral'
-                : Math.abs(p.variancePct) <= 0.10
-                  ? 'good'
-                  : Math.abs(p.variancePct) <= 0.20
-                    ? 'warn'
-                    : 'bad'
-            }
-          />
-        </div>
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
+            <ResultBox
+              title="Recommended $/m² range"
+              primary={`$${p.benchmark.rateLow.toLocaleString()} – $${p.benchmark.rateHigh.toLocaleString()}`}
+              secondary={`Mid: $${p.benchmark.rateMid.toLocaleString()} /m²`}
+            />
+            <ResultBox
+              title="Recommended total construction"
+              primary={`${formatMillions(p.benchmark.totalLow)} – ${formatMillions(p.benchmark.totalHigh)}`}
+              secondary={`Mid: ${formatMillions(p.benchmark.totalMid)}`}
+            />
+            <ResultBox
+              title="Your model vs benchmark"
+              primary={
+                p.currentTotal
+                  ? formatMillions(p.currentTotal)
+                  : (p.currentRate ? `$${p.currentRate.toLocaleString()} /m²` : '—')
+              }
+              secondary={
+                p.variancePct !== null
+                  ? `${p.variancePct >= 0 ? '+' : ''}${formatPercent(p.variancePct)} vs mid`
+                  : 'set rate to compare'
+              }
+              tone={
+                p.variancePct === null
+                  ? 'neutral'
+                  : Math.abs(p.variancePct) <= 0.10
+                    ? 'good'
+                    : Math.abs(p.variancePct) <= 0.20
+                      ? 'warn'
+                      : 'bad'
+              }
+            />
+          </div>
+
+          {/* Prominent static-source citation */}
+          <SourceNote label="Source" text={p.benchmark.source} />
+        </>
       )}
 
-      {/* Factor decomposition */}
       {p.benchmark && (
-        <details className="mb-3 text-[10px] text-gray-600">
+        <details className="mb-3 mt-2 text-[10px] text-gray-600">
           <summary className="cursor-pointer font-semibold text-gray-700">How was this calculated?</summary>
           <div className="mt-1 pl-3 space-y-0.5">
             <p>Base band (Brisbane / standard finish): ${p.benchmark.factors.base[0].toLocaleString()} – ${p.benchmark.factors.base[1].toLocaleString()} /m²</p>
@@ -306,17 +396,13 @@ function ConstructionBenchmarkPanel(p: ConstructionPanelProps) {
             <p>Finish factor: ×{p.benchmark.factors.finishFactor.toFixed(2)} ({p.finish})</p>
             <p>Height factor: ×{p.benchmark.factors.heightFactor.toFixed(2)} ({p.storeys} storeys)</p>
             <p>Site factor: ×{p.benchmark.factors.siteFactor.toFixed(2)} ({p.siteComplexity})</p>
-            <p className="italic mt-1">Source: {p.benchmark.source}</p>
           </div>
         </details>
       )}
 
-      {/* Per-unit cross-check */}
       {p.units > 0 && p.benchmark && (
         <PerUnitCrossCheck units={p.units} totalMid={p.benchmark.totalMid} />
       )}
-
-      <Disclaimer />
     </>
   );
 }
@@ -353,7 +439,7 @@ function PerUnitCrossCheck({ units, totalMid }: { units: number; totalMid: numbe
   );
 }
 
-/* ─────────────────────── Professional fees panel ────────────────────── */
+/* ── Professional fees panel ────────────────────────────────────────────── */
 
 function ProfessionalFeeBenchmarkPanel({
   contractValue,
@@ -366,6 +452,9 @@ function ProfessionalFeeBenchmarkPanel({
 }) {
   return (
     <>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-blue-700 mb-1">
+        Static benchmark (built-in)
+      </p>
       <div className="flex items-center gap-2 mb-3 text-[11px]">
         <label className="text-gray-700 font-medium">Construction contract value (ex-GST)</label>
         <input
@@ -420,12 +509,187 @@ function ProfessionalFeeBenchmarkPanel({
         </table>
       </div>
 
-      <Disclaimer />
+      <div className="mt-2">
+        <SourceNote
+          label="Source"
+          text="Compiled from AIA Fee Schedule 2022, AIQS Practice Guide 2023, Engineers Australia 2023, AILA / DIA / GBCA 2023–2024, T&T ICMS 2024 (per-row source shown in 'Notes / Source' column)"
+        />
+      </div>
     </>
   );
 }
 
-/* ─────────────────────── Generic helpers ────────────────────── */
+/* ── Live AI research panel ─────────────────────────────────────────────── */
+
+function LiveResearchPanel({
+  mode,
+  loading,
+  error,
+  constructionResult,
+  professionalResult,
+  onRun,
+  gfa,
+  contractValue,
+}: {
+  mode: Mode;
+  loading: boolean;
+  error: string | null;
+  constructionResult: ConstructionResearch | null;
+  professionalResult: ProfessionalResearch | null;
+  onRun: () => void;
+  gfa: number;
+  contractValue: number;
+}) {
+  return (
+    <div className="mt-4 pt-3 border-t border-blue-200">
+      <div className="flex items-center gap-2 mb-2">
+        <p className="text-[10px] font-bold uppercase tracking-wide text-purple-700">
+          Live AI research (Claude with web search)
+        </p>
+        <button
+          type="button"
+          onClick={onRun}
+          disabled={loading}
+          className="text-[11px] bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white px-3 py-1 rounded"
+        >
+          {loading ? 'Researching…' : 'Research live benchmarks'}
+        </button>
+        <span className="text-[10px] text-gray-500 italic ml-auto">
+          Requires <code>ANTHROPIC_API_KEY</code> on the server.
+        </span>
+      </div>
+
+      {error && (
+        <div className="p-2 mb-2 text-[11px] bg-red-50 border border-red-200 text-red-800 rounded">
+          <span className="font-semibold">Live research failed:</span> {error}
+          {error.toLowerCase().includes('not configured') && (
+            <span className="block mt-1 text-red-600">
+              The static benchmark above remains available. To enable live research, set
+              the <code>ANTHROPIC_API_KEY</code> environment variable on the deployment.
+            </span>
+          )}
+        </div>
+      )}
+
+      {mode === 'construction' && constructionResult && (
+        <LiveConstructionResult result={constructionResult} gfa={gfa} />
+      )}
+
+      {mode === 'professional' && professionalResult && (
+        <LiveProfessionalResult result={professionalResult} contractValue={contractValue} />
+      )}
+    </div>
+  );
+}
+
+function LiveConstructionResult({ result, gfa }: { result: ConstructionResearch; gfa: number }) {
+  const totalLow  = result.totalLow  ?? (gfa > 0 ? result.rateLow  * gfa : 0);
+  const totalHigh = result.totalHigh ?? (gfa > 0 ? result.rateHigh * gfa : 0);
+  return (
+    <div className="border border-purple-300 bg-purple-50 rounded p-2">
+      <p className="text-[11px] text-gray-800 mb-2">{result.summary}</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
+        <ResultBox
+          title="AI-researched $/m² range"
+          primary={`$${result.rateLow.toLocaleString()} – $${result.rateHigh.toLocaleString()}`}
+          secondary={`Mid: $${Math.round((result.rateLow + result.rateHigh) / 2).toLocaleString()} /m²`}
+        />
+        <ResultBox
+          title="AI-researched total construction"
+          primary={
+            totalLow > 0 ? `${formatMillions(totalLow)} – ${formatMillions(totalHigh)}` : '— (set GFA above)'
+          }
+          secondary={
+            totalLow > 0 ? `Mid: ${formatMillions((totalLow + totalHigh) / 2)}` : ''
+          }
+        />
+      </div>
+      <SourcesList sources={result.sources} model={result.model} timestamp={result.timestamp} />
+    </div>
+  );
+}
+
+function LiveProfessionalResult({
+  result,
+  contractValue,
+}: {
+  result: ProfessionalResearch;
+  contractValue: number;
+}) {
+  return (
+    <div className="border border-purple-300 bg-purple-50 rounded p-2">
+      <p className="text-[11px] text-gray-800 mb-2">{result.summary}</p>
+      <div className="overflow-x-auto mb-2">
+        <table className="w-full text-[11px] border-collapse">
+          <thead>
+            <tr className="bg-purple-200 text-purple-900">
+              <th className="px-2 py-1 text-left">Discipline</th>
+              <th className="px-2 py-1 text-right w-20">% Low</th>
+              <th className="px-2 py-1 text-right w-20">% High</th>
+              <th className="px-2 py-1 text-right w-28">$ Low</th>
+              <th className="px-2 py-1 text-right w-28">$ High</th>
+            </tr>
+          </thead>
+          <tbody>
+            {result.feeBreakdown.map((row, i) => {
+              const dollarLow  = row.dollarLow  ?? (contractValue > 0 ? contractValue * row.percentLow  : 0);
+              const dollarHigh = row.dollarHigh ?? (contractValue > 0 ? contractValue * row.percentHigh : 0);
+              return (
+                <tr key={`${row.discipline}-${i}`} className={i % 2 === 0 ? 'bg-white' : 'bg-purple-50'}>
+                  <td className="px-2 py-0.5">{row.discipline}</td>
+                  <td className="px-2 py-0.5 text-right font-mono">{(row.percentLow  * 100).toFixed(2)}%</td>
+                  <td className="px-2 py-0.5 text-right font-mono">{(row.percentHigh * 100).toFixed(2)}%</td>
+                  <td className="px-2 py-0.5 text-right font-mono">{dollarLow  > 0 ? formatCurrency(dollarLow)  : '—'}</td>
+                  <td className="px-2 py-0.5 text-right font-mono">{dollarHigh > 0 ? formatCurrency(dollarHigh) : '—'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <SourcesList sources={result.sources} model={result.model} timestamp={result.timestamp} />
+    </div>
+  );
+}
+
+function SourcesList({
+  sources,
+  model,
+  timestamp,
+}: {
+  sources: ResearchSource[];
+  model: string;
+  timestamp: string;
+}) {
+  const date = new Date(timestamp);
+  return (
+    <div className="border-t border-purple-200 pt-2 mt-1">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-purple-800 mb-1">
+        Sources cited by AI
+      </p>
+      {sources.length === 0 ? (
+        <p className="text-[11px] italic text-gray-500">No sources returned.</p>
+      ) : (
+        <ul className="space-y-1">
+          {sources.map((s, i) => (
+            <li key={`${s.url}-${i}`} className="text-[11px] text-gray-700">
+              <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline hover:text-blue-900 font-medium">
+                {s.title}
+              </a>
+              {s.snippet && <span className="text-gray-500"> — {s.snippet}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-[10px] italic text-gray-500 mt-1">
+        Generated by {model} at {date.toLocaleString()} via the web_search tool. Verify against
+        the linked sources before relying on these figures.
+      </p>
+    </div>
+  );
+}
+
+/* ── Generic helpers ────────────────────────────────────────────────────── */
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -462,9 +726,21 @@ function ResultBox({
   );
 }
 
+/**
+ * Prominent source-attribution note. Used under every static benchmark band.
+ */
+function SourceNote({ label, text }: { label: string; text: string }) {
+  return (
+    <div className="text-[11px] bg-amber-50 border border-amber-200 rounded px-2 py-1">
+      <span className="font-bold text-amber-800">{label}:</span>{' '}
+      <span className="text-amber-900">{text}</span>
+    </div>
+  );
+}
+
 function Disclaimer() {
   return (
-    <p className="text-[10px] text-gray-500 italic mt-1">
+    <p className="text-[10px] text-gray-500 italic mt-3">
       Indicative ranges for sanity-checking only. Real tenders vary materially with site conditions,
       structural system, façade complexity, services density, and procurement timing. Validate
       against a project-specific QS estimate before relying on these figures.
