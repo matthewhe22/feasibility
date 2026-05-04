@@ -198,13 +198,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json(parsed);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const errCode = (err as any)?.code || (err as any)?.status || '';
 
-    if (msg.includes('API key') || msg.includes('authentication') || msg.includes('401')) {
+    if (msg.includes('API key') || msg.includes('authentication') || msg.includes('401') || msg.includes('UNAUTHENTICATED')) {
       return res.status(500).json({
         error: `Google Gemini API key is invalid (source: ${active.source}). Update it in the Admin Portal → AI Settings. Get a free key at https://aistudio.google.com/apikey`,
       });
     }
-    if (msg.includes('rate') || msg.includes('429')) {
+    if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('rate') || msg.includes('429') || errCode === 429) {
       return res.status(429).json({
         error: 'Google Gemini API rate limit reached (free tier: 60 req/min, 1500 req/day). Try again shortly.'
       });
