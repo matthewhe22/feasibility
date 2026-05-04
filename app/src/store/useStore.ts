@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware';
 import type {
   AdminConfig,
   MainInputs,
@@ -54,6 +54,10 @@ interface AppState {
   /** ID of the currently loaded/saved project (null if unsaved session). */
   currentProjectId: number | null;
   setCurrentProjectId: (id: number | null) => void;
+
+  /** Global master list of project names. Hydrated from DB on startup; used as data validation when creating new projects. */
+  projectList: string[];
+  setProjectList: (list: string[]) => void;
 }
 
 const defaultAdmin: AdminConfig = {
@@ -137,6 +141,39 @@ const defaultInputs: MainInputs = {
   otherFinancingCosts: defaultOtherFinancingCosts,
 };
 
+/**
+ * Debounced localStorage wrapper — coalesces rapid setItem calls (typing in input
+ * fields) into a single write. Reads are pass-through. Reduces serialization
+ * overhead for the ~50KB+ inputs object on every keystroke.
+ */
+function createDebouncedLocalStorage(delayMs: number): StateStorage {
+  const pending = new Map<string, string>();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const flush = () => {
+    timer = null;
+    for (const [key, value] of pending) localStorage.setItem(key, value);
+    pending.clear();
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', flush);
+  }
+  return {
+    getItem: (key) => {
+      if (pending.has(key)) return pending.get(key) ?? null;
+      return localStorage.getItem(key);
+    },
+    setItem: (key, value) => {
+      pending.set(key, value);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(flush, delayMs);
+    },
+    removeItem: (key) => {
+      pending.delete(key);
+      localStorage.removeItem(key);
+    },
+  };
+}
+
 export const useStore = create<AppState>()(
   persist(
     (set) => ({
@@ -160,10 +197,19 @@ export const useStore = create<AppState>()(
 
       currentProjectId: null,
       setCurrentProjectId: (id) => set({ currentProjectId: id }),
+
+      // projectList is rehydrated from the DB on startup (App.tsx) — no need
+      // to persist it in localStorage.
+      projectList: [],
+      setProjectList: (list) => set({ projectList: list }),
     }),
     {
       name: 'feasibility-store',
       version: 1,
+      // Debounce localStorage writes to coalesce rapid keystrokes into a single
+      // serialization+write. 250 ms is imperceptible to users but eliminates
+      // dozens of redundant writes per second when typing into input fields.
+      storage: createJSONStorage(() => createDebouncedLocalStorage(250)),
       // Exclude transient runtime state from localStorage
       partialize: (state) => ({
         activeTab: state.activeTab,

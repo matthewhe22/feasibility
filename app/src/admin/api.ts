@@ -111,3 +111,48 @@ export async function renameProject(id: number, name: string, description: strin
 export async function deleteProject(id: number): Promise<void> {
   await apiFetch(`/project/${id}`, { method: 'DELETE' });
 }
+
+// ── AI Settings ──────────────────────────────────────────────────────────────
+
+export type AIModelId =
+  | 'claude-opus-4-7'
+  | 'claude-opus-4-6'
+  | 'claude-sonnet-4-6'
+  | 'claude-haiku-4-5';
+
+export interface AIModelOption {
+  id: AIModelId;
+  label: string;
+  tier: 'opus' | 'sonnet' | 'haiku';
+  contextWindow: string;
+  inputPricePerMillion: number;
+  outputPricePerMillion: number;
+  recommendedFor: string;
+}
+
+export interface AISettings {
+  hasKey: boolean;
+  keyPreview: string;
+  model: AIModelId;
+  enabled: boolean;
+  source: 'stored' | 'env' | 'none';
+  hasEnvFallback: boolean;
+  hasStoredKey: boolean;
+  allowedModels: AIModelOption[];
+}
+
+export async function fetchAISettings(): Promise<AISettings> {
+  return apiFetch<AISettings>('/ai-settings');
+}
+
+export async function updateAISettings(patch: {
+  apiKey?: string;
+  model?: AIModelId;
+  enabled?: boolean;
+}): Promise<{ ok: true; hasKey: boolean; keyPreview: string; model: AIModelId; enabled: boolean }> {
+  return apiFetch('/ai-settings', { method: 'POST', body: JSON.stringify(patch) });
+}
+
+export async function deleteStoredAIKey(): Promise<void> {
+  await apiFetch('/ai-settings', { method: 'DELETE' });
+}

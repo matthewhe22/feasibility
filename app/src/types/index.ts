@@ -200,6 +200,10 @@ export interface DebtFacility {
 // ===== ADMIN =====
 export interface AdminConfig {
   projectName: string;
+  /** Free-text version label for the saved project (e.g. "Initial baseline", "Post review v2"). Used by the dashboard version-comparison feature. */
+  versionName?: string;
+  /** Short version/revision tag displayed in the app header (e.g. "1.0", "rev 3"). */
+  projectVersion?: string;
   modelStartDate: number;
   monthsPerPeriod: number;
   lastActualsPeriod: number;
@@ -570,6 +574,30 @@ export interface GSTCompliance {
   netGSTPayable: number;
 }
 
+/**
+ * Solver diagnostics — exposed to the UI so users can see whether the iterative
+ * debt solver converged, how many iterations it ran, and the final delta.
+ * If `converged === false`, finance costs and facility sizes may be inaccurate.
+ */
+export interface SolverDiagnostics {
+  converged: boolean;
+  iterations: number;
+  maxIterations: number;
+  /** Final absolute finance-cost delta (dollars) when the solver exited. */
+  finalDelta: number;
+  /** Tolerance ($) used for convergence comparison. */
+  tolerance: number;
+}
+
+export type WarningSeverity = 'error' | 'warning' | 'info';
+export type WarningCategory = 'solver' | 'gst' | 'sCurve' | 'revenue' | 'funding' | 'general';
+
+export interface CalculationWarning {
+  message: string;
+  severity: WarningSeverity;
+  category: WarningCategory;
+}
+
 export interface DashboardData {
   feasibility: FeasibilitySummary;
   kpis: KPIs;
@@ -595,7 +623,12 @@ export interface DashboardData {
   dscr?: DSCRSummary;
   gstCompliance?: GSTCompliance;
   cashflows: MonthlyCashflow[];
-  warnings: string[]; // S-curve and other calculation warnings
+  /** Plain-string warnings (legacy — kept for backward compat with existing UI). */
+  warnings: string[];
+  /** Structured warnings with severity + category — new UI uses this for filtering / grouping. */
+  warningsDetail?: CalculationWarning[];
+  /** Iterative debt-solver diagnostics. */
+  solver?: SolverDiagnostics;
   /** Per-line-item cost variance: budget vs actuals, cost-to-date, cost-to-complete. */
   costVariance: CostLineVariance[];
 }

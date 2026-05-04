@@ -41,6 +41,10 @@ export interface BrandingSettings {
 }
 
 const BRANDING_SENTINEL = '__global_branding__';
+const PROJECT_LIST_SENTINEL = '__global_project_list__';
+
+/** All sentinel record names — filtered out of listProjects. */
+const SENTINELS: readonly string[] = [BRANDING_SENTINEL, PROJECT_LIST_SENTINEL];
 
 // ── IndexedDB (Dexie) — local fallback ─────────────────────────────────────
 
@@ -158,13 +162,81 @@ export async function listProjects(): Promise<ProjectRecord[]> {
     const { data, error } = await supabase
       .from('projects')
       .select('*')
-      .neq('name', BRANDING_SENTINEL)
+      .not('name', 'in', `(${SENTINELS.map(s => `"${s}"`).join(',')})`)
       .order('updated_at', { ascending: false });
     if (error) throw new Error(error.message);
     return (data as SupabaseRow[]).map(rowToRecord);
   }
   const all = await db.projects.orderBy('updatedAt').reverse().toArray();
-  return all.filter(p => p.name !== BRANDING_SENTINEL);
+  return all.filter(p => !SENTINELS.includes(p.name));
+}
+
+// ── Global project-name list (master list used as data validation) ──────────
+// Persisted as a sentinel record so it lives alongside projects without
+// requiring a schema change. Stored under `admin.projectList`.
+
+export async function loadProjectList(): Promise<string[]> {
+  try {
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('admin')
+        .eq('name', PROJECT_LIST_SENTINEL)
+        .maybeSingle();
+      if (error || !data) return [];
+      const list = (data as { admin: { projectList?: unknown } }).admin?.projectList;
+      return Array.isArray(list) ? list.filter((s): s is string => typeof s === 'string') : [];
+    }
+    const row = await db.projects.where('name').equals(PROJECT_LIST_SENTINEL).first();
+    if (!row) return [];
+    const list = (row.admin as { projectList?: unknown }).projectList;
+    return Array.isArray(list) ? list.filter((s): s is string => typeof s === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveProjectList(list: string[]): Promise<void> {
+  // De-dup, trim, drop empties — keeps the master list clean.
+  const cleaned = Array.from(new Set(list.map(s => s.trim()).filter(Boolean)));
+  const sentinelAdmin = { projectList: cleaned } as unknown as AdminConfig;
+  try {
+    if (supabase) {
+      const { data: existing } = await supabase
+        .from('projects')
+        .select('id')
+        .eq('name', PROJECT_LIST_SENTINEL)
+        .maybeSingle();
+      if (existing) {
+        await supabase
+          .from('projects')
+          .update({ admin: sentinelAdmin, updated_at: new Date().toISOString() })
+          .eq('name', PROJECT_LIST_SENTINEL);
+      } else {
+        await supabase
+          .from('projects')
+          .insert({ name: PROJECT_LIST_SENTINEL, description: '', admin: sentinelAdmin, inputs: {} as MainInputs });
+      }
+      return;
+    }
+    const existing = await db.projects.where('name').equals(PROJECT_LIST_SENTINEL).first();
+    const now = new Date();
+    if (existing?.id != null) {
+      await db.projects.update(existing.id, { admin: sentinelAdmin, updatedAt: now });
+    } else {
+      await db.projects.add({
+        name: PROJECT_LIST_SENTINEL,
+        description: '',
+        createdAt: now,
+        updatedAt: now,
+        admin: sentinelAdmin,
+        inputs: {} as MainInputs,
+        dashboardData: null,
+      });
+    }
+  } catch (e) {
+    console.warn('saveProjectList failed:', e);
+  }
 }
 
 /** Load app-wide branding settings from the DB (cross-device). */

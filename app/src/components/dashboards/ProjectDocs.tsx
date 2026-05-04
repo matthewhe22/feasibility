@@ -214,9 +214,6 @@ export function ProjectDocs() {
               label="PM Fee per period"
               formula="PMFee[t] = pmFeeRate × (devCosts[t] + constructionCosts[t] + marketingCosts[t] + otherCosts[t] + landCosts[t] + sellingCosts[t])"
             />
-            <WarningBox>
-              <strong>Known gap (GAP B):</strong> The Excel reference model computes PM fees on a wider base that includes GST-inclusive costs and finance costs, yielding ~$23.2M vs this app's ~$18.3M. This difference is a known open item.
-            </WarningBox>
           </SubSection>
           <SubSection title="Selling cost timing">
             <p>Selling commissions are split into front-end (at presale exchange) and back-end (at settlement):</p>
@@ -403,8 +400,7 @@ export function ProjectDocs() {
           <p>
             The model contains a circular dependency: finance costs (interest + fees) depend on the
             facility size, the facility size depends on Total Development Cost (TDC) via LTC constraints,
-            and TDC includes finance costs. The Excel model resolves this via a VBA macro; this app uses
-            an iterative convergence loop.
+            and TDC includes finance costs. 
           </p>
           <SubSection title="Algorithm">
             <ol className="list-decimal pl-5 space-y-1">

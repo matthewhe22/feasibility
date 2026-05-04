@@ -1,14 +1,22 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { formatCurrency, formatPercent, formatNumber } from '../../utils';
+import { listProjects, loadProject, type ProjectRecord } from '../../db/projectDb';
+import type { FeasibilitySummary } from '../../types';
 
-function DashValue({ label, value, unit = '$', indent = false, bold = false, highlight = false }: {
-  label: string; value: number; unit?: '$' | '%' | 'ratio' | '#'; indent?: boolean; bold?: boolean; highlight?: boolean;
-}) {
-  const formatted = unit === '$' ? formatCurrency(value)
+type Unit = '$' | '%' | 'ratio' | '#';
+
+function formatValue(value: number, unit: Unit): string {
+  return unit === '$' ? formatCurrency(value)
     : unit === '%' ? formatPercent(value)
     : unit === 'ratio' ? value.toFixed(4)
     : formatNumber(value);
+}
+
+function DashValue({ label, value, unit = '$', indent = false, bold = false, highlight = false }: {
+  label: string; value: number; unit?: Unit; indent?: boolean; bold?: boolean; highlight?: boolean;
+}) {
+  const formatted = formatValue(value, unit);
 
   return (
     <div className={`flex justify-between items-center py-0.5 px-2 ${highlight ? 'bg-blue-50' : ''} ${bold ? 'font-bold' : ''}`}>
@@ -21,6 +29,32 @@ function DashValue({ label, value, unit = '$', indent = false, bold = false, hig
   );
 }
 
+function CompareRow({ label, current, previous, unit = '$', indent = false, bold = false, highlight = false }: {
+  label: string;
+  current: number;
+  previous: number | null;
+  unit?: Unit;
+  indent?: boolean;
+  bold?: boolean;
+  highlight?: boolean;
+}) {
+  const variance = previous != null ? current - previous : null;
+  const valueClass = (v: number) => `text-xs font-mono ${v < 0 ? 'text-red-600' : 'text-gray-800'}`;
+
+  return (
+    <div className={`grid grid-cols-[1fr_auto_auto_auto] gap-3 items-center py-0.5 px-2 ${highlight ? 'bg-blue-50' : ''} ${bold ? 'font-bold' : ''}`}>
+      <span className={`text-xs ${indent ? 'pl-4' : ''} ${bold ? 'text-gray-800' : 'text-gray-600'}`}>{label}</span>
+      <span className={`${valueClass(current)} text-right tabular-nums w-28`}>{formatValue(current, unit)}</span>
+      <span className={`text-xs font-mono text-right tabular-nums w-28 ${previous == null ? 'text-gray-300' : previous < 0 ? 'text-red-600' : 'text-gray-700'}`}>
+        {previous == null ? '—' : formatValue(previous, unit)}
+      </span>
+      <span className={`text-xs font-mono text-right tabular-nums w-28 ${variance == null ? 'text-gray-300' : variance < 0 ? 'text-red-600' : variance > 0 ? 'text-green-700' : 'text-gray-500'}`}>
+        {variance == null ? '—' : (variance > 0 ? '+' : '') + formatValue(variance, unit)}
+      </span>
+    </div>
+  );
+}
+
 function TableHeader({ children }: { children: React.ReactNode }) {
   return <div className="bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-t">{children}</div>;
 }
@@ -29,8 +63,176 @@ function TableBox({ children, className = '' }: { children: React.ReactNode; cla
   return <div className={`border border-gray-200 rounded mb-3 ${className}`}>{children}</div>;
 }
 
+function formatVersionLabel(rec: ProjectRecord): string {
+  const updated = new Date(rec.updatedAt).toLocaleString('en-AU', { dateStyle: 'short', timeStyle: 'short' });
+  const version = rec.admin?.versionName ?? rec.description;
+  return version ? `${version} (${updated})` : updated;
+}
+
+function Table1FeasibilitySummary({
+  current,
+  versions,
+  selectedVersionId,
+  onSelectVersion,
+  comparison,
+}: {
+  current: FeasibilitySummary;
+  versions: ProjectRecord[];
+  selectedVersionId: number | null;
+  onSelectVersion: (id: number | null) => void;
+  comparison: ProjectRecord | null;
+}) {
+  const compareEnabled = selectedVersionId != null;
+  const prev: FeasibilitySummary | null = useMemo(() => {
+    if (!compareEnabled) return null;
+    return comparison?.dashboardData?.feasibility ?? null;
+  }, [compareEnabled, comparison]);
+
+  const prevHeaderLabel = comparison ? formatVersionLabel(comparison) : 'Previous version';
+
+  // Each row's previous value (null when not comparing or snapshot missing).
+  const p = (key: keyof FeasibilitySummary): number | null =>
+    prev ? prev[key] : null;
+
+  return (
+    <TableBox>
+      <TableHeader>Table 1 - Feasibility Summary</TableHeader>
+
+      {/* Version comparison selector */}
+      <div className="flex items-center gap-2 px-2 py-1.5 bg-gray-50 border-b border-gray-200">
+        <label className="text-[11px] text-gray-600 shrink-0">Compare against previous version:</label>
+        <select
+          className="flex-1 min-w-0 text-xs border border-gray-300 rounded px-2 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
+          value={selectedVersionId ?? ''}
+          onChange={e => onSelectVersion(e.target.value === '' ? null : Number(e.target.value))}
+          disabled={versions.length === 0}
+          title={versions.length === 0 ? 'No prior saved versions for this project' : undefined}
+        >
+          <option value="">— None —</option>
+          {versions.map(v => (
+            <option key={v.id} value={v.id!}>{formatVersionLabel(v)}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Column header (only when comparing) */}
+      {compareEnabled && (
+        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 items-end px-2 py-1 bg-blue-50 text-blue-800 border-b border-gray-200">
+          <span className="text-[10px] font-semibold uppercase tracking-wide"></span>
+          <span className="text-[10px] font-semibold text-right w-28">Current</span>
+          <span className="text-[10px] font-semibold text-right w-28 truncate" title={prevHeaderLabel}>{prevHeaderLabel}</span>
+          <span className="text-[10px] font-semibold text-right w-28">Variance</span>
+        </div>
+      )}
+
+      {compareEnabled && prev == null && (
+        <div className="px-2 py-1 text-[11px] text-amber-800 bg-amber-50 border-b border-amber-200">
+          Selected version has no saved dashboard snapshot — variance is unavailable.
+        </div>
+      )}
+
+      <div className="divide-y divide-gray-100">
+        {compareEnabled ? (
+          <>
+            <CompareRow label="Total GRV (net incentives)" current={current.totalGRV} previous={p('totalGRV')} />
+            <div className="h-px bg-gray-200" />
+            <CompareRow label="Land" current={current.land} previous={p('land')} />
+            <CompareRow label="Acquisition Costs (Stamp Duty, Reg Fees)" current={current.stampDuty} previous={p('stampDuty')} />
+            <CompareRow label="Build Costs" current={current.buildCosts} previous={p('buildCosts')} />
+            <CompareRow label="Senior Finance Costs" current={current.seniorFinanceCosts} previous={p('seniorFinanceCosts')} />
+            <CompareRow label="Mezzanine Finance Costs" current={current.mezzFinanceCosts} previous={p('mezzFinanceCosts')} />
+            <CompareRow label="Other Financing Costs" current={current.otherFinancingCosts} previous={p('otherFinancingCosts')} />
+            <CompareRow label="Standard Costs" current={current.standardCosts} previous={p('standardCosts')} />
+            <CompareRow label="GST on Costs (ITC Claimable)" current={current.gst} previous={p('gst')} indent />
+            <CompareRow label="GST on Revenue (Remitted to ATO)" current={current.gstOnRevenue} previous={p('gstOnRevenue')} indent />
+            <CompareRow label="Net GST Payable to ATO" current={current.gstNet} previous={p('gstNet')} indent bold />
+            <CompareRow label="Marketing and Advertising" current={current.marketingAndAdvertising} previous={p('marketingAndAdvertising')} />
+            <CompareRow label="Sales Commissions" current={current.salesCommissions} previous={p('salesCommissions')} />
+            <CompareRow label="Project Management Fee" current={current.pmFee} previous={p('pmFee')} />
+            <CompareRow label="Total Cost" current={current.totalCost} previous={p('totalCost')} bold highlight />
+            <div className="h-1 bg-gray-300" />
+            <CompareRow label="Total Profit" current={current.totalProfit} previous={p('totalProfit')} bold highlight />
+            <CompareRow label="Total Profit (after Loan Coupon Interest)" current={current.totalProfitAfterCoupon} previous={p('totalProfitAfterCoupon')} bold />
+          </>
+        ) : (
+          <>
+            <DashValue label="Total GRV (net incentives)" value={current.totalGRV} />
+            <div className="h-px bg-gray-200" />
+            <DashValue label="Land" value={current.land} />
+            <DashValue label="Acquisition Costs (Stamp Duty, Reg Fees)" value={current.stampDuty} />
+            <DashValue label="Build Costs" value={current.buildCosts} />
+            <DashValue label="Senior Finance Costs" value={current.seniorFinanceCosts} />
+            <DashValue label="Mezzanine Finance Costs" value={current.mezzFinanceCosts} />
+            <DashValue label="Other Financing Costs" value={current.otherFinancingCosts} />
+            <DashValue label="Standard Costs" value={current.standardCosts} />
+            <DashValue label="GST on Costs (ITC Claimable)" value={current.gst} indent />
+            <DashValue label="GST on Revenue (Remitted to ATO)" value={current.gstOnRevenue} indent />
+            <DashValue label="Net GST Payable to ATO" value={current.gstNet} indent bold />
+            <DashValue label="Marketing and Advertising" value={current.marketingAndAdvertising} />
+            <DashValue label="Sales Commissions" value={current.salesCommissions} />
+            <DashValue label="Project Management Fee" value={current.pmFee} />
+            <DashValue label="Total Cost" value={current.totalCost} bold highlight />
+            <div className="h-1 bg-gray-300" />
+            <DashValue label="Total Profit" value={current.totalProfit} bold highlight />
+            <DashValue label="Total Profit (after Loan Coupon Interest)" value={current.totalProfitAfterCoupon} bold />
+          </>
+        )}
+      </div>
+    </TableBox>
+  );
+}
+
 export function InternalDashboard() {
-  const { dashboardData: data } = useStore();
+  const { dashboardData: data, admin, currentProjectId } = useStore();
+
+  const [versions, setVersions] = useState<ProjectRecord[]>([]);
+  const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
+  const [loadedVersion, setLoadedVersion] = useState<ProjectRecord | null>(null);
+
+  // Load saved versions matching the current project name (excluding the
+  // currently loaded record). Re-fetches when the project name or current id
+  // changes (e.g. after the user saves/loads a project).
+  useEffect(() => {
+    let cancelled = false;
+    listProjects()
+      .then(all => {
+        if (cancelled) return;
+        // Strict project-match: only show versions whose admin.projectName
+        // equals the current project's name. Falls back to record name for
+        // legacy records that pre-date the projectName/versionName split.
+        const matches = all.filter(p => {
+          if (p.id == null || p.id === currentProjectId) return false;
+          const recProject = p.admin?.projectName ?? p.name;
+          return recProject === admin.projectName;
+        });
+        setVersions(matches);
+      })
+      .catch(() => { if (!cancelled) setVersions([]); });
+    return () => { cancelled = true; };
+  }, [admin.projectName, currentProjectId]);
+
+  // Treat the selection as cleared if it isn't in the current versions list
+  // (e.g. the user just deleted that saved record).
+  const effectiveSelectedId = selectedVersionId != null && versions.some(v => v.id === selectedVersionId)
+    ? selectedVersionId
+    : null;
+
+  // Hydrate the selected version's full record (we need its dashboardData
+  // snapshot). The fetch only writes state from async callbacks — render
+  // gates the comparison on whether `loadedVersion.id` matches the current
+  // selection, so stale loads never appear.
+  useEffect(() => {
+    if (effectiveSelectedId == null) return;
+    let cancelled = false;
+    loadProject(effectiveSelectedId)
+      .then(rec => { if (!cancelled) setLoadedVersion(rec ?? null); })
+      .catch(() => { if (!cancelled) setLoadedVersion(null); });
+    return () => { cancelled = true; };
+  }, [effectiveSelectedId]);
+
+  const comparisonVersion = effectiveSelectedId != null && loadedVersion?.id === effectiveSelectedId
+    ? loadedVersion
+    : null;
 
   if (!data) {
     return <div className="text-center py-12 text-gray-400 text-sm">Run calculations to see the Internal Dashboard</div>;
@@ -48,37 +250,20 @@ export function InternalDashboard() {
     <div>
       <div className="text-center mb-4">
         <h2 className="text-lg font-bold text-blue-800">Internal Feasibility Dashboard</h2>
-        <p className="text-xs text-gray-500">Checks: OK</p>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         {/* Left Column */}
         <div>
-          {/* Table 1: Feasibility Summary */}
-          <TableBox>
-            <TableHeader>Table 1 - Feasibility Summary</TableHeader>
-            <div className="divide-y divide-gray-100">
-              <DashValue label="Total GRV (net incentives)" value={f.totalGRV} />
-              <div className="h-px bg-gray-200" />
-              <DashValue label="Land" value={f.land} />
-              <DashValue label="Acquisition Costs (Stamp Duty, Reg Fees)" value={f.stampDuty} />
-              <DashValue label="Build Costs" value={f.buildCosts} />
-              <DashValue label="Senior Finance Costs" value={f.seniorFinanceCosts} />
-              <DashValue label="Mezzanine Finance Costs" value={f.mezzFinanceCosts} />
-              <DashValue label="Other Financing Costs" value={f.otherFinancingCosts} />
-              <DashValue label="Standard Costs" value={f.standardCosts} />
-              <DashValue label="GST on Costs (ITC Claimable)" value={f.gst} indent />
-              <DashValue label="GST on Revenue (Remitted to ATO)" value={f.gstOnRevenue} indent />
-              <DashValue label="Net GST Payable to ATO" value={f.gstNet} indent bold />
-              <DashValue label="Marketing and Advertising" value={f.marketingAndAdvertising} />
-              <DashValue label="Sales Commissions" value={f.salesCommissions} />
-              <DashValue label="Project Management Fee" value={f.pmFee} />
-              <DashValue label="Total Cost" value={f.totalCost} bold highlight />
-              <div className="h-1 bg-gray-300" />
-              <DashValue label="Total Profit" value={f.totalProfit} bold highlight />
-              <DashValue label="Total Profit (after Loan Coupon Interest)" value={f.totalProfitAfterCoupon} bold />
-            </div>
-          </TableBox>
+          {/* Table 1: Feasibility Summary (with optional version comparison) */}
+          <Table1FeasibilitySummary
+            current={f}
+            versions={versions}
+            selectedVersionId={selectedVersionId}
+            onSelectVersion={setSelectedVersionId}
+            comparison={comparisonVersion}
+          />
+
 
           {/* Table 2: KPIs */}
           <TableBox>
@@ -102,10 +287,10 @@ export function InternalDashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-blue-50 text-blue-800">
-                    <th className="px-2 py-1 text-left">Description</th>
-                    <th className="px-2 py-1 text-right">Total</th>
-                    <th className="px-2 py-1 text-right">JV Partner</th>
-                    <th className="px-2 py-1 text-right">Developer</th>
+                    <th scope="col" className="px-2 py-1 text-left">Description</th>
+                    <th scope="col" className="px-2 py-1 text-right">Total</th>
+                    <th scope="col" className="px-2 py-1 text-right">JV Partner</th>
+                    <th scope="col" className="px-2 py-1 text-right">Developer</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -162,10 +347,10 @@ export function InternalDashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-blue-50 text-blue-800">
-                    <th className="px-2 py-1 text-left">Capital Stack</th>
-                    <th className="px-2 py-1 text-right">LTC</th>
-                    <th className="px-2 py-1 text-right" title="Loan-to-Value Ratio. Denominator is NRV — Gross Realization Value net of GST on residential and selling costs. Matches term sheet convention: LTV based on valuation net of GST and selling costs.">LVR (NRV)</th>
-                    <th className="px-2 py-1 text-right">Total</th>
+                    <th scope="col" className="px-2 py-1 text-left">Capital Stack</th>
+                    <th scope="col" className="px-2 py-1 text-right">LTC</th>
+                    <th scope="col" className="px-2 py-1 text-right" title="Loan-to-Value Ratio. Denominator is NRV — Gross Realization Value net of GST on residential and selling costs. Matches term sheet convention: LTV based on valuation net of GST and selling costs.">LVR (NRV)</th>
+                    <th scope="col" className="px-2 py-1 text-right">Total</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -219,10 +404,10 @@ export function InternalDashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-blue-50 text-blue-800">
-                    <th className="px-2 py-1 text-left"></th>
-                    <th className="px-2 py-1 text-right">Principal</th>
-                    <th className="px-2 py-1 text-right">Interest</th>
-                    <th className="px-2 py-1 text-right">Total</th>
+                    <th scope="col" className="px-2 py-1 text-left"></th>
+                    <th scope="col" className="px-2 py-1 text-right">Principal</th>
+                    <th scope="col" className="px-2 py-1 text-right">Interest</th>
+                    <th scope="col" className="px-2 py-1 text-right">Total</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -272,12 +457,12 @@ export function InternalDashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-blue-50 text-blue-800">
-                    <th className="px-2 py-1 text-left"></th>
-                    <th className="px-2 py-1 text-right">Senior #1</th>
-                    <th className="px-2 py-1 text-right">Senior #2</th>
-                    <th className="px-2 py-1 text-right">Senior #3</th>
-                    <th className="px-2 py-1 text-right">Mezzanine</th>
-                    <th className="px-2 py-1 text-right">Land Loan</th>
+                    <th scope="col" className="px-2 py-1 text-left"></th>
+                    <th scope="col" className="px-2 py-1 text-right">Senior #1</th>
+                    <th scope="col" className="px-2 py-1 text-right">Senior #2</th>
+                    <th scope="col" className="px-2 py-1 text-right">Senior #3</th>
+                    <th scope="col" className="px-2 py-1 text-right">Mezzanine</th>
+                    <th scope="col" className="px-2 py-1 text-right">Land Loan</th>
                   </tr>
                 </thead>
                 <tbody>
