@@ -115,15 +115,14 @@ export async function deleteProject(id: number): Promise<void> {
 // ── AI Settings ──────────────────────────────────────────────────────────────
 
 export type AIModelId =
-  | 'claude-opus-4-7'
-  | 'claude-opus-4-6'
-  | 'claude-sonnet-4-6'
-  | 'claude-haiku-4-5';
+  | 'gemini-2-0-flash'
+  | 'gemini-1-5-pro'
+  | 'gemini-1-5-flash';
 
 export interface AIModelOption {
   id: AIModelId;
   label: string;
-  tier: 'opus' | 'sonnet' | 'haiku';
+  tier: 'flash' | 'pro';
   contextWindow: string;
   inputPricePerMillion: number;
   outputPricePerMillion: number;
