@@ -2,8 +2,10 @@ import React, { useState, useRef } from 'react';
 import { useStore } from '../../store/useStore';
 import { CurrencyInput, PercentInput, NumberInput, SectionHeader } from '../common/FormFields';
 import { FinancingInputs } from './FinancingInputs';
+import { CostReferenceCard } from './CostReferenceCard';
 import { formatCurrency, excelDateToDate, addMonths, endOfMonth } from '../../utils';
 import { calculateStampDuty, STAMP_DUTY_STATES, type StampDutyState } from '../../utils/stampDuty';
+import type { State as BenchmarkState } from '../../utils/costBenchmarks';
 import {
   getActualPeriodCount,
   monthCountToExcelSerial,
@@ -1253,6 +1255,13 @@ export function MainInputTab() {
             >Clear All</button>
           </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
+            <CostReferenceCard
+              mode="professional"
+              currentTotal={inputs.constructionCosts.reduce((s, c) => s + c.totalCosts, 0)}
+              defaultGFA={inputs.preliminary.projectGFA}
+              defaultUnits={inputs.preliminary.projectLots}
+              defaultState={inputs.landPurchase.stampDutyState as BenchmarkState}
+            />
             <CostLineTable items={inputs.developmentCosts}
               onChange={items => setInputs({ developmentCosts: items })} />
           </div>
@@ -1269,6 +1278,18 @@ export function MainInputTab() {
             >Clear All</button>
           </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
+            <CostReferenceCard
+              mode="construction"
+              currentTotal={inputs.constructionCosts.reduce((s, c) => s + c.totalCosts, 0)}
+              currentRate={
+                inputs.constructionCosts.length > 0 && inputs.constructionCosts[0].units > 0
+                  ? inputs.constructionCosts[0].baseRate
+                  : undefined
+              }
+              defaultGFA={inputs.preliminary.projectGFA}
+              defaultUnits={inputs.preliminary.projectLots}
+              defaultState={inputs.landPurchase.stampDutyState as BenchmarkState}
+            />
             <CostLineTable items={inputs.constructionCosts}
               onChange={items => setInputs({ constructionCosts: items })} />
             <PercentInput label="Construction Contingency %" value={inputs.constructionContingencyPercent}
@@ -1319,6 +1340,13 @@ export function MainInputTab() {
             >Clear All</button>
           </SectionHeader>
           <div className="bg-white border border-t-0 border-gray-200 rounded-b p-3">
+            <CostReferenceCard
+              mode="professional"
+              currentTotal={inputs.constructionCosts.reduce((s, c) => s + c.totalCosts, 0)}
+              defaultGFA={inputs.preliminary.projectGFA}
+              defaultUnits={inputs.preliminary.projectLots}
+              defaultState={inputs.landPurchase.stampDutyState as BenchmarkState}
+            />
             <CostLineTable items={inputs.pmFees}
               onChange={items => setInputs({ pmFees: items })} />
           </div>
