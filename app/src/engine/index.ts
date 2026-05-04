@@ -271,12 +271,16 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     // equals item.currentSalePrice × effectiveFactor × 1/11.
     if (hasPresale) {
       const depositGST = item.currentSalePrice * depositPct * gstRate / (1 + gstRate) * effectiveFactor;
-      const span = Math.max(1, item.preSaleSpan);
-      const perMonth = depositGST / span;
+      const rawSpan = Math.max(1, item.preSaleSpan);
       const startIdx = item.preSaleExchangeMonth - 1;
-      for (let i = 0; i < span; i++) {
-        const idx = startIdx + i;
-        if (idx >= 0 && idx < n) gstOnDeposits[idx] += perMonth;
+      // Clip span to the slots that fit within the timeline so perMonth divides
+      // over the periods that actually receive GST (avoids dropping liability).
+      const effectiveSpan = Math.min(rawSpan, Math.max(0, n - startIdx));
+      if (effectiveSpan > 0) {
+        const perMonth = depositGST / effectiveSpan;
+        for (let i = 0; i < effectiveSpan; i++) {
+          gstOnDeposits[startIdx + i] += perMonth;
+        }
       }
     }
   }

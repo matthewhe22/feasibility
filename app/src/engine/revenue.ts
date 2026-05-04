@@ -110,13 +110,20 @@ export function spreadDeposits(
     const depositPct = (typeof configuredPct === 'number' && configuredPct > 0) ? configuredPct : 0.1;
     const depositAmount = item.currentSalePrice * depositPct;
     const startIdx = item.preSaleExchangeMonth - 1;
-    const span = normaliseSpan(item.preSaleSpan, n, `Revenue item ${item.code} presale`);
-    const perMonth = depositAmount / span;
-    for (let i = 0; i < span; i++) {
-      const targetIdx = startIdx + i;
-      if (targetIdx >= 0 && targetIdx < n) {
-        result[targetIdx] += perMonth;
-      }
+    const rawSpan = normaliseSpan(item.preSaleSpan, n, `Revenue item ${item.code} presale`);
+    // Clip span to slots that actually fit within the timeline so perMonth
+    // divides over the periods that receive value (avoids silently dropping deposits).
+    const effectiveSpan = Math.min(rawSpan, Math.max(0, n - startIdx));
+    if (effectiveSpan <= 0) {
+      _revenueWarnings.add(`Revenue item ${item.code}: presale month ${item.preSaleExchangeMonth} is beyond the timeline — deposit not spread.`);
+      continue;
+    }
+    if (effectiveSpan < rawSpan) {
+      _revenueWarnings.add(`Revenue item ${item.code}: presale span clipped from ${rawSpan} to ${effectiveSpan} months to fit within timeline.`);
+    }
+    const perMonth = depositAmount / effectiveSpan;
+    for (let i = 0; i < effectiveSpan; i++) {
+      result[startIdx + i] += perMonth;
     }
   }
   return result;
@@ -164,13 +171,14 @@ export function spreadBackEndCommissions(
     if (backEnd <= 0) continue;
 
     const startIdx = grv.settlementMonth - 1;
-    const span = normaliseSpan(grv.settlementSpan, n, `Revenue item ${grv.code} settlement`);
-    const perMonth = backEnd / span;
-    for (let j = 0; j < span; j++) {
-      const idx = startIdx + j;
-      if (idx >= 0 && idx < n) {
-        result[idx] += perMonth;
-      }
+    const rawSpan = normaliseSpan(grv.settlementSpan, n, `Revenue item ${grv.code} settlement`);
+    // Clip to fit the timeline so perMonth divides over the slots that receive
+    // commission (mirrors the spreadSettlements clipping for consistency).
+    const effectiveSpan = Math.min(rawSpan, Math.max(0, n - startIdx));
+    if (effectiveSpan <= 0) continue;
+    const perMonth = backEnd / effectiveSpan;
+    for (let j = 0; j < effectiveSpan; j++) {
+      result[startIdx + j] += perMonth;
     }
   }
   return result;
