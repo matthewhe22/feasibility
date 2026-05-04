@@ -1,0 +1,21 @@
+{
+  "name": "Pencil Feasibility Engine",
+  "short_name": "Pencil",
+  "description": "AI-driven residential and commercial property feasibility model for developers, financiers, and project managers.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F4F1EA",
+  "theme_color": "#0E1012",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "finance", "productivity"],
+  "lang": "en-AU",
+  "dir": "ltr",
+  "orientation": "landscape"
+}

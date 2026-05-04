@@ -176,6 +176,20 @@ function App() {
   }, [appTitle, admin.projectName]);
 
   useEffect(() => {
+    const baseDesc = 'AI-driven property feasibility model for residential and commercial development. Model land costs, construction, revenue, debt, and IRR with precision.';
+    const desc = admin.projectName
+      ? `${admin.projectName} feasibility analysis — ${baseDesc}`
+      : baseDesc;
+    let metaDesc = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+    if (!metaDesc) {
+      metaDesc = document.createElement('meta');
+      metaDesc.name = 'description';
+      document.head.appendChild(metaDesc);
+    }
+    metaDesc.content = desc;
+  }, [admin.projectName]);
+
+  useEffect(() => {
     if (!admin.faviconDataUrl) return;
     let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
     if (!link) {
