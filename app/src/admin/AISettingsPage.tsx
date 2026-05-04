@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   fetchAISettings,
   updateAISettings,
@@ -6,7 +6,36 @@ import {
   type AISettings,
   type AIModelId,
   type AIModelOption,
+  type AIProvider,
 } from './api';
+
+interface ProviderInfo {
+  label: string;
+  apiKeyUrl: string;
+  apiKeyLabel: string;
+  envVar: string;
+  description: string;
+  keyPlaceholder: string;
+}
+
+const PROVIDERS: Record<AIProvider, ProviderInfo> = {
+  gemini: {
+    label: 'Google Gemini',
+    apiKeyUrl: 'https://aistudio.google.com/apikey',
+    apiKeyLabel: 'aistudio.google.com/apikey',
+    envVar: 'GEMINI_API_KEY',
+    description: 'Free tier: 15 req/min, 1500 req/day on Gemini 2.0 Flash. Live web search via Google Search grounding (may require billing).',
+    keyPlaceholder: '(paste your Gemini API key)',
+  },
+  deepseek: {
+    label: 'DeepSeek',
+    apiKeyUrl: 'https://platform.deepseek.com/api_keys',
+    apiKeyLabel: 'platform.deepseek.com/api_keys',
+    envVar: 'DEEPSEEK_API_KEY',
+    description: 'Very low cost (~$0.27/M input, $1.10/M output for deepseek-chat). Pay-as-you-go — no free tier. No built-in web search.',
+    keyPlaceholder: 'sk-...',
+  },
+};
 
 export function AISettingsPage() {
   const [settings, setSettings] = useState<AISettings | null>(null);
@@ -54,7 +83,7 @@ export function AISettingsPage() {
   };
 
   const handleRemoveKey = async () => {
-    if (!confirm('Remove the stored Google Gemini API key? Live AI research will fall back to the GEMINI_API_KEY env var (if set) — otherwise it will be disabled.')) return;
+    if (!confirm('Remove the stored API key? Live AI research will fall back to a configured env var (GEMINI_API_KEY or DEEPSEEK_API_KEY) — otherwise it will be disabled.')) return;
     setSaving(true);
     setSaveMsg(null);
     try {
@@ -126,6 +155,19 @@ export function AISettingsPage() {
     model !== settings.model ||
     enabled !== settings.enabled;
 
+  const selectedOption = settings.allowedModels.find(m => m.id === model);
+  const currentProvider: AIProvider = selectedOption?.provider ?? 'gemini';
+  const providerInfo = PROVIDERS[currentProvider];
+
+  // Group models by provider for the radio group.
+  const modelsByProvider = useMemo(() => {
+    const groups: Record<AIProvider, AIModelOption[]> = { gemini: [], deepseek: [] };
+    for (const m of settings.allowedModels) {
+      if (groups[m.provider]) groups[m.provider].push(m);
+    }
+    return groups;
+  }, [settings.allowedModels]);
+
   return (
     <div>
       <Header />
@@ -135,17 +177,17 @@ export function AISettingsPage() {
 
       <div className="space-y-6">
         {/* API Key */}
-        <Card title="Google Gemini API Key (Free)">
+        <Card title={`${providerInfo.label} API Key`}>
           <p className="text-xs text-gray-400 mb-3">
-            Get a free key from <a className="text-blue-400 underline" target="_blank" rel="noopener" href="https://aistudio.google.com/apikey">aistudio.google.com/apikey</a>.
-            Free tier: 60 requests/minute, 1500 requests/day. Keys are stored encrypted in the database and only ever read on the server — they are never sent to the browser.
+            Get a key from <a className="text-blue-400 underline" target="_blank" rel="noopener" href={providerInfo.apiKeyUrl}>{providerInfo.apiKeyLabel}</a>.
+            {' '}{providerInfo.description} Keys are stored encrypted in the database and only ever read on the server — they are never sent to the browser.
           </p>
 
           {settings.hasStoredKey && (
             <div className="mb-3 flex items-center gap-3 text-sm">
               <span className="text-gray-400">Current stored key:</span>
               <code className="px-2 py-0.5 bg-gray-900 border border-gray-700 rounded text-blue-300 font-mono text-xs">
-                {settings.keyPreview || 'sk-ant-***'}
+                {settings.keyPreview || '***'}
               </code>
               <button
                 onClick={handleRemoveKey}
@@ -158,14 +200,14 @@ export function AISettingsPage() {
           )}
 
           <label className="block text-xs font-semibold text-gray-300 mb-1">
-            {settings.hasStoredKey ? 'Replace key (leave blank to keep current)' : 'Set API key'}
+            {settings.hasStoredKey ? 'Replace key (leave blank to keep current)' : `Set ${providerInfo.label} API key`}
           </label>
           <div className="flex items-center gap-2">
             <input
               type={showKey ? 'text' : 'password'}
               value={keyInput}
               onChange={e => setKeyInput(e.target.value)}
-              placeholder="(paste your Gemini API key)"
+              placeholder={providerInfo.keyPlaceholder}
               autoComplete="off"
               spellCheck={false}
               className="flex-1 text-sm bg-gray-700 border border-gray-600 text-white rounded px-3 py-2 font-mono focus:outline-none focus:border-blue-500"
@@ -178,21 +220,40 @@ export function AISettingsPage() {
               {showKey ? 'Hide' : 'Show'}
             </button>
           </div>
+          <p className="text-[10px] text-gray-500 mt-2">
+            Note: only one API key is stored at a time. If you switch providers, replace the key with the new provider's key.
+          </p>
         </Card>
 
-        {/* Model selector */}
-        <Card title="Default Model">
+        {/* Model selector — grouped by provider */}
+        <Card title="Provider & Model">
           <p className="text-xs text-gray-400 mb-3">
-            Used for every "Research live benchmarks" request. Higher-tier models give more accurate research at higher cost per request.
+            Used for every "Research live benchmarks" request. Pick a provider — the API key above must match the selected model's provider.
           </p>
-          <div className="space-y-2">
-            {settings.allowedModels.map(opt => (
-              <ModelOption
-                key={opt.id}
-                option={opt}
-                selected={model === opt.id}
-                onSelect={() => setModel(opt.id)}
-              />
+          <div className="space-y-4">
+            {(['gemini', 'deepseek'] as AIProvider[]).map(p => (
+              modelsByProvider[p].length > 0 && (
+                <div key={p}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xs font-bold uppercase tracking-wide text-gray-300">
+                      {PROVIDERS[p].label}
+                    </span>
+                    <span className="text-[10px] text-gray-500">
+                      key: <a className="text-blue-400 underline" target="_blank" rel="noopener" href={PROVIDERS[p].apiKeyUrl}>{PROVIDERS[p].apiKeyLabel}</a>
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {modelsByProvider[p].map(opt => (
+                      <ModelOption
+                        key={opt.id}
+                        option={opt}
+                        selected={model === opt.id}
+                        onSelect={() => setModel(opt.id)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )
             ))}
           </div>
         </Card>
@@ -253,7 +314,8 @@ function Header() {
     <div className="mb-6">
       <h2 className="text-xl font-bold text-white">AI Settings</h2>
       <p className="text-gray-400 text-sm mt-0.5">
-        Configure the Google Gemini API key (free tier available) and model used by the live "Research benchmarks" button on cost-reference cards.
+        Configure the API key and model used by the live "Research benchmarks" button on cost-reference cards.
+        Supports Google Gemini (free tier) and DeepSeek (very low cost).
       </p>
     </div>
   );
@@ -271,7 +333,7 @@ function StatusBanner({ settings }: { settings: AISettings }) {
   if (settings.source === 'env') {
     return (
       <p className="text-sm text-blue-300 bg-blue-900/40 border border-blue-700 rounded px-4 py-2.5 mb-6">
-        Using fallback <code className="font-mono">GEMINI_API_KEY</code> environment variable.
+        Using fallback <code className="font-mono">GEMINI_API_KEY</code> or <code className="font-mono">DEEPSEEK_API_KEY</code> environment variable.
         Set a stored key below to manage it from this UI (the env var will then be ignored).
       </p>
     );
@@ -304,9 +366,14 @@ function ModelOption({
   onSelect: () => void;
 }) {
   const tierColors: Record<typeof option.tier, string> = {
-    flash: 'bg-blue-900/40   border-blue-700   text-blue-300',
-    pro:   'bg-purple-900/40 border-purple-700 text-purple-300',
+    flash:    'bg-blue-900/40    border-blue-700    text-blue-300',
+    pro:      'bg-purple-900/40  border-purple-700  text-purple-300',
+    chat:     'bg-emerald-900/40 border-emerald-700 text-emerald-300',
+    reasoner: 'bg-amber-900/40   border-amber-700   text-amber-300',
   };
+  const priceLabel = option.inputPricePerMillion === 0 && option.outputPricePerMillion === 0
+    ? 'free tier'
+    : `$${option.inputPricePerMillion}/M in · $${option.outputPricePerMillion}/M out`;
   return (
     <label
       className={`flex items-start gap-3 p-3 rounded border cursor-pointer transition-colors ${
@@ -323,15 +390,24 @@ function ModelOption({
         className="mt-1"
       />
       <div className="flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-semibold text-white">{option.label}</span>
           <span className={`text-[10px] px-1.5 py-0.5 rounded border ${tierColors[option.tier]} uppercase`}>
             {option.tier}
           </span>
+          {option.supportsWebSearch ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-green-900/40 border-green-700 text-green-300 uppercase">
+              web search
+            </span>
+          ) : (
+            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-gray-700/40 border-gray-600 text-gray-400 uppercase">
+              no web search
+            </span>
+          )}
         </div>
         <div className="text-xs text-gray-400 mt-0.5">{option.recommendedFor}</div>
         <div className="text-[11px] text-gray-500 mt-1 font-mono">
-          {option.contextWindow} context · ${option.inputPricePerMillion}/M in · ${option.outputPricePerMillion}/M out · <span className="text-gray-600">{option.id}</span>
+          {option.contextWindow} context · {priceLabel} · <span className="text-gray-600">{option.id}</span>
         </div>
       </div>
     </label>

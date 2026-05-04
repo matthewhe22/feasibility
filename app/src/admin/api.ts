@@ -114,18 +114,26 @@ export async function deleteProject(id: number): Promise<void> {
 
 // ── AI Settings ──────────────────────────────────────────────────────────────
 
+export type AIProvider = 'gemini' | 'deepseek';
+
 export type AIModelId =
+  // Gemini
   | 'gemini-2-0-flash'
   | 'gemini-1-5-pro'
-  | 'gemini-1-5-flash';
+  | 'gemini-1-5-flash'
+  // DeepSeek
+  | 'deepseek-chat'
+  | 'deepseek-reasoner';
 
 export interface AIModelOption {
   id: AIModelId;
   label: string;
-  tier: 'flash' | 'pro';
+  provider: AIProvider;
+  tier: 'flash' | 'pro' | 'chat' | 'reasoner';
   contextWindow: string;
   inputPricePerMillion: number;
   outputPricePerMillion: number;
+  supportsWebSearch: boolean;
   recommendedFor: string;
 }
 

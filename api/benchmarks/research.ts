@@ -2,7 +2,12 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { setCors } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
-import { resolveActiveSettings, toGeminiApiModel } from '../_lib/aiSettings';
+import {
+  resolveActiveSettings,
+  toGeminiApiModel,
+  toDeepSeekApiModel,
+  type AIModelId,
+} from '../_lib/aiSettings';
 
 /**
  * POST /api/benchmarks/research
@@ -267,8 +272,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'buildingType, finishQuality, and siteComplexity are required for construction/professional modes' });
   }
 
-  const client = new GoogleGenerativeAI(apiKey);
   const model = active.model;
+  const provider = active.provider;
+  const systemPrompt = body.mode === 'grv' ? SYSTEM_PROMPT_GRV : SYSTEM_PROMPT_COST;
+  const userPrompt = buildUserPrompt(body);
+
+  if (provider === 'deepseek') {
+    return handleDeepSeek({
+      apiKey, model, systemPrompt, userPrompt, source: active.source, res,
+    });
+  }
+  return handleGemini({
+    apiKey, model, systemPrompt, userPrompt, source: active.source, res,
+  });
+}
+
+/* ── Gemini handler ──────────────────────────────────────────────────────── */
+
+async function handleGemini({
+  apiKey, model, systemPrompt, userPrompt, source, res,
+}: {
+  apiKey: string;
+  model: AIModelId;
+  systemPrompt: string;
+  userPrompt: string;
+  source: 'stored' | 'env';
+  res: VercelResponse;
+}) {
+  const client = new GoogleGenerativeAI(apiKey);
   const apiModelName = toGeminiApiModel(model);
 
   // Google Search grounding tool name differs by model generation:
@@ -281,16 +312,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const callGemini = async (useGrounding: boolean) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const config: any = {
-      model: apiModelName,
-      systemInstruction: body.mode === 'grv' ? SYSTEM_PROMPT_GRV : SYSTEM_PROMPT_COST,
-    };
+    const config: any = { model: apiModelName, systemInstruction: systemPrompt };
     if (useGrounding) config.tools = [groundingTool];
     const genModel = client.getGenerativeModel(config);
-    return genModel.generateContent(buildUserPrompt(body));
+    return genModel.generateContent(userPrompt);
   };
 
-  // Track whether grounding was actually used (so we can tell the client).
   let groundingUsed = true;
   let groundingFallbackReason: string | null = null;
 
@@ -300,10 +327,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       response = await callGemini(true);
     } catch (err) {
-      // If grounding failed with a quota / permission error, fall back to a
-      // plain (non-grounded) call. Grounding has its own free-tier limits
-      // that are tighter than plain generateContent and often require billing
-      // to be enabled — many users hit 429 or 403 the very first time.
       const m = err instanceof Error ? err.message : '';
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = (err as any)?.code || (err as any)?.status || '';
@@ -317,39 +340,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const text = response.response.text();
-    let parsed: ResearchResult | null = null;
-
-    // Strip markdown fences if Gemini wrapped the JSON.
-    const cleaned = text
-      .replace(/^\s*```(?:json)?\s*/i, '')
-      .replace(/\s*```\s*$/i, '')
-      .trim();
-
-    try {
-      parsed = JSON.parse(cleaned) as ResearchResult;
-    } catch {
-      // Last-ditch — extract first {...} block
-      const m = cleaned.match(/\{[\s\S]*\}/);
-      if (m) {
-        try { parsed = JSON.parse(m[0]) as ResearchResult; } catch { /* ignore */ }
-      }
-      if (!parsed) {
-        return res.status(502).json({
-          error: 'AI response did not contain valid JSON.',
-          raw: text,
-        });
-      }
+    const parsed = parseJsonResponse(text);
+    if (!parsed) {
+      return res.status(502).json({
+        error: 'AI response did not contain valid JSON.',
+        raw: text,
+      });
     }
 
-    // Augment / overwrite sources with grounding citations when present —
-    // these are the URLs Google Search actually fetched, so they're more
-    // reliable than what the model reproduced inside the JSON.
+    // Merge grounding citations into the sources list.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const candidates = (response.response as any)?.candidates ?? [];
     const grounding = candidates[0]?.groundingMetadata;
     if (grounding) {
       const chunks = grounding.groundingChunks ?? [];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const groundingSources = chunks
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .map((c: any) => c?.web)
@@ -358,7 +362,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .map((w: any) => ({ title: w.title || w.uri, url: w.uri }));
       if (groundingSources.length > 0) {
-        // Merge: prefer grounding URLs (real), keep model-cited extras
         const seen = new Set(groundingSources.map((s: { url: string }) => s.url));
         const extra = (parsed.sources ?? []).filter(s => !seen.has(s.url));
         parsed.sources = [...groundingSources, ...extra];
@@ -367,15 +370,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     parsed.model = model;
     parsed.timestamp = new Date().toISOString();
-    (parsed as ResearchResult & {
+    const augmented = parsed as ResearchResult & {
       configSource?: string;
+      provider?: string;
       groundingUsed?: boolean;
-      groundingFallbackReason?: string | null;
-    }).configSource = active.source;
-    (parsed as ResearchResult & { groundingUsed?: boolean }).groundingUsed = groundingUsed;
-    if (groundingFallbackReason) {
-      (parsed as ResearchResult & { groundingFallbackReason?: string }).groundingFallbackReason = groundingFallbackReason;
-    }
+      groundingFallbackReason?: string;
+    };
+    augmented.configSource = source;
+    augmented.provider = 'gemini';
+    augmented.groundingUsed = groundingUsed;
+    if (groundingFallbackReason) augmented.groundingFallbackReason = groundingFallbackReason;
 
     return res.status(200).json(parsed);
   } catch (err) {
@@ -383,13 +387,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const errAny = err as any;
     const errCode = errAny?.code || errAny?.status || errAny?.statusCode || '';
-    // Gemini SDK often nests the API error in errAny.errorDetails or
-    // errAny.response — surface as much as we can.
     const detail = errAny?.errorDetails ?? errAny?.response?.error ?? null;
 
     if (msg.includes('API key') || msg.includes('authentication') || msg.includes('401') || msg.includes('UNAUTHENTICATED')) {
       return res.status(500).json({
-        error: `Google Gemini API key is invalid (source: ${active.source}). Update it in the Admin Portal → AI Settings. Get a free key at https://aistudio.google.com/apikey`,
+        error: `Google Gemini API key is invalid (source: ${source}). Update it in the Admin Portal → AI Settings. Get a free key at https://aistudio.google.com/apikey`,
         debug: { code: errCode, message: msg },
       });
     }
@@ -402,8 +404,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (msg.includes('RESOURCE_EXHAUSTED') || /\bquota\b/i.test(msg) || /\b429\b/.test(msg) || errCode === 429) {
       const onFlash = apiModelName === 'gemini-2.0-flash' || apiModelName === 'gemini-1.5-flash';
       const hint = onFlash
-        ? `Even on Gemini 2.0/1.5 Flash, the project has hit its quota (free tier: 15 req/min, 1,500 req/day for 2.0 Flash). Wait a minute and retry, or enable billing at https://console.cloud.google.com/ to raise the cap. If this happens on the very first request, the cause is usually the per-project daily quota already being consumed by another app sharing the same key, or Google Search grounding which has a separate, smaller quota.`
-        : `Per-model quota exhausted for "${apiModelName}". Switch to "Gemini 2.0 Flash" in Admin → AI Settings (highest free quota), or enable billing at https://console.cloud.google.com/.`;
+        ? `Even on Gemini 2.0/1.5 Flash, the project has hit its quota (free tier: 15 req/min, 1,500 req/day for 2.0 Flash). Wait a minute and retry, or enable billing at https://console.cloud.google.com/ to raise the cap. As a free alternative, switch to "DeepSeek Chat" in Admin → AI Settings (very low cost, no Google quota).`
+        : `Per-model quota exhausted for "${apiModelName}". Switch to "Gemini 2.0 Flash" or "DeepSeek Chat" in Admin → AI Settings, or enable billing at https://console.cloud.google.com/.`;
       return res.status(429).json({
         error: `Google Gemini API quota / rate limit reached. ${hint}`,
         debug: { code: errCode, message: msg, detail },
@@ -420,5 +422,128 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       error: `Live benchmark research failed: ${msg}`,
       debug: { code: errCode, message: msg, detail },
     });
+  }
+}
+
+/* ── DeepSeek handler ────────────────────────────────────────────────────── */
+
+async function handleDeepSeek({
+  apiKey, model, systemPrompt, userPrompt, source, res,
+}: {
+  apiKey: string;
+  model: AIModelId;
+  systemPrompt: string;
+  userPrompt: string;
+  source: 'stored' | 'env';
+  res: VercelResponse;
+}) {
+  const apiModelName = toDeepSeekApiModel(model);
+
+  try {
+    const r = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: apiModelName,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user',   content: userPrompt   },
+        ],
+        // DeepSeek supports OpenAI-style structured JSON output.
+        response_format: { type: 'json_object' },
+        // Reasoner uses chain-of-thought; chat is faster.
+        temperature: 0.2,
+        stream: false,
+      }),
+    });
+
+    if (!r.ok) {
+      const errText = await r.text().catch(() => '');
+      const debug = { status: r.status, body: errText.slice(0, 1000) };
+      if (r.status === 401) {
+        return res.status(500).json({
+          error: `DeepSeek API key is invalid (source: ${source}). Update it in the Admin Portal → AI Settings. Get a key at https://platform.deepseek.com/api_keys`,
+          debug,
+        });
+      }
+      if (r.status === 402) {
+        return res.status(402).json({
+          error: 'DeepSeek API: insufficient balance. Top up at https://platform.deepseek.com/top_up.',
+          debug,
+        });
+      }
+      if (r.status === 429) {
+        return res.status(429).json({
+          error: 'DeepSeek API rate limit reached. Wait a minute and retry.',
+          debug,
+        });
+      }
+      if (r.status === 404) {
+        return res.status(502).json({
+          error: `DeepSeek model "${apiModelName}" was not found. Check https://api-docs.deepseek.com/ for current model IDs.`,
+          debug,
+        });
+      }
+      return res.status(502).json({
+        error: `DeepSeek API error ${r.status}: ${errText || r.statusText}`,
+        debug,
+      });
+    }
+
+    const data = await r.json() as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const text = data.choices?.[0]?.message?.content ?? '';
+    const parsed = parseJsonResponse(text);
+    if (!parsed) {
+      return res.status(502).json({
+        error: 'DeepSeek response did not contain valid JSON.',
+        raw: text,
+      });
+    }
+
+    parsed.model = model;
+    parsed.timestamp = new Date().toISOString();
+    const augmented = parsed as ResearchResult & {
+      configSource?: string;
+      provider?: string;
+      groundingUsed?: boolean;
+      webSearchSupported?: boolean;
+    };
+    augmented.configSource = source;
+    augmented.provider = 'deepseek';
+    augmented.groundingUsed = false;
+    augmented.webSearchSupported = false; // DeepSeek has no built-in web search
+
+    return res.status(200).json(parsed);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    return res.status(500).json({
+      error: `DeepSeek live benchmark research failed: ${msg}`,
+      debug: { message: msg },
+    });
+  }
+}
+
+/* ── Helpers ────────────────────────────────────────────────────────────── */
+
+/** Parse a JSON response, stripping markdown fences and extracting first {...} block as a fallback. */
+function parseJsonResponse(text: string): ResearchResult | null {
+  const cleaned = text
+    .replace(/^\s*```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim();
+
+  try {
+    return JSON.parse(cleaned) as ResearchResult;
+  } catch {
+    const m = cleaned.match(/\{[\s\S]*\}/);
+    if (m) {
+      try { return JSON.parse(m[0]) as ResearchResult; } catch { /* ignore */ }
+    }
+    return null;
   }
 }

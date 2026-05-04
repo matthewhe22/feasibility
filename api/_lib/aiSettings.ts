@@ -15,10 +15,16 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const AI_SETTINGS_SENTINEL = '__ai_settings__';
 
+export type AIProvider = 'gemini' | 'deepseek';
+
 export type AIModelId =
+  // Google Gemini
   | 'gemini-2-0-flash'
   | 'gemini-1-5-pro'
-  | 'gemini-1-5-flash';
+  | 'gemini-1-5-flash'
+  // DeepSeek
+  | 'deepseek-chat'
+  | 'deepseek-reasoner';
 
 /**
  * Map our internal model IDs (dash-separated, TS-friendly) to the actual
@@ -31,47 +37,94 @@ export function toGeminiApiModel(id: AIModelId): string {
     case 'gemini-2-0-flash': return 'gemini-2.0-flash';
     case 'gemini-1-5-pro':   return 'gemini-1.5-pro';
     case 'gemini-1-5-flash': return 'gemini-1.5-flash';
+    default: return id;
   }
+}
+
+/** DeepSeek API expects model names verbatim. */
+export function toDeepSeekApiModel(id: AIModelId): string {
+  return id; // 'deepseek-chat' | 'deepseek-reasoner'
+}
+
+/** Derive which provider a given model belongs to. */
+export function getProvider(id: AIModelId): AIProvider {
+  if (id.startsWith('gemini-')) return 'gemini';
+  if (id.startsWith('deepseek-')) return 'deepseek';
+  // Fallback — shouldn't happen with the union, but keeps TS happy.
+  return 'gemini';
 }
 
 export interface AIModelOption {
   id: AIModelId;
   label: string;
-  tier: 'flash' | 'pro';
+  provider: AIProvider;
+  tier: 'flash' | 'pro' | 'chat' | 'reasoner';
   contextWindow: string;
   inputPricePerMillion: number;
   outputPricePerMillion: number;
+  /** True if the provider supports built-in live web search grounding. */
+  supportsWebSearch: boolean;
   recommendedFor: string;
 }
 
-/** Models the admin can pick from. Pricing in USD per million tokens (free tier: 60 req/min, 1500 req/day). */
+/** Models the admin can pick from. Pricing in USD per million tokens. */
 export const ALLOWED_MODELS: AIModelOption[] = [
+  // ── Google Gemini (free tier: 15 req/min, 1500 req/day on 2.0 Flash) ──
   {
     id: 'gemini-2-0-flash',
     label: 'Gemini 2.0 Flash — recommended (free tier)',
+    provider: 'gemini',
     tier: 'flash',
     contextWindow: '1M',
     inputPricePerMillion: 0,
     outputPricePerMillion: 0,
-    recommendedFor: 'Fastest, free tier. Best for cost benchmarks. Built-in web search.',
+    supportsWebSearch: true,
+    recommendedFor: 'Fastest, free tier. Best for cost benchmarks. Live web search via Google Search grounding.',
   },
   {
     id: 'gemini-1-5-pro',
-    label: 'Gemini 1.5 Pro — most capable',
+    label: 'Gemini 1.5 Pro — most capable Gemini',
+    provider: 'gemini',
     tier: 'pro',
     contextWindow: '2M',
     inputPricePerMillion: 1.25,
     outputPricePerMillion: 5,
+    supportsWebSearch: true,
     recommendedFor: 'Highest quality reasoning (paid tier).',
   },
   {
     id: 'gemini-1-5-flash',
     label: 'Gemini 1.5 Flash — balanced',
+    provider: 'gemini',
     tier: 'flash',
     contextWindow: '1M',
     inputPricePerMillion: 0.075,
     outputPricePerMillion: 0.3,
+    supportsWebSearch: true,
     recommendedFor: 'Fast and cheaper alternative to Pro (paid tier).',
+  },
+  // ── DeepSeek (very cheap; no built-in web search) ─────────────────────
+  {
+    id: 'deepseek-chat',
+    label: 'DeepSeek Chat (V3) — cheapest',
+    provider: 'deepseek',
+    tier: 'chat',
+    contextWindow: '64K',
+    inputPricePerMillion: 0.27,
+    outputPricePerMillion: 1.10,
+    supportsWebSearch: false,
+    recommendedFor: 'Very low cost (~$1/M tokens). General-purpose. No live web search — answers from training data.',
+  },
+  {
+    id: 'deepseek-reasoner',
+    label: 'DeepSeek Reasoner (R1) — chain-of-thought',
+    provider: 'deepseek',
+    tier: 'reasoner',
+    contextWindow: '64K',
+    inputPricePerMillion: 0.55,
+    outputPricePerMillion: 2.19,
+    supportsWebSearch: false,
+    recommendedFor: 'Best reasoning quality from DeepSeek; slower. No live web search.',
   },
 ];
 
@@ -142,29 +195,48 @@ export async function deleteAISettings(supabase: SupabaseClient): Promise<void> 
 }
 
 /**
- * Resolve the active key + model with this precedence:
+ * Resolve the active key + model + provider with this precedence:
  *   1. Stored settings (admin UI)
- *   2. Env vars ANTHROPIC_API_KEY / ANTHROPIC_MODEL
+ *   2. Env vars: GEMINI_API_KEY (+ GEMINI_MODEL) or DEEPSEEK_API_KEY (+ DEEPSEEK_MODEL)
+ *      — Gemini takes precedence if both are set.
  *
  * Returns `null` if no key is available anywhere.
  */
 export async function resolveActiveSettings(
   supabase: SupabaseClient | null,
-): Promise<{ apiKey: string; model: AIModelId; source: 'stored' | 'env' } | null> {
+): Promise<{
+  apiKey: string;
+  model: AIModelId;
+  provider: AIProvider;
+  source: 'stored' | 'env';
+} | null> {
   if (supabase) {
     const stored = await loadAISettings(supabase);
     if (stored && stored.apiKey && stored.enabled) {
-      return { apiKey: stored.apiKey, model: stored.model, source: 'stored' };
+      return {
+        apiKey: stored.apiKey,
+        model: stored.model,
+        provider: getProvider(stored.model),
+        source: 'stored',
+      };
     }
   }
-  const envKey = process.env.GEMINI_API_KEY?.trim();
-  if (envKey) {
+  // Env-var fallback — try Gemini first, then DeepSeek.
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+  if (geminiKey) {
     const envModel = process.env.GEMINI_MODEL?.trim() as AIModelId | undefined;
-    return {
-      apiKey: envKey,
-      model: ALLOWED_MODELS.some(m => m.id === envModel) ? (envModel as AIModelId) : 'gemini-2-0-flash',
-      source: 'env',
-    };
+    const model = ALLOWED_MODELS.some(m => m.id === envModel && m.provider === 'gemini')
+      ? (envModel as AIModelId)
+      : 'gemini-2-0-flash';
+    return { apiKey: geminiKey, model, provider: 'gemini', source: 'env' };
+  }
+  const deepseekKey = process.env.DEEPSEEK_API_KEY?.trim();
+  if (deepseekKey) {
+    const envModel = process.env.DEEPSEEK_MODEL?.trim() as AIModelId | undefined;
+    const model = ALLOWED_MODELS.some(m => m.id === envModel && m.provider === 'deepseek')
+      ? (envModel as AIModelId)
+      : 'deepseek-chat';
+    return { apiKey: deepseekKey, model, provider: 'deepseek', source: 'env' };
   }
   return null;
 }

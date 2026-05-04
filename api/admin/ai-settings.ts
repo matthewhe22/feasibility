@@ -82,7 +82,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const existing = await loadAISettings(supabase);
     const next = {
       apiKey:  body.apiKey ?? existing?.apiKey ?? '',
-      model:   (body.model as AIModelId) ?? existing?.model ?? 'claude-opus-4-7',
+      model:   (body.model as AIModelId) ?? existing?.model ?? 'gemini-2-0-flash',
       enabled: body.enabled ?? existing?.enabled ?? true,
     };
 
