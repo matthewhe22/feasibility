@@ -279,15 +279,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ? { googleSearch: {} }
     : { googleSearchRetrieval: {} };
 
-  try {
+  const callGemini = async (useGrounding: boolean) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const genModel = client.getGenerativeModel({
+    const config: any = {
       model: apiModelName,
       systemInstruction: body.mode === 'grv' ? SYSTEM_PROMPT_GRV : SYSTEM_PROMPT_COST,
-      tools: [groundingTool],
-    } as any);
+    };
+    if (useGrounding) config.tools = [groundingTool];
+    const genModel = client.getGenerativeModel(config);
+    return genModel.generateContent(buildUserPrompt(body));
+  };
 
-    const response = await genModel.generateContent(buildUserPrompt(body));
+  // Track whether grounding was actually used (so we can tell the client).
+  let groundingUsed = true;
+  let groundingFallbackReason: string | null = null;
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let response: any;
+    try {
+      response = await callGemini(true);
+    } catch (err) {
+      // If grounding failed with a quota / permission error, fall back to a
+      // plain (non-grounded) call. Grounding has its own free-tier limits
+      // that are tighter than plain generateContent and often require billing
+      // to be enabled — many users hit 429 or 403 the very first time.
+      const m = err instanceof Error ? err.message : '';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const c = (err as any)?.code || (err as any)?.status || '';
+      const isQuotaOrPerm =
+        m.includes('RESOURCE_EXHAUSTED') || /\bquota\b/i.test(m) || /\b429\b/.test(m) || c === 429 ||
+        m.includes('PERMISSION_DENIED') || /\b403\b/.test(m) || c === 403;
+      if (!isQuotaOrPerm) throw err;
+      groundingUsed = false;
+      groundingFallbackReason = m || 'Google Search grounding quota / permission error';
+      response = await callGemini(false);
+    }
 
     const text = response.response.text();
     let parsed: ResearchResult | null = null;
@@ -340,7 +367,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     parsed.model = model;
     parsed.timestamp = new Date().toISOString();
-    (parsed as ResearchResult & { configSource?: string }).configSource = active.source;
+    (parsed as ResearchResult & {
+      configSource?: string;
+      groundingUsed?: boolean;
+      groundingFallbackReason?: string | null;
+    }).configSource = active.source;
+    (parsed as ResearchResult & { groundingUsed?: boolean }).groundingUsed = groundingUsed;
+    if (groundingFallbackReason) {
+      (parsed as ResearchResult & { groundingFallbackReason?: string }).groundingFallbackReason = groundingFallbackReason;
+    }
 
     return res.status(200).json(parsed);
   } catch (err) {
@@ -365,11 +400,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
     if (msg.includes('RESOURCE_EXHAUSTED') || /\bquota\b/i.test(msg) || /\b429\b/.test(msg) || errCode === 429) {
-      // Distinguish per-minute / per-day / per-model-quota where possible
-      const isPerModel = /per[\s_-]?model|model[\s_-]?quota/i.test(msg);
-      const hint = isPerModel
-        ? `This usually means the per-model quota for "${apiModelName}" is exhausted on the free tier. Switch to "Gemini 2.0 Flash" (highest free quota) in Admin → AI Settings, or enable billing on your Google Cloud project.`
-        : `Free tier limits: 60 req/min, 1,500 req/day per project. Wait a minute and retry, or enable billing in https://console.cloud.google.com/ if you've hit the daily cap.`;
+      const onFlash = apiModelName === 'gemini-2.0-flash' || apiModelName === 'gemini-1.5-flash';
+      const hint = onFlash
+        ? `Even on Gemini 2.0/1.5 Flash, the project has hit its quota (free tier: 15 req/min, 1,500 req/day for 2.0 Flash). Wait a minute and retry, or enable billing at https://console.cloud.google.com/ to raise the cap. If this happens on the very first request, the cause is usually the per-project daily quota already being consumed by another app sharing the same key, or Google Search grounding which has a separate, smaller quota.`
+        : `Per-model quota exhausted for "${apiModelName}". Switch to "Gemini 2.0 Flash" in Admin → AI Settings (highest free quota), or enable billing at https://console.cloud.google.com/.`;
       return res.status(429).json({
         error: `Google Gemini API quota / rate limit reached. ${hint}`,
         debug: { code: errCode, message: msg, detail },
