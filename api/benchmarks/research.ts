@@ -271,11 +271,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const model = active.model;
   const apiModelName = toGeminiApiModel(model);
 
+  // Google Search grounding tool name differs by model generation:
+  //   - Gemini 1.5.x → googleSearchRetrieval
+  //   - Gemini 2.0+  → googleSearch
+  const isGen2 = apiModelName.startsWith('gemini-2');
+  const groundingTool = isGen2
+    ? { googleSearch: {} }
+    : { googleSearchRetrieval: {} };
+
   try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const genModel = client.getGenerativeModel({
       model: apiModelName,
       systemInstruction: body.mode === 'grv' ? SYSTEM_PROMPT_GRV : SYSTEM_PROMPT_COST,
-    });
+      tools: [groundingTool],
+    } as any);
 
     const response = await genModel.generateContent(buildUserPrompt(body));
 
@@ -304,6 +314,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // Augment / overwrite sources with grounding citations when present —
+    // these are the URLs Google Search actually fetched, so they're more
+    // reliable than what the model reproduced inside the JSON.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const candidates = (response.response as any)?.candidates ?? [];
+    const grounding = candidates[0]?.groundingMetadata;
+    if (grounding) {
+      const chunks = grounding.groundingChunks ?? [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const groundingSources = chunks
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((c: any) => c?.web)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .filter((w: any) => w?.uri)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((w: any) => ({ title: w.title || w.uri, url: w.uri }));
+      if (groundingSources.length > 0) {
+        // Merge: prefer grounding URLs (real), keep model-cited extras
+        const seen = new Set(groundingSources.map((s: { url: string }) => s.url));
+        const extra = (parsed.sources ?? []).filter(s => !seen.has(s.url));
+        parsed.sources = [...groundingSources, ...extra];
+      }
+    }
+
     parsed.model = model;
     parsed.timestamp = new Date().toISOString();
     (parsed as ResearchResult & { configSource?: string }).configSource = active.source;
@@ -312,24 +346,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const errCode = (err as any)?.code || (err as any)?.status || '';
+    const errAny = err as any;
+    const errCode = errAny?.code || errAny?.status || errAny?.statusCode || '';
+    // Gemini SDK often nests the API error in errAny.errorDetails or
+    // errAny.response — surface as much as we can.
+    const detail = errAny?.errorDetails ?? errAny?.response?.error ?? null;
 
     if (msg.includes('API key') || msg.includes('authentication') || msg.includes('401') || msg.includes('UNAUTHENTICATED')) {
       return res.status(500).json({
         error: `Google Gemini API key is invalid (source: ${active.source}). Update it in the Admin Portal → AI Settings. Get a free key at https://aistudio.google.com/apikey`,
+        debug: { code: errCode, message: msg },
       });
     }
-    if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('rate limit') || errCode === 429) {
-      return res.status(429).json({
-        error: 'Google Gemini API rate limit reached (free tier: 60 req/min, 1500 req/day). Try again shortly.'
-      });
-    }
-    if (msg.includes('NOT_FOUND') || msg.includes('not found') || msg.includes('404') || errCode === 404) {
+    if (msg.includes('NOT_FOUND') || msg.includes('not found') || /\b404\b/.test(msg) || errCode === 404) {
       return res.status(502).json({
         error: `Gemini model "${apiModelName}" was not found (404). The selected model may have been renamed or retired by Google. Try a different model in Admin → AI Settings, or check https://ai.google.dev/gemini-api/docs/models for current model IDs.`,
+        debug: { code: errCode, message: msg },
+      });
+    }
+    if (msg.includes('RESOURCE_EXHAUSTED') || /\bquota\b/i.test(msg) || /\b429\b/.test(msg) || errCode === 429) {
+      // Distinguish per-minute / per-day / per-model-quota where possible
+      const isPerModel = /per[\s_-]?model|model[\s_-]?quota/i.test(msg);
+      const hint = isPerModel
+        ? `This usually means the per-model quota for "${apiModelName}" is exhausted on the free tier. Switch to "Gemini 2.0 Flash" (highest free quota) in Admin → AI Settings, or enable billing on your Google Cloud project.`
+        : `Free tier limits: 60 req/min, 1,500 req/day per project. Wait a minute and retry, or enable billing in https://console.cloud.google.com/ if you've hit the daily cap.`;
+      return res.status(429).json({
+        error: `Google Gemini API quota / rate limit reached. ${hint}`,
+        debug: { code: errCode, message: msg, detail },
+      });
+    }
+    if (msg.includes('PERMISSION_DENIED') || /\b403\b/.test(msg) || errCode === 403) {
+      return res.status(502).json({
+        error: `Google Gemini permission denied. The API key may not have access to "${apiModelName}", or the API may not be enabled. Check https://aistudio.google.com/ and enable "Generative Language API" in the Google Cloud project.`,
+        debug: { code: errCode, message: msg, detail },
       });
     }
 
-    return res.status(500).json({ error: `Live benchmark research failed: ${msg}` });
+    return res.status(500).json({
+      error: `Live benchmark research failed: ${msg}`,
+      debug: { code: errCode, message: msg, detail },
+    });
   }
 }
