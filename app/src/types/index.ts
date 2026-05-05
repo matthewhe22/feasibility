@@ -71,6 +71,20 @@ export interface CostLineItem {
   ctd: number;
   ctc: number;
   actuals?: number[] | undefined; // per-period actual spend (0-based period index); overrides forecast for actual periods
+  /**
+   * PM-fee specific. Rate applied to total non-PM costs (incl. GST on those
+   * costs) to derive the PM fee total. Decimal — 0.02 = 2%. Only meaningful on
+   * `pmFees[0]`; ignored on every other cost section.
+   *
+   * Why a dedicated field: the v1 engine read the PM fee rate from the
+   * generic `units` column. The Inputs UI labels that column "Units" and on
+   * edit recomputes `totalCosts = units × baseRate`. A user expressing
+   * "PM Fee = $500K" naturally typed `units=1, baseRate=500000` — and the
+   * engine then read units=1 as a 100% rate, producing the v2-UAT $94–98M PM
+   * fee bug. With `feeRatePercent` separated out, the rate is no longer
+   * overloaded onto Units and the Inputs UI can validate it as 0..1.
+   */
+  feeRatePercent?: number;
 }
 
 export interface ConstructionCostItem extends CostLineItem {
@@ -169,8 +183,26 @@ export interface EquityConfig {
  */
 export type LineFeeBasis = 'peak-drawn' | 'committed-limit' | 'undrawn-commitment';
 
+/**
+ * Loan product type. Drives whether the Internal Dashboard shows DSCR-as-covenant
+ * (only meaningful for term/investment lending against operating cashflow) or
+ * LVR / LTC / peak-debt covenants (the lending tests for a development loan).
+ *
+ *  - 'development': construction or pre-revenue facility — sized by feasibility,
+ *    LVR (peak senior / GRV), LTC (peak debt / total cost) and peak debt vs
+ *    facility limit. DSCR during construction is structurally negative and is
+ *    NOT an underwriting gate (UAT v2 Rule 1 violation).
+ *  - 'investment' / 'residual-stock': revenue-generating term loan — DSCR is
+ *    the relevant covenant.
+ */
+export type FacilityType = 'development' | 'investment' | 'residual-stock';
+
 export interface DebtFacility {
   name: string;
+  /** Loan product type. Optional for back-compat — undefined defaults to
+   *  'development' for senior/mezz/land facilities and 'investment' for
+   *  residual-stock. See engine/index.ts. */
+  facilityType?: FacilityType;
   facilityLimit: number;
   startMonth: number;
   maturityMonth: number;
@@ -493,6 +525,37 @@ export interface EquityReturnSummary {
  * DSCR = Operating Cashflow before Finance / Debt Service (interest + scheduled principal).
  * Lenders typically require DSCR ≥ 1.25x.
  */
+/**
+ * Covenant summary for a development loan. Surfaced on Table 12 in place of
+ * DSCR rows when the senior facility's facilityType is 'development', because
+ * DSCR is not a meaningful covenant on a pre-revenue construction project.
+ * UAT v2 Rule 1 violation fix.
+ */
+export interface DevelopmentCovenants {
+  /** Peak senior debt balance / total GRV. */
+  lvr: number;
+  /** Peak total debt / total project cost. */
+  ltc: number;
+  /** Peak total debt across all facilities (informational). */
+  peakDebt: number;
+  /** Peak senior balance (informational). */
+  peakSenior: number;
+  /** Senior facility approved limit. */
+  seniorLimit: number;
+  /** Peak senior / senior limit — utilisation gate. */
+  peakSeniorPctLimit: number;
+  /** Senior facility's lvrTarget (typical 0.65). */
+  lvrTarget: number;
+  /** Senior facility's ltcTarget (typical 0.7). */
+  ltcTarget: number;
+  /** lvr <= lvrTarget. */
+  meetsLVR: boolean;
+  /** ltc <= ltcTarget. */
+  meetsLTC: boolean;
+  /** Peak senior balance <= senior limit (no overdraw). */
+  withinSeniorLimit: boolean;
+}
+
 export interface DSCRSummary {
   averageDSCR: number;
   minimumDSCR: number;
@@ -586,6 +649,9 @@ export interface DashboardData {
     unsoldGRV: number;
   };
   dscr?: DSCRSummary;
+  /** Populated when the senior facility is a development loan. Shown on
+   *  Table 12 instead of (or alongside) the DSCR rows. */
+  developmentCovenants?: DevelopmentCovenants;
   gstCompliance?: GSTCompliance;
   cashflows: MonthlyCashflow[];
   /** Plain-string warnings (legacy — kept for backward compat with existing UI). */

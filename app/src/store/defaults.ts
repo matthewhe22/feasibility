@@ -164,10 +164,13 @@ export const defaultOtherStandardCosts: CostLineItem[] = [
 ];
 
 // ===== PM FEES =====
+// PM Fee rate now lives on `feeRatePercent` rather than being overloaded onto
+// the generic `units` column — see engine/index.ts and the v2-UAT P0 fix.
 export const defaultPMFees: CostLineItem[] = [
   {
     code: '6001', description: 'Project Management Fees', costType: 'Development & Project Management Fees',
-    units: 0.02, baseRate: 21327785, totalCosts: 23200301,
+    units: 1, baseRate: 23200301, totalCosts: 23200301,
+    feeRatePercent: 0.02,
     sCurve: 'Evenly Split', monthStart: 22, monthSpan: 52,
     addGST: true, ctd: 9176909, ctc: 14023392,
   },
@@ -272,6 +275,7 @@ export const defaultEquityAdditional: EquityConfig = {
 // ===== DEBT FACILITIES =====
 export const defaultLandLoan: DebtFacility = {
   name: 'Land Loan Facility',
+  facilityType: 'development',
   facilityLimit: 120000000,
   startMonth: 30,
   maturityMonth: 33,
@@ -290,6 +294,7 @@ export const defaultLandLoan: DebtFacility = {
 
 export const defaultMezzanine: DebtFacility = {
   name: 'Mezzanine Finance',
+  facilityType: 'development',
   facilityLimit: 0,
   startMonth: 0,
   maturityMonth: 0,
@@ -308,6 +313,7 @@ export const defaultMezzanine: DebtFacility = {
 
 export const defaultSeniorFacility: DebtFacility = {
   name: 'Senior Construction Facility',
+  facilityType: 'development',
   facilityLimit: 767034632,
   startMonth: 33,
   maturityMonth: 65,
@@ -326,6 +332,7 @@ export const defaultSeniorFacility: DebtFacility = {
 
 export const defaultSeniorFacility2: DebtFacility = {
   name: 'Senior Facility #2',
+  facilityType: 'development',
   facilityLimit: 0,
   startMonth: 33,
   maturityMonth: 33,
@@ -344,6 +351,7 @@ export const defaultSeniorFacility2: DebtFacility = {
 
 export const defaultResidualStock: DebtFacility = {
   name: 'Residual Stock Facility',
+  facilityType: 'residual-stock',
   facilityLimit: 0,
   startMonth: 0,
   maturityMonth: 0,

@@ -360,9 +360,12 @@ export function ChecksTab() {
 
   // ── 10. PM FEE RATE CHECK ────────────────────────────────────────────────────
   {
-    const pmRate = inputs.pmFees.length > 0 && (inputs.pmFees[0]?.units ?? 0) > 0
-      ? (inputs.pmFees[0]?.units ?? 0.02)
-      : 0.02;
+    // Read the PM-fee rate from the dedicated feeRatePercent field — must
+    // match engine/index.ts. Fallback to 0.02 (2%) for legacy projects whose
+    // pmFees[0] does not yet have feeRatePercent set.
+    const rawPmRate = inputs.pmFees[0]?.feeRatePercent;
+    const pmRate = (typeof rawPmRate === 'number' && rawPmRate > 0 && rawPmRate < 1)
+      ? rawPmRate : 0.02;
     const expectedPMFee = pmRate * (
       sum(inputs.landPurchase.paymentStages.map(s =>
         s.percentOfLand > 0 ? s.percentOfLand * inputs.landPurchase.landPurchasePrice : s.amount
@@ -441,21 +444,55 @@ export function ChecksTab() {
     });
   }
 
-  // ── 14. PROFIT vs WATERFALL DISTRIBUTIONS ───────────────────────────────────
-  // Profit from feasibility should closely match the sum of distributions from funding waterfall
+  // ── 14. PROFIT ↔ WATERFALL RECONCILIATION ──────────────────────────────────
+  // The two profits this check has historically compared are NOT the same
+  // accounting object:
+  //   feasibilityProfit = settlements + rentals + other - GSTonRev - totalCost
+  //                     (accounting profit, can be negative)
+  //   waterfallProfit   = Σ profitDistributions in the funding waterfall
+  //                     (residual after senior/mezz/equity repayment, floored at 0)
+  //
+  // For a profitable project they should agree to within rounding. For a
+  // loss-making project they cannot agree: the waterfall floors at 0 by
+  // construction, so the variance always equals the unrepatriated equity
+  // plus any unpaid debt. Calling that "rounding" is wrong (UAT v2 issue #5).
+  //
+  // We now compute reconciledWaterfall = waterfallProfit
+  //                                    − unrepatriatedEquity
+  //                                    − unpaidDebt
+  // and assert reconciledWaterfall ≈ feasibilityProfit. Loss-making projects
+  // PASS this check with a clear breakdown in the notes; reconciliation gaps
+  // beyond that breakdown still FAIL.
   {
     const waterfallProfit = sum(cf.map(c => c.profitDistribution));
-    const variance = waterfallProfit - f.totalProfit;
-    const status: CheckStatus = Math.abs(variance) < 10_000 ? 'PASS' : Math.abs(variance) < 1_000_000 ? 'WARN' : 'FAIL';
+    const equityInjected = sum(cf.map(c => c.equityInjection));
+    const equityReturned = sum(cf.map(c => c.equityRepatriation));
+    const unrepatriatedEquity = Math.max(0, equityInjected - equityReturned);
+    // Ending facility balances = last period's closing balance (kept on each
+    // monthly cashflow row so we don't need a new FundingResult field).
+    const lastIdx = cf.length - 1;
+    const unpaidSenior = lastIdx >= 0 ? (cf[lastIdx]?.seniorBalance ?? 0) + (cf[lastIdx]?.senior2Balance ?? 0) : 0;
+    const unpaidMezz = lastIdx >= 0 ? (cf[lastIdx]?.mezzBalance ?? 0) : 0;
+    const unpaidLand = lastIdx >= 0 ? (cf[lastIdx]?.landLoanBalance ?? 0) : 0;
+    const unpaidDebt = unpaidSenior + unpaidMezz + unpaidLand;
+    const reconciledWaterfall = waterfallProfit - unrepatriatedEquity - unpaidDebt;
+    const variance = reconciledWaterfall - f.totalProfit;
+    const status: CheckStatus = Math.abs(variance) < 10_000 ? 'PASS'
+      : Math.abs(variance) < 100_000 ? 'WARN' : 'FAIL';
     checks.push({
       id: 'profit-waterfall',
       category: 'Returns',
-      description: 'Feasibility profit ≈ Sum of profit distributions (waterfall)',
+      description: 'Feasibility profit ≈ Waterfall − unrepatriated equity − unpaid debt',
       expected: formatCurrency(f.totalProfit),
-      actual: formatCurrency(waterfallProfit),
+      actual: formatCurrency(reconciledWaterfall),
       variance: formatCurrency(variance),
       status,
-      notes: 'Difference may be due to timing rounding in the debt-solving iteration.',
+      notes:
+        `Waterfall distributions ${formatCurrency(waterfallProfit)} ` +
+        `− unrepatriated equity ${formatCurrency(unrepatriatedEquity)} ` +
+        `− unpaid debt ${formatCurrency(unpaidDebt)} ` +
+        `(senior ${formatCurrency(unpaidSenior)} / mezz ${formatCurrency(unpaidMezz)} / land ${formatCurrency(unpaidLand)})` +
+        `. Loss-making projects: this PASSes when feasibility profit equals the negative of the equity+debt shortfall.`,
     });
   }
 

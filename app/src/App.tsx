@@ -90,16 +90,27 @@ function App() {
   const [calcError, setCalcError] = useState<string | null>(null);
   const [dismissedWarnings, setDismissedWarnings] = useState(false);
 
-  const calculate = () => {
+  // Accept explicit overrides so callers (e.g. ProjectManager.handleLoad) can
+  // pass freshly-fetched admin/inputs without relying on this closure's
+  // possibly-stale store snapshot. Falls back to useStore.getState() — the
+  // freshest values in the store at call time — if no override is provided.
+  // Reading from getState() rather than the destructured `admin`/`inputs`
+  // closure variables is the second half of the v2-UAT state-drift fix
+  // (the first half is in ProjectManager.handleLoad: replaceAdmin/replaceInputs
+  // + null'd dashboardData + onLoad called with explicit values).
+  const calculate = (override?: { admin: typeof admin; inputs: typeof inputs }) => {
     setIsCalculating(true);
     setCalcError(null);
     setDismissedWarnings(false);
     setTimeout(() => {
       try {
-        const result = runCalculations(admin, inputs);
+        const a = override?.admin ?? useStore.getState().admin;
+        const i = override?.inputs ?? useStore.getState().inputs;
+        const result = runCalculations(a, i);
         setDashboardData(result);
-        if (currentProjectId !== null) {
-          saveProject(currentProjectId, admin, inputs, result).catch((err) => {
+        const pid = useStore.getState().currentProjectId;
+        if (pid !== null) {
+          saveProject(pid, a, i, result).catch((err) => {
             console.warn('Auto-save failed:', err);
           });
         }
@@ -233,7 +244,8 @@ function App() {
             Admin
           </a>
           <button
-            onClick={calculate}
+            // Wrap so React's MouseEvent is not passed as the override arg.
+            onClick={() => calculate()}
             disabled={isCalculating}
             className="pencil-btn-primary"
           >

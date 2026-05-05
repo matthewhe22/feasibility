@@ -1,6 +1,7 @@
 import type {
   AdminConfig, MainInputs, DashboardData, MonthlyCashflow,
-  GSTCompliance, DSCRSummary, CalculationWarning, SolverDiagnostics,
+  GSTCompliance, DSCRSummary, DevelopmentCovenants, FacilityType,
+  CalculationWarning, SolverDiagnostics,
 } from '../types';
 import { generateTimeline } from './timeline';
 import { spreadCosts, spreadLandPayments, clearSCurveWarnings, getSCurveWarnings, buildCostVariance } from './costSpreading';
@@ -124,10 +125,25 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     sum(marketingCosts) + sum(otherStdCosts) + sum(otherFinCosts) +
     sum(frontEndCommByPeriod) + sum(backEndCommByPeriod) +
     prelimGSTOnCosts;
-  // PM fee rate comes from the item's `units` field (e.g. 0.02 = 2%)
-  const pmFeeRate = (inputs.pmFees.length > 0 && (inputs.pmFees[0]?.units ?? 0) > 0)
-    ? (inputs.pmFees[0]?.units ?? 0.02)
-    : 0.02;
+  // PM fee rate comes from the dedicated feeRatePercent field on pmFees[0].
+  // Historically the engine read the rate from the generic `units` column,
+  // which the Inputs UI also exposes as a quantity. A user typing
+  // `units=1, baseRate=500000` to express "$500K PM Fee" produced rate=1
+  // (100% of all cost), which is the v2-UAT P0 PM Fee bug.
+  //
+  // Migration: useStore's persist.migrate (v2→v3) copies legacy values from
+  // `units` into `feeRatePercent` *only* when `units` is in (0, 1) — a
+  // plausible rate range. Outside that range we default to 0.02 (2%) and
+  // emit a calculation warning so the user can correct it explicitly.
+  const rawRate = inputs.pmFees[0]?.feeRatePercent;
+  let pmFeeRate = 0.02;
+  if (typeof rawRate === 'number' && Number.isFinite(rawRate) && rawRate > 0 && rawRate < 1) {
+    pmFeeRate = rawRate;
+  } else if (typeof rawRate === 'number' && rawRate !== 0) {
+    localWarnings.push(
+      `PM Fee rate ${rawRate} out of plausible range (0,1) — using 0.02 (2%) instead.`,
+    );
+  }
   let dynamicPMFeeTotal = pmFeeRate * totalCostsExcPM;
   let pmFeesWithTotal = inputs.pmFees.map((f, idx) =>
     idx === 0 ? { ...f, totalCosts: dynamicPMFeeTotal } : f
@@ -671,6 +687,40 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     peakEquityMonth: funding.peakEquityMonth,
   };
 
+  // ===== DEVELOPMENT-LOAN COVENANTS (Table 12 alternative) =====
+  // DSCR is not a meaningful covenant on a development loan — peak senior /
+  // GRV (LVR) and peak debt / total cost (LTC) are. Compute these whenever
+  // the senior facility is a development loan; the dashboard will then show
+  // these rows on Table 12 instead of (or alongside) the DSCR rows.
+  // Defaults to 'development' for senior/mezz/land facilities and
+  // 'investment' for residual-stock per store/defaults.ts. Saved projects
+  // without facilityType are treated as 'development' (back-compat).
+  const seniorTypeRaw = inputs.seniorFacility?.facilityType;
+  const seniorType: FacilityType = seniorTypeRaw ?? 'development';
+  const grvForCovenants = totalGRV(inputs.grvItems);
+  let developmentCovenants: DevelopmentCovenants | undefined;
+  if (seniorType === 'development') {
+    const peakSeniorBalance = Math.max(...funding.seniorBalance, 0);
+    const seniorLimit = inputs.seniorFacility?.facilityLimit ?? 0;
+    const lvrTarget = inputs.seniorFacility?.lvrTarget ?? 0.65;
+    const ltcTarget = inputs.seniorFacility?.ltcTarget ?? 0.7;
+    const lvr = grvForCovenants > 0 ? peakSeniorBalance / grvForCovenants : 0;
+    const ltc = totalCost > 0 ? funding.peakDebt / totalCost : 0;
+    developmentCovenants = {
+      lvr,
+      ltc,
+      peakDebt: funding.peakDebt,
+      peakSenior: peakSeniorBalance,
+      seniorLimit,
+      peakSeniorPctLimit: seniorLimit > 0 ? peakSeniorBalance / seniorLimit : 0,
+      lvrTarget,
+      ltcTarget,
+      meetsLVR: grvForCovenants > 0 && lvr <= lvrTarget,
+      meetsLTC: totalCost > 0 && ltc <= ltcTarget,
+      withinSeniorLimit: seniorLimit > 0 ? peakSeniorBalance <= seniorLimit : true,
+    };
+  }
+
   // ===== GST COMPLIANCE SCHEDULE =====
   let marginSchemeSupplies = 0;
   let standardRatedSupplies = 0;
@@ -826,20 +876,27 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       landToSettlementMonths: lastSettlement - (inputs.landLoan?.startMonth ?? 0),
     },
     equityReturns: {
+      // Total row must equal the sum of JV + Developer rows, otherwise
+      // Table 3 column sums don't add (UAT v2 issue #19). Previously this
+      // row used feasibilityProfit (revenue − costs) while the per-entity
+      // rows used waterfall sums — those are two different accounting
+      // objects. profitShareBalance / totalProfitShare now both report
+      // the waterfall total; feasibility profit is shown separately as a
+      // memo row in InternalDashboard Table 3.
       total: {
         entity: 'Total',
         fundingContribPercent: 1,
         totalEquityContributed: equityContrib,
         irr,
         equityRepatriation1st: 0,
-        equityRepatriation2nd: equityContrib,
-        totalEquityRepatriation: equityContrib,
+        equityRepatriation2nd: sum(funding.equityRepatriations),
+        totalEquityRepatriation: sum(funding.equityRepatriations),
         establishmentFee: 0,
         couponInterest: 0,
         couponInterestPercent: 0,
-        profitShareBalance: totalProfit,
+        profitShareBalance: sum(funding.profitDistributions),
         profitSharePercent: 1,
-        totalProfitShare: totalProfit,
+        totalProfitShare: sum(funding.profitDistributions),
       },
       jvPartner: {
         entity: 'JV Partner',
@@ -882,6 +939,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       unsoldGRV: totalAptGRV - grvSoldExchanged,
     },
     dscr,
+    ...(developmentCovenants ? { developmentCovenants } : {}),
     gstCompliance,
     cashflows,
     warnings: [
