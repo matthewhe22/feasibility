@@ -397,7 +397,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     grvDeposits: at(deposits, i),
     rentalIncome: at(rentalInc, i),
     otherIncome: at(otherInc, i),
-    gstOnRevenue: at(gstOnRevenue, i) + at(gstOnDeposits, i),
+    gstOnRevenue: at(gstOnRevenue, i),
     gstOnDeposits: at(gstOnDeposits, i),
     gstWithholding: at(gstWithholding, i),
     landLoanDrawdown: at(funding.landLoanDrawdowns, i),
