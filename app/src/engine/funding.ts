@@ -482,6 +482,16 @@ function runFundingWaterfall(
     // This assumes the lender is an exempt financial institution (GSTA s.40-60).
     // For non-bank facilities, verify whether fees are GST-inclusive in the term sheet.
     if (i === llStartIdx && landLoan.facilityLimit > 0) {
+      // D2: A land loan drawn the same period as senior is repaid immediately
+      // (step 4 below), so no interest accrues. That's correct for the modelled
+      // sequence but typically reflects a misconfiguration: a land loan is
+      // intended as a 3-6 month bridge before construction draws on senior.
+      // Surface a warning so the user can reconcile their term-sheet timing.
+      if (hasSenior && landLoan.startMonth >= (senior.startMonth ?? landLoan.startMonth + 1)) {
+        _fundingWarnings.push(
+          `Land Loan starts month ${landLoan.startMonth} but Senior starts month ${senior.startMonth} — land loan is repaid same period it is drawn, so no land-loan interest accrues. Confirm the bridge period (typical pattern: land-loan precedes senior by 3-6 months).`
+        );
+      }
       llDrawdowns[i]     = landLoan.facilityLimit;
       llRunningBalance  += landLoan.facilityLimit;
       bankBalance       += landLoan.facilityLimit;
@@ -824,6 +834,26 @@ function runFundingWaterfall(
     snrBalance[i]   = Math.max(0, snrRunningBalance);
     snr2Balance[i]  = Math.max(0, snr2RunningBalance);
     mzBalance[i]    = Math.max(0, mzRunningBalance);
+
+    // D1: Facility-cap overshoot. If capitalised interest has pushed a balance
+    // above its committed limit, the model is implicitly relying on an
+    // accordion the lender hasn't committed. Surface so the term sheet can be
+    // restructured (or interest paid current rather than capitalised).
+    if (mezzLimit > 0 && mzRunningBalance > mezzLimit + 1) {
+      _fundingWarnings.push(
+        `Period ${i + 1}: Mezz balance $${Math.round(mzRunningBalance).toLocaleString()} exceeds committed limit $${Math.round(mezzLimit).toLocaleString()} (capitalised interest pushed over cap). Restructure: pay mezz interest current, or increase the commitment.`
+      );
+    }
+    if (seniorLimit > 0 && snrRunningBalance > seniorLimit + 1) {
+      _fundingWarnings.push(
+        `Period ${i + 1}: Senior #1 balance $${Math.round(snrRunningBalance).toLocaleString()} exceeds committed limit $${Math.round(seniorLimit).toLocaleString()}.`
+      );
+    }
+    if (senior2Limit > 0 && snr2RunningBalance > senior2Limit + 1) {
+      _fundingWarnings.push(
+        `Period ${i + 1}: Senior #2 balance $${Math.round(snr2RunningBalance).toLocaleString()} exceeds committed limit $${Math.round(senior2Limit).toLocaleString()}.`
+      );
+    }
 
     peakDebt = Math.max(peakDebt,
       snrRunningBalance + snr2RunningBalance
