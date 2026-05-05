@@ -618,8 +618,12 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const constructionSpan = inputs.constructionCosts[0]?.monthSpan || 41;
   const settlementMonths = inputs.grvItems.map(g => g.settlementMonth).filter(m => m > 0);
   const lastSettlement = settlementMonths.length > 0 ? Math.max(...settlementMonths) : 0;
+  // Sales Commencement = first presale exchange across ANY revenue type.
+  // Restricting to revenueType === 'Residential' caused mixed-use projects
+  // to show "N/A" when items were labelled e.g. 'Retail F&B' or 'Apartments'
+  // (Melbourne UAT Dh2). Use any item with a positive presale month.
   const presaleMonths = inputs.grvItems
-    .filter(g => g.preSaleExchangeMonth > 0 && g.revenueType === 'Residential')
+    .filter(g => g.preSaleExchangeMonth > 0)
     .map(g => g.preSaleExchangeMonth);
   const salesStart = presaleMonths.length > 0 ? Math.min(...presaleMonths) : 0;
 
@@ -743,15 +747,21 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     netGSTPayable: (gstOnMarginSchemeSupplies + gstOnStandardSupplies + gstWithholdingTotal) - totalGSTOnCosts,
   };
 
-  // GRV Summary
+  // GRV Summary (Table 11). Previously totalAptGRV filtered for revenueType
+  // === 'Residential' which produced $0 on any project where the user labelled
+  // residential items differently (e.g. "Apartments" in a mixed-use scheme).
+  // Now aggregates ALL GRV items so the Table 11 "Total Stock GRV" row never
+  // shows $0 when the project has revenue items. Unsold GRV is clamped at 0.
+  // (Melbourne UAT Dh1.)
   const totalAptGRV = inputs.grvItems
-    .filter(g => g.revenueType === 'Residential')
+    .filter(g => Number.isFinite(g.currentSalePrice) && g.currentSalePrice > 0)
     .reduce((s, g) => s + g.currentSalePrice, 0);
 
   // GRV sold/exchanged: items whose presale exchange month falls within the actuals window
   const lastActualPeriodNum = periods.reduce((last, p) => p.isActual ? Math.max(last, p.periodNumber) : last, 0);
   const grvSoldExchanged = inputs.grvItems
     .filter(g => g.preSaleExchangeMonth > 0 && g.preSaleExchangeMonth <= lastActualPeriodNum)
+    .filter(g => Number.isFinite(g.currentSalePrice) && g.currentSalePrice > 0)
     .reduce((s, g) => s + g.currentSalePrice, 0);
 
   return {
@@ -914,7 +924,9 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     grvSummary: {
       totalApartmentGRV: totalAptGRV,
       grvSoldExchanged: grvSoldExchanged,
-      unsoldGRV: totalAptGRV - grvSoldExchanged,
+      // Clamp at 0 — sold-but-not-yet-recognised stock can otherwise produce
+      // a negative "unsold" figure (UAT v2 #20 / Melbourne UAT Dh5).
+      unsoldGRV: Math.max(0, totalAptGRV - grvSoldExchanged),
     },
     peakExposure,
     ...(developmentCovenants ? { developmentCovenants } : {}),
