@@ -332,6 +332,17 @@ export function InternalDashboard() {
                     <td className="px-2 py-1 text-right font-mono">{formatCurrency(er.jvPartner.totalProfitShare)}</td>
                     <td className="px-2 py-1 text-right font-mono">{formatCurrency(er.developer.totalProfitShare)}</td>
                   </tr>
+                  {/* Memo row — feasibility (accounting) profit, distinct from
+                      the waterfall total above. Surfaced here so the user can
+                      still see the headline accounting figure (which can be
+                      negative on a loss-making project) without the table
+                      losing its column-sum invariant. */}
+                  <tr className="bg-gray-50 italic text-gray-600 border-t-2 border-blue-200">
+                    <td className="px-2 py-1">Memo: Feasibility Profit (accounting)</td>
+                    <td className="px-2 py-1 text-right font-mono">{formatCurrency(data.feasibility.totalProfit)}</td>
+                    <td className="px-2 py-1 text-right font-mono">—</td>
+                    <td className="px-2 py-1 text-right font-mono">—</td>
+                  </tr>
                 </tbody>
               </table>
             </div>

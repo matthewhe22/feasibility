@@ -841,20 +841,27 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       landToSettlementMonths: lastSettlement - (inputs.landLoan?.startMonth ?? 0),
     },
     equityReturns: {
+      // Total row must equal the sum of JV + Developer rows, otherwise
+      // Table 3 column sums don't add (UAT v2 issue #19). Previously this
+      // row used feasibilityProfit (revenue − costs) while the per-entity
+      // rows used waterfall sums — those are two different accounting
+      // objects. profitShareBalance / totalProfitShare now both report
+      // the waterfall total; feasibility profit is shown separately as a
+      // memo row in InternalDashboard Table 3.
       total: {
         entity: 'Total',
         fundingContribPercent: 1,
         totalEquityContributed: equityContrib,
         irr,
         equityRepatriation1st: 0,
-        equityRepatriation2nd: equityContrib,
-        totalEquityRepatriation: equityContrib,
+        equityRepatriation2nd: sum(funding.equityRepatriations),
+        totalEquityRepatriation: sum(funding.equityRepatriations),
         establishmentFee: 0,
         couponInterest: 0,
         couponInterestPercent: 0,
-        profitShareBalance: totalProfit,
+        profitShareBalance: sum(funding.profitDistributions),
         profitSharePercent: 1,
-        totalProfitShare: totalProfit,
+        totalProfitShare: sum(funding.profitDistributions),
       },
       jvPartner: {
         entity: 'JV Partner',
