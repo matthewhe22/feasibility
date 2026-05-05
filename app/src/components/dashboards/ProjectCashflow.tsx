@@ -8,6 +8,11 @@ type RowDef = {
   bold?: boolean;
   bg?: string;
   textColor?: string;
+  /** When true, the "Total" cell shows the LAST-PERIOD closing balance
+   *  rather than sum-of-monthlies. Use for outstanding-balance rows where
+   *  summing monthlies is meaningless (e.g. Senior Balance). UAT v2 #14 /
+   *  Melbourne UAT C2. */
+  closingBalance?: boolean;
 };
 
 const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
@@ -60,7 +65,7 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
       { label: 'Senior Repayment', getValue: c => c.seniorRepayment },
       { label: 'Senior Interest', getValue: c => c.seniorInterest },
       { label: 'Senior Line fee', getValue: c => c.seniorFees },
-      { label: 'Senior Balance', getValue: c => c.seniorBalance, bold: true, bg: 'bg-blue-50' },
+      { label: 'Senior Balance', closingBalance: true, getValue: c => c.seniorBalance, bold: true, bg: 'bg-blue-50' },
     ],
   },
   {
@@ -71,7 +76,7 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
       { label: 'Senior #2 Repayment', getValue: c => c.senior2Repayment },
       { label: 'Senior #2 Interest', getValue: c => c.senior2Interest },
       { label: 'Senior #2 Line fee', getValue: c => c.senior2Fees },
-      { label: 'Senior #2 Balance', getValue: c => c.senior2Balance, bold: true, bg: 'bg-blue-50' },
+      { label: 'Senior #2 Balance', closingBalance: true, getValue: c => c.senior2Balance, bold: true, bg: 'bg-blue-50' },
     ],
   },
   {
@@ -82,7 +87,7 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
       { label: 'Mezz Repayment', getValue: c => c.mezzRepayment },
       { label: 'Mezz Interest', getValue: c => c.mezzInterest },
       { label: 'Mezz Fees', getValue: c => c.mezzFees },
-      { label: 'Mezz Balance', getValue: c => c.mezzBalance, bold: true, bg: 'bg-teal-50' },
+      { label: 'Mezz Balance', closingBalance: true, getValue: c => c.mezzBalance, bold: true, bg: 'bg-teal-50' },
     ],
   },
   {
@@ -93,7 +98,7 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
       { label: 'Land Loan Repayment', getValue: c => c.landLoanRepayment },
       { label: 'Land Loan Interest', getValue: c => c.landLoanInterest },
       { label: 'Land Loan Fees', getValue: c => c.landLoanFees },
-      { label: 'Land Loan Balance', getValue: c => c.landLoanBalance, bold: true, bg: 'bg-orange-50' },
+      { label: 'Land Loan Balance', closingBalance: true, getValue: c => c.landLoanBalance, bold: true, bg: 'bg-orange-50' },
     ],
   },
   {
@@ -110,7 +115,7 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
     headerBg: 'bg-gray-700 text-white',
     rows: [
       { label: 'Net Cashflow', getValue: c => c.netCashflow, bold: true },
-      { label: 'Cumulative Cashflow', getValue: c => c.cumulativeCashflow, bold: true },
+      { label: 'Cumulative Cashflow', closingBalance: true, getValue: c => c.cumulativeCashflow, bold: true },
     ],
   },
 ];
@@ -135,6 +140,16 @@ export function ProjectCashflow() {
     if (total == null || isNaN(total) || total === 0) return '';
     const color = total < 0 ? 'text-red-600' : (textColor || 'text-gray-800');
     return <span className={`font-bold ${color}`}>{formatCurrency(total)}</span>;
+  };
+
+  // Closing-balance variant for outstanding-balance rows: shows the LAST
+  // non-zero period's balance, not the meaningless sum of monthly closing
+  // balances (UAT v2 #14 / Melbourne UAT C2). Header label is "Closing".
+  const fmtClosing = (getValue: (c: MonthlyCashflow) => number, textColor?: string) => {
+    const last = cf.length > 0 ? getValue(cf[cf.length - 1]!) : 0;
+    if (last == null || isNaN(last) || last === 0) return '';
+    const color = last < 0 ? 'text-red-600' : (textColor || 'text-gray-800');
+    return <span className={`font-bold ${color}`}>{formatCurrency(last)}</span>;
   };
 
   return (
@@ -184,7 +199,9 @@ export function ProjectCashflow() {
                       {row.label}
                     </td>
                     <td className={`px-1.5 py-0.5 text-right font-mono bg-gray-100 border-r border-gray-300 ${row.bold ? 'font-bold' : ''}`}>
-                      {fmtTotal(row.getValue, row.textColor)}
+                      {row.closingBalance
+                        ? fmtClosing(row.getValue, row.textColor)
+                        : fmtTotal(row.getValue, row.textColor)}
                     </td>
                     {cf.map(c => (
                       <td key={c.period.periodNumber} className={`px-1.5 py-0.5 text-right font-mono ${row.bold ? 'font-bold' : ''}`}>

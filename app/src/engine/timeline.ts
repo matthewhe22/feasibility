@@ -1,8 +1,18 @@
 import type { Period, AdminConfig, MainInputs } from '../types';
 import { excelDateToDate, addMonths, endOfMonth, daysBetween, formatMonthYear } from '../utils';
 
+/**
+ * Generate the period array used by the engine.
+ *
+ * Horizon = inputs.preliminary.projectSpanMonths exactly. The legacy +10
+ * buffer caused the cashflow tab to render 10 trailing zero-only months
+ * (UAT v2 issue #6 / Melbourne UAT C1). If a settlement or other event
+ * is configured beyond projectSpanMonths, the engine and dashboard already
+ * surface that as a Checks-tab "Last settlement month" finding rather than
+ * silently extending the horizon.
+ */
 export function generateTimeline(admin: AdminConfig, inputs: MainInputs): Period[] {
-  const totalPeriods = inputs.preliminary.projectSpanMonths + 10; // extra buffer
+  const totalPeriods = Math.max(1, inputs.preliminary.projectSpanMonths);
   const firstPeriodDate = excelDateToDate(inputs.preliminary.dateOfFirstPeriod);
   const lastActualsDate = excelDateToDate(admin.lastActualsPeriod);
   const periods: Period[] = [];
