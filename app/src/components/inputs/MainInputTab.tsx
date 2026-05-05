@@ -1218,15 +1218,6 @@ export function MainInputTab() {
                 <option value="none">None (defer until spend)</option>
               </select>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-gray-600 w-40 shrink-0" title="Target minimum DSCR (Debt Service Coverage Ratio). Lenders typically require 1.25x.">DSCR Target</span>
-              <input type="number" min={0} max={5} step={0.05}
-                value={admin.dscrTarget ?? 1.25}
-                onChange={e => setAdmin({ dscrTarget: parseFloat(e.target.value) || 1.25 })}
-                className="w-20 text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
-              />
-              <span className="text-xs text-gray-400">× (1.25 standard)</span>
-            </div>
           </div>
         </div>
       )}

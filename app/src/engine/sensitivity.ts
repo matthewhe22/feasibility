@@ -90,7 +90,7 @@ function extractResult(variable: string, delta: number, data: DashboardData): Se
     irr: data.kpis.irr,
     cashOnCash: data.kpis.totalCashOnCash,
     roi: data.kpis.roi,
-    peakDebt: data.dscr?.peakDebt ?? 0,
+    peakDebt: data.peakExposure.peakDebt,
   };
 }
 

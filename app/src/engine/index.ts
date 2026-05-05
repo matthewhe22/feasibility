@@ -1,6 +1,6 @@
 import type {
   AdminConfig, MainInputs, DashboardData, MonthlyCashflow,
-  GSTCompliance, DSCRSummary, DevelopmentCovenants, FacilityType,
+  GSTCompliance, PeakExposure, DevelopmentCovenants, FacilityType,
   CalculationWarning, SolverDiagnostics,
 } from '../types';
 import { generateTimeline } from './timeline';
@@ -650,50 +650,19 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     }
   }
 
-  // ===== DSCR (Debt Service Coverage Ratio) =====
-  // Monthly DSC = operating cashflow before finance / debt service (interest + fees + repayments).
-  // Annual DSCR is averaged over rolling 12-month windows where debt service > 0.
-  const monthlyOperating = cashflows.map(cf =>
-    cf.grvSettlements + cf.rentalIncome + cf.otherIncome
-    - cf.landCosts - cf.acquisitionCosts - cf.developmentCosts - cf.constructionCosts
-    - cf.contingency - cf.marketingCosts - cf.otherStandardCosts - cf.pmFees
-    - cf.sellingCostsFrontEnd - cf.sellingCostsBackEnd - cf.otherFinancingCosts
-  );
-  const monthlyDebtService = cashflows.map(cf =>
-    cf.landLoanInterest + cf.landLoanFees + cf.landLoanRepayment
-    + cf.seniorInterest + cf.seniorFees + cf.seniorRepayment
-    + cf.senior2Interest + cf.senior2Fees + cf.senior2Repayment
-    + cf.mezzInterest + cf.mezzFees + cf.mezzRepayment
-  );
-  const dscrRatios: number[] = [];
-  for (let i = 0; i < cashflows.length; i++) {
-    const ds = monthlyDebtService[i] ?? 0;
-    if (ds > 1) {
-      const op = monthlyOperating[i] ?? 0;
-      const ratio = op / ds;
-      if (Number.isFinite(ratio)) dscrRatios.push(ratio);
-    }
-  }
-  const dscrTarget = admin.dscrTarget ?? 1.25;
-  const averageDSCR = dscrRatios.length > 0 ? sum(dscrRatios) / dscrRatios.length : 0;
-  const minimumDSCR = dscrRatios.length > 0 ? Math.min(...dscrRatios) : 0;
-  const dscr: DSCRSummary = {
-    averageDSCR,
-    minimumDSCR,
-    targetDSCR: dscrTarget,
-    meetsTarget: minimumDSCR >= dscrTarget,
+  // ===== PEAK EXPOSURE =====
+  // Peak debt / peak equity / peak-equity month are reported regardless of
+  // facility type; LVR / LTC covenants live on `developmentCovenants` below.
+  const peakExposure: PeakExposure = {
     peakDebt: funding.peakDebt,
     peakEquity: funding.peakEquity,
     peakEquityMonth: funding.peakEquityMonth,
   };
 
-  // ===== DEVELOPMENT-LOAN COVENANTS (Table 12 alternative) =====
-  // DSCR is not a meaningful covenant on a development loan — peak senior /
-  // GRV (LVR) and peak debt / total cost (LTC) are. Compute these whenever
-  // the senior facility is a development loan; the dashboard will then show
-  // these rows on Table 12 instead of (or alongside) the DSCR rows.
-  // Defaults to 'development' for senior/mezz/land facilities and
-  // 'investment' for residual-stock per store/defaults.ts. Saved projects
+  // ===== DEVELOPMENT-LOAN COVENANTS (Table 12) =====
+  // LVR (peak senior / GRV) + LTC (peak debt / total cost) + peak senior vs
+  // facility limit. Defaults to 'development' for senior/mezz/land and
+  // 'investment' for residual-stock per store/defaults.ts; saved projects
   // without facilityType are treated as 'development' (back-compat).
   const seniorTypeRaw = inputs.seniorFacility?.facilityType;
   const seniorType: FacilityType = seniorTypeRaw ?? 'development';
@@ -938,7 +907,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       grvSoldExchanged: grvSoldExchanged,
       unsoldGRV: totalAptGRV - grvSoldExchanged,
     },
-    dscr,
+    peakExposure,
     ...(developmentCovenants ? { developmentCovenants } : {}),
     gstCompliance,
     cashflows,

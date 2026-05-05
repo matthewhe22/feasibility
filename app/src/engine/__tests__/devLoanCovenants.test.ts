@@ -1,13 +1,9 @@
 /**
- * Regression tests for UAT v2 Rule 1: DSCR is not a covenant on a development
- * loan. The Internal Dashboard Table 12 used to show DSCR Target / Avg / Min /
- * Target Met for every project. For a pre-revenue development loan that's
- * structurally meaningless — the table now shows LVR / LTC / peak-debt
- * covenants when the senior facility's facilityType is 'development'.
- *
- * This test exercises the engine side: developmentCovenants populated for a
- * 'development' senior, omitted for an 'investment' or 'residual-stock'
- * senior, and the LVR / LTC math.
+ * Regression tests for the development-loan covenant block (LVR / LTC / peak
+ * senior vs facility limit). DSCR has been removed wholesale; this test
+ * exercises that developmentCovenants is populated for a 'development'
+ * senior and omitted for an 'investment' / 'residual-stock' senior, plus the
+ * LVR / LTC math.
  *
  * Run: cd app && npx tsx src/engine/__tests__/devLoanCovenants.test.ts
  */
@@ -39,7 +35,6 @@ const baseAdmin: AdminConfig = {
   manualSCurves: [[], [], []],
   buildSCurves: {},
   contingencyGSTMode: 'none',
-  dscrTarget: 1.25,
 };
 
 function makeInputs(seniorType: FacilityType | undefined): MainInputs {
@@ -129,9 +124,9 @@ function makeInputs(seniorType: FacilityType | undefined): MainInputs {
   const result = runCalculations(baseAdmin, makeInputs('residual-stock'));
   assert(result.developmentCovenants === undefined,
     'developmentCovenants OMITTED when seniorFacility.facilityType === "residual-stock"');
-  // DSCR table is still available for that case (legacy path)
-  assert(result.dscr !== undefined,
-    'DSCR summary still available so the dashboard can fall back to the legacy table');
+  // Peak exposure (peakDebt/peakEquity/peakEquityMonth) is still always emitted.
+  assert(typeof result.peakExposure?.peakDebt === 'number',
+    'peakExposure still emitted regardless of facility type (replaces removed DSCR summary)');
 }
 
 // ── 3. investment senior → developmentCovenants omitted ────────────────────
