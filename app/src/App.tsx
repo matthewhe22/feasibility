@@ -183,7 +183,52 @@ function App() {
   const appTitle = admin.appName || 'Pencil — Feasibility Engine';
 
   useEffect(() => {
-    document.title = admin.projectName ? `${admin.projectName} — ${appTitle}` : appTitle;
+    document.title = admin.projectName
+      ? `${admin.projectName} — ${appTitle} | Property Development Feasibility`
+      : `${appTitle} | Property Development Feasibility, Cashflow & IRR`;
+
+    const desc = admin.projectName
+      ? `${admin.projectName} feasibility — monthly cashflow, senior debt, GST, IRR and equity waterfall modelled in Pencil.`
+      : 'Pencil is a browser-based property development feasibility engine. Model land, construction, GST, senior debt, IRR and equity waterfalls with Australian QS-grade accuracy.';
+    let descMeta = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+    if (!descMeta) {
+      descMeta = document.createElement('meta');
+      descMeta.name = 'description';
+      document.head.appendChild(descMeta);
+    }
+    descMeta.content = desc;
+
+    let ogTitle = document.querySelector<HTMLMetaElement>('meta[property="og:title"]');
+    if (!ogTitle) {
+      ogTitle = document.createElement('meta');
+      ogTitle.setAttribute('property', 'og:title');
+      document.head.appendChild(ogTitle);
+    }
+    ogTitle.content = document.title;
+
+    let ogDesc = document.querySelector<HTMLMetaElement>('meta[property="og:description"]');
+    if (!ogDesc) {
+      ogDesc = document.createElement('meta');
+      ogDesc.setAttribute('property', 'og:description');
+      document.head.appendChild(ogDesc);
+    }
+    ogDesc.content = desc;
+
+    let twDesc = document.querySelector<HTMLMetaElement>('meta[name="twitter:description"]');
+    if (!twDesc) {
+      twDesc = document.createElement('meta');
+      twDesc.name = 'twitter:description';
+      document.head.appendChild(twDesc);
+    }
+    twDesc.content = desc;
+
+    let canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+    if (!canonical) {
+      canonical = document.createElement('link');
+      canonical.rel = 'canonical';
+      document.head.appendChild(canonical);
+    }
+    canonical.href = `${window.location.origin}${window.location.pathname}`;
   }, [appTitle, admin.projectName]);
 
   useEffect(() => {

@@ -9,6 +9,16 @@ import { AdminApp } from './admin/AdminApp.tsx'
 // Vercel's SPA rewrite rule ensures all paths serve this file.
 const isAdminRoute = window.location.pathname.startsWith('/admin');
 
+if (isAdminRoute) {
+  // Defence-in-depth: robots.txt disallows /admin, but we also emit a
+  // page-level noindex in case a crawler follows a stray inbound link.
+  const robots = document.createElement('meta');
+  robots.name = 'robots';
+  robots.content = 'noindex,nofollow,noarchive';
+  document.head.appendChild(robots);
+  document.title = 'Admin — Pencil';
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {isAdminRoute ? <AdminApp /> : <App />}

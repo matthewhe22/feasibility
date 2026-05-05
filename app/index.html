@@ -1,13 +1,94 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-AU">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>app</title>
+    <meta name="theme-color" content="#0E1012" />
+    <meta name="color-scheme" content="light" />
+
+    <!-- Primary SEO -->
+    <title>Pencil — Property Development Feasibility Engine | Cashflow, IRR &amp; Debt Modelling</title>
+    <meta name="description" content="Pencil is a browser-based property development feasibility engine. Model land, construction, GST, senior debt, IRR and equity waterfalls with Australian QS-grade accuracy — no spreadsheets required." />
+    <meta name="keywords" content="property development feasibility, real estate feasibility model, development cashflow, IRR calculator, debt sizing, GST margin scheme, senior debt waterfall, Australian property development, residual land value, capital stack, equity waterfall, peak debt, Pencil feasibility" />
+    <meta name="author" content="Pencil" />
+    <meta name="application-name" content="Pencil — Feasibility Engine" />
+    <meta name="generator" content="Pencil" />
+    <meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large,max-video-preview:-1" />
+    <meta name="googlebot" content="index,follow" />
+    <link rel="canonical" href="https://pencil-feasibility.vercel.app/" />
+
+    <!-- Icons & PWA -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-title" content="Pencil" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- Open Graph / Facebook / LinkedIn -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Pencil — Feasibility Engine" />
+    <meta property="og:title" content="Pencil — Property Development Feasibility Engine" />
+    <meta property="og:description" content="Browser-based property development feasibility — model land, construction, GST, senior debt, IRR and equity waterfalls with Australian QS-grade accuracy." />
+    <meta property="og:url" content="https://pencil-feasibility.vercel.app/" />
+    <meta property="og:locale" content="en_AU" />
+    <meta property="og:image" content="/og-image.svg" />
+    <meta property="og:image:type" content="image/svg+xml" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Pencil — Property Development Feasibility Engine" />
+
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Pencil — Property Development Feasibility Engine" />
+    <meta name="twitter:description" content="Browser-based property development feasibility — model land, construction, GST, senior debt, IRR and equity waterfalls with Australian QS-grade accuracy." />
+    <meta name="twitter:image" content="/og-image.svg" />
+    <meta name="twitter:image:alt" content="Pencil — Property Development Feasibility Engine" />
+
+    <!-- Preconnects for fonts referenced in CSS (IBM Plex Sans / Mono) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <!-- Structured data: SoftwareApplication -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Pencil — Feasibility Engine",
+      "alternateName": "Pencil Feasibility",
+      "applicationCategory": "FinanceApplication",
+      "applicationSubCategory": "Property Development Feasibility",
+      "operatingSystem": "Web",
+      "browserRequirements": "Requires JavaScript and a modern evergreen browser (Chrome, Edge, Safari, Firefox).",
+      "url": "https://pencil-feasibility.vercel.app/",
+      "image": "https://pencil-feasibility.vercel.app/og-image.svg",
+      "description": "Pencil is a browser-based property development feasibility engine for modelling land, construction, GST, senior debt, IRR and equity waterfalls with Australian QS-grade accuracy.",
+      "inLanguage": "en-AU",
+      "isAccessibleForFree": true,
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "AUD"
+      },
+      "featureList": [
+        "Monthly cashflow modelling with S-curve cost spreading",
+        "Senior debt sizing with circular-reference convergence solver",
+        "GST margin scheme, ITC recovery and vendor withholding (s.72-55)",
+        "IRR, ROI, Cash-on-Cash, DSCR and peak equity metrics",
+        "Configurable line-fee basis (peak-drawn / committed-limit / undrawn)",
+        "Internal and external dashboards with capital stack and exit waterfall",
+        "Sensitivity analysis on construction, GRV, contingency and timeline"
+      ]
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      Pencil Feasibility Engine requires JavaScript. Please enable JavaScript in your browser to model property development cashflows, debt and IRR.
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

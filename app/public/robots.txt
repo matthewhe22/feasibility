@@ -1,0 +1,15 @@
+# Pencil — Feasibility Engine
+# Public marketing surface is indexable; the admin portal is not.
+
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+
+# Common crawl-trap query strings
+Disallow: /*?*utm_
+Disallow: /*?*fbclid=
+Disallow: /*?*gclid=
+
+Sitemap: https://pencil-feasibility.vercel.app/sitemap.xml
