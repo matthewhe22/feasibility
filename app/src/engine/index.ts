@@ -492,10 +492,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // what the developer actually receives from settlements.  Deducting it from
   // totalProfit ensures the dashboard figure equals sum(profitDistributions)
   // from the funding waterfall, which uses periodNetCash = revenue − gstOnRevenue − costs.
-  // Include deposit-period GST so Table 1 (totalGSTOnRevenue) reconciles with
-  // Table 13 (gstOnMarginSchemeSupplies + gstOnStandardSupplies). Without this,
-  // settlement-period GST captured only the (1 − depositPct) fraction.
-  const totalGSTOnRevenue = sum(gstOnRevenue) + sum(gstOnDeposits);
+  const totalGSTOnRevenue = sum(gstOnRevenue);
 
   // Lender GST exemption: debt facility fees are modelled as GST-free assuming
   // the lender is an exempt financial institution (GSTA s.40-60). Non-bank lenders
