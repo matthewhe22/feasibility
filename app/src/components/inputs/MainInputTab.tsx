@@ -1344,7 +1344,7 @@ export function MainInputTab() {
               mode="construction"
               currentTotal={inputs.constructionCosts.reduce((s, c) => s + c.totalCosts, 0)}
               currentRate={
-                inputs.constructionCosts.length > 0 && inputs.constructionCosts[0].units > 0
+                inputs.constructionCosts[0] && inputs.constructionCosts[0].units > 0
                   ? inputs.constructionCosts[0].baseRate
                   : undefined
               }

@@ -306,13 +306,13 @@ export interface GRVBenchmarkInputs {
   /** Year for which the price is wanted (e.g. 2025 = today, 2028 = projected) */
   targetYear: number;
   /** Optional: m² per unit (only required for $/m² bases). */
-  unitArea?: number;
+  unitArea?: number | undefined;
   /** Optional: number of units / keys / lots. */
-  units?: number;
+  units?: number | undefined;
   /** Optional: total saleable area (overrides unitArea × units when provided). */
-  totalSaleableArea?: number;
+  totalSaleableArea?: number | undefined;
   /** Optional: override annual escalation rate (decimal). */
-  customEscalation?: number;
+  customEscalation?: number | undefined;
 }
 
 export interface GRVBenchmarkResult {

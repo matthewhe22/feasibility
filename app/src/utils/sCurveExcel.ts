@@ -172,7 +172,7 @@ function buildBuildSheet(
     styleRef(row.getCell(1));
     for (let c = 2; c <= totalCols; c++) {
       const dur = durations[c - 2];
-      if (m < dur) {
+      if (dur !== undefined && m < dur) {
         styleEditable(row.getCell(c));
       } else {
         // Grey out months beyond this build duration
@@ -228,8 +228,8 @@ export async function downloadSCurveTemplate(admin: AdminConfig): Promise<void> 
 // ─── Public: parse uploaded file ─────────────────────────────────────────────
 
 export interface SCurveParseResult {
-  manualSCurves?: number[][];
-  buildSCurves?: Record<number, number[]>;
+  manualSCurves?: number[][] | undefined;
+  buildSCurves?: Record<number, number[]> | undefined;
   warnings: string[];
 }
 
@@ -253,7 +253,7 @@ export async function parseSCurveFile(file: File): Promise<SCurveParseResult> {
       for (let ci = 0; ci < 3; ci++) {
         const v = row.getCell(ci + 2).value;
         const num = typeof v === 'number' ? v : parseFloat(String(v ?? '0'));
-        curves[ci].push(isNaN(num) ? 0 : Math.max(0, num));
+        curves[ci]?.push(isNaN(num) ? 0 : Math.max(0, num));
       }
     });
     // Only include curves that have any non-zero data
@@ -279,7 +279,7 @@ export async function parseSCurveFile(file: File): Promise<SCurveParseResult> {
       headerRow.eachCell((cell, colNum) => {
         if (colNum === 1) return;
         const m = String(cell.value ?? '').match(/^(\d+)\s*Month\s*Build$/i);
-        if (m) colMap.push({ colIdx: colNum, duration: parseInt(m[1]) });
+        if (m && m[1]) colMap.push({ colIdx: colNum, duration: parseInt(m[1]) });
       });
 
       if (colMap.length > 0) {
@@ -295,17 +295,17 @@ export async function parseSCurveFile(file: File): Promise<SCurveParseResult> {
           for (const { colIdx, duration } of colMap) {
             const v = row.getCell(colIdx).value;
             const num = typeof v === 'number' ? v : parseFloat(String(v ?? '0'));
-            curves[duration].push(isNaN(num) ? 0 : Math.max(0, num));
+            curves[duration]?.push(isNaN(num) ? 0 : Math.max(0, num));
           }
         });
 
         // Keep only curves with data
         const validCurves: Record<number, number[]> = {};
         for (const { duration } of colMap) {
-          if (curves[duration].some(w => w > 0)) {
+          const curve = curves[duration];
+          if (curve && curve.some(w => w > 0)) {
             // Trim trailing zeros to the actual build duration
-            const arr = curves[duration].slice(0, duration);
-            validCurves[duration] = arr;
+            validCurves[duration] = curve.slice(0, duration);
           }
         }
 

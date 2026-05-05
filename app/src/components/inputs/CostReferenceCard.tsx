@@ -21,8 +21,8 @@ type Mode = 'construction' | 'professional';
 interface CostReferenceCardProps {
   mode: Mode;
   defaultGFA?: number;
-  currentTotal?: number;
-  currentRate?: number;
+  currentTotal?: number | undefined;
+  currentRate?: number | undefined;
   defaultUnits?: number;
   defaultState?: State;
 }
@@ -258,8 +258,8 @@ interface ConstructionPanelProps {
   siteComplexity: SiteComplexity; setSiteComplexity: (s: SiteComplexity) => void;
   gfa: number;                    setGfa: (n: number) => void;
   units: number;                  setUnits: (n: number) => void;
-  currentTotal?: number;
-  currentRate?: number;
+  currentTotal?: number | undefined;
+  currentRate?: number | undefined;
   benchmark: ReturnType<typeof computeConstructionBenchmark>;
   variancePct: number | null;
 }
