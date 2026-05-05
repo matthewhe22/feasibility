@@ -520,7 +520,6 @@ export interface EquityReturnSummary {
  * Covenant summary for a development loan. Surfaced on Table 12. LVR (peak
  * senior / GRV), LTC (peak debt / total cost) and peak senior vs facility
  * limit are the relevant covenants for a pre-revenue construction project —
- * DSCR is not, and is no longer computed by the engine.
  */
 export interface DevelopmentCovenants {
   /** Peak senior debt balance / total GRV. */
@@ -548,9 +547,9 @@ export interface DevelopmentCovenants {
 }
 
 /**
- * Peak debt / equity exposure summary. Replaces the legacy DSCRSummary struct
- * for the "Peak Exposure" portion of Table 12; the ratio rows are now in
- * DevelopmentCovenants.
+ * Peak debt / equity / peak-equity-month exposure summary. Always emitted
+ * by the engine; surfaced on Table 12 alongside the LVR / LTC covenants
+ * (in DevelopmentCovenants).
  */
 export interface PeakExposure {
   /** Peak aggregate debt balance reached across all facilities */
@@ -642,8 +641,8 @@ export interface DashboardData {
   };
   /** Peak debt / equity / peak-month exposure. Always populated. */
   peakExposure: PeakExposure;
-  /** LVR / LTC / facility-limit covenants. Populated for every project; the
-   *  dashboard surfaces these on Table 12 in place of the removed DSCR rows. */
+  /** LVR / LTC / facility-limit covenants. Populated when the senior facility
+   *  is a development loan; surfaced on Table 12. */
   developmentCovenants?: DevelopmentCovenants;
   gstCompliance?: GSTCompliance;
   cashflows: MonthlyCashflow[];

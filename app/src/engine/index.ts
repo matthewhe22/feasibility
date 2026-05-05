@@ -217,18 +217,24 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     (s, g) => s + (Number.isFinite(g.currentSalePrice) && g.currentSalePrice > 0 ? g.currentSalePrice : 0),
     0,
   );
-  const totalGSTIncludedGRV = inputs.grvItems
-    .filter(g => g.gstIncluded && Number.isFinite(g.currentSalePrice) && g.currentSalePrice > 0)
+  // Margin-scheme supplies — routed by revenueType in resolveSupplyType so a
+  // Commercial Office / Retail / Hotel item is NOT silently coerced into the
+  // margin scheme just because gstIncluded is true.
+  const marginSchemeGRV = inputs.grvItems
+    .filter(g => Number.isFinite(g.currentSalePrice) && g.currentSalePrice > 0)
+    .filter(g => resolveSupplyType(g) === 'margin-scheme')
     .reduce((s, g) => s + g.currentSalePrice, 0);
-  const nonGSTGRV = Math.max(0, totalGRVAllItems - totalGSTIncludedGRV);
   const landPriceFinite = Number.isFinite(inputs.landPurchase.landPurchasePrice)
     ? Math.max(0, inputs.landPurchase.landPurchasePrice)
     : 0;
+  // Land cost apportioned to margin-scheme supplies under Division 75 / GSTR
+  // 2006/1: land × (margin-scheme GRV / total GRV). Capped at the margin-scheme
+  // GRV itself so the taxable margin can never go negative.
   const marginSchemeDeduction = totalGRVAllItems > 0
-    ? landPriceFinite * nonGSTGRV / totalGRVAllItems
+    ? Math.min(marginSchemeGRV, landPriceFinite * marginSchemeGRV / totalGRVAllItems)
     : 0;
-  const marginSchemeFactor = totalGSTIncludedGRV > 0
-    ? Math.max(0, 1 - marginSchemeDeduction / totalGSTIncludedGRV)
+  const marginSchemeFactor = marginSchemeGRV > 0
+    ? Math.max(0, 1 - marginSchemeDeduction / marginSchemeGRV)
     : 1;
   if (totalGRVAllItems === 0 && inputs.grvItems.length > 0) {
     localWarnings.push(
@@ -391,7 +397,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     grvDeposits: at(deposits, i),
     rentalIncome: at(rentalInc, i),
     otherIncome: at(otherInc, i),
-    gstOnRevenue: at(gstOnRevenue, i),
+    gstOnRevenue: at(gstOnRevenue, i) + at(gstOnDeposits, i),
     gstOnDeposits: at(gstOnDeposits, i),
     gstWithholding: at(gstWithholding, i),
     landLoanDrawdown: at(funding.landLoanDrawdowns, i),
@@ -486,7 +492,10 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // what the developer actually receives from settlements.  Deducting it from
   // totalProfit ensures the dashboard figure equals sum(profitDistributions)
   // from the funding waterfall, which uses periodNetCash = revenue − gstOnRevenue − costs.
-  const totalGSTOnRevenue = sum(gstOnRevenue);
+  // Include deposit-period GST so Table 1 (totalGSTOnRevenue) reconciles with
+  // Table 13 (gstOnMarginSchemeSupplies + gstOnStandardSupplies). Without this,
+  // settlement-period GST captured only the (1 − depositPct) fraction.
+  const totalGSTOnRevenue = sum(gstOnRevenue) + sum(gstOnDeposits);
 
   // Lender GST exemption: debt facility fees are modelled as GST-free assuming
   // the lender is an exempt financial institution (GSTA s.40-60). Non-bank lenders
