@@ -359,37 +359,27 @@ export function ChecksTab() {
   }
 
   // ── 10. PM FEE RATE CHECK ────────────────────────────────────────────────────
+  // Aligns with the engine's iterative converge: engine writes f.pmFee and
+  // spreads it across the cashflow PM Fees row. Both should sum to the same
+  // figure. The previous version of this check ran a manual formula that
+  // excluded capitalised finance costs from the base, which the engine
+  // includes — producing a spurious +$389K WARN on the Melbourne UAT
+  // (Ch1 finding). The current check is the real cross-section invariant.
   {
-    // Read the PM-fee rate from the dedicated feeRatePercent field — must
-    // match engine/index.ts. Fallback to 0.02 (2%) for legacy projects whose
-    // pmFees[0] does not yet have feeRatePercent set.
     const rawPmRate = inputs.pmFees[0]?.feeRatePercent;
     const pmRate = (typeof rawPmRate === 'number' && rawPmRate > 0 && rawPmRate < 1)
       ? rawPmRate : 0.02;
-    const expectedPMFee = pmRate * (
-      sum(inputs.landPurchase.paymentStages.map(s =>
-        s.percentOfLand > 0 ? s.percentOfLand * inputs.landPurchase.landPurchasePrice : s.amount
-      )) +
-      inputs.landPurchase.prsvUplift +
-      sum(inputs.landPurchase.acquisitionCosts.map(a => a.amount)) +
-      sum(inputs.developmentCosts.map(c => c.totalCosts)) +
-      sum(inputs.constructionCosts.map(c => c.totalCosts)) +
-      f.contingency +
-      sum(inputs.marketingCosts.map(c => c.totalCosts)) +
-      sum(inputs.otherStandardCosts.map(c => c.totalCosts)) +
-      sum(inputs.otherFinancingCosts.map(c => c.totalCosts)) +
-      f.salesCommissions
-    );
-    const variance = f.pmFee - expectedPMFee;
+    const cashflowPMTotal = sum(cf.map(c => c.pmFees));
+    const variance = cashflowPMTotal - f.pmFee;
     checks.push({
       id: 'pm-fee',
       category: 'Costs',
-      description: `PM Fee = ${formatPercent(pmRate)} × eligible costs`,
-      expected: formatCurrency(expectedPMFee),
-      actual: formatCurrency(f.pmFee),
+      description: `PM Fee — cashflow sums match feasibility total`,
+      expected: formatCurrency(f.pmFee),
+      actual: formatCurrency(cashflowPMTotal),
       variance: formatCurrency(variance),
-      status: near(f.pmFee, expectedPMFee, 1000) ? 'PASS' : 'WARN',
-      notes: `PM fee rate: ${formatPercent(pmRate)}. Applied to all costs including selling commissions, excluding PM fee itself.`,
+      status: near(cashflowPMTotal, f.pmFee, 1000) ? 'PASS' : 'WARN',
+      notes: `PM fee rate ${formatPercent(pmRate)} applied to total non-PM costs (incl. capitalised finance costs and GST on those costs) per engine/index.ts.`,
     });
   }
 

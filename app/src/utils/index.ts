@@ -32,8 +32,15 @@ export function formatMillions(value: number, decimals = 1): string {
   return `$${(value / 1_000_000).toFixed(decimals)}M`;
 }
 
-// Format percentage
+// Format percentage. Values outside ±999% are clipped for display so an
+// IRR solver that diverges (e.g. 5e+42% on a loss-making project — UAT v2 #17 /
+// Melbourne UAT Dh3) never produces an unreadable e+N display. The underlying
+// numeric value is unchanged for any downstream calculation.
 export function formatPercent(value: number, decimals = 2): string {
+  if (!Number.isFinite(value)) return 'N/A';
+  const CLIP = 9.99;        // ±999% in decimal
+  if (value >  CLIP) return `>${(CLIP * 100).toFixed(decimals)}%`;
+  if (value < -CLIP) return `<-${(CLIP * 100).toFixed(decimals)}%`;
   return `${(value * 100).toFixed(decimals)}%`;
 }
 

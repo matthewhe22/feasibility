@@ -47,7 +47,6 @@ const baseAdmin: AdminConfig = {
   manualSCurves: [[], [], []],
   buildSCurves: {},
   contingencyGSTMode: 'none',
-  dscrTarget: 1.25,
 };
 
 // Profitable scenario — $20M GRV, $10M build cost, no GST → ~$10M profit.

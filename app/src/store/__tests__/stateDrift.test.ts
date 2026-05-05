@@ -59,7 +59,6 @@ function buildAdmin(name: string): AdminConfig {
     sCurveOptions: ['Evenly Split'],
     manualSCurves: [[], [], []],
     buildSCurves: {},
-    dscrTarget: 1.25,
   };
 }
 

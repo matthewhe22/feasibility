@@ -86,7 +86,6 @@ const defaultAdmin: AdminConfig = {
   itcRecoveryLagMonths: 0,
   applyGSTWithholding: false,
   contingencyGSTMode: 'full',
-  dscrTarget: 1.25,
 };
 
 const defaultInputs: MainInputs = {
@@ -212,7 +211,8 @@ export const useStore = create<AppState>()(
       // v3 = PM fee rate moved from `pmFees[0].units` (overloaded with the
       //      generic Units column) to a dedicated `pmFees[0].feeRatePercent`
       //      field. See engine/index.ts and the v2-UAT P0 PM-Fee bug.
-      version: 3,
+      // v4 = removed `dscrTarget` from AdminConfig — DSCR removed wholesale.
+      version: 4,
       migrate: (persisted, version) => {
         const p = persisted as Record<string, unknown> | null;
         if (!p || typeof p !== 'object') return p;
@@ -222,6 +222,11 @@ export const useStore = create<AppState>()(
           delete inputs.additionalLoan1;
           delete inputs.additionalLoan2;
           delete inputs.additionalLoan3;
+        }
+        if (version < 4 && p.admin && typeof p.admin === 'object') {
+          // v3→v4: drop the legacy `dscrTarget` field from AdminConfig.
+          // The engine no longer reads it; merge() also strips it defensively.
+          delete (p.admin as Record<string, unknown>).dscrTarget;
         }
         if (version < 3 && p.inputs && typeof p.inputs === 'object') {
           // Migrate the legacy PM-fee rate. We only adopt the legacy `units`
@@ -264,13 +269,16 @@ export const useStore = create<AppState>()(
       // (in case migrate is bypassed by a stale schema version on disk).
       merge: (persisted, current) => {
         const p = persisted as Partial<AppState>;
-        const legacyKeys = ['seniorFacility3', 'additionalLoan1', 'additionalLoan2', 'additionalLoan3'];
+        const legacyInputKeys = ['seniorFacility3', 'additionalLoan1', 'additionalLoan2', 'additionalLoan3'];
         const cleanInputs = { ...(p.inputs ?? {}) } as Record<string, unknown>;
-        for (const k of legacyKeys) delete cleanInputs[k];
+        for (const k of legacyInputKeys) delete cleanInputs[k];
+        // v4: drop legacy `dscrTarget` from admin.
+        const cleanAdmin = { ...(p.admin ?? {}) } as Record<string, unknown>;
+        delete cleanAdmin.dscrTarget;
         return {
           ...current,
           ...p,
-          admin: { ...current.admin, ...(p.admin ?? {}) },
+          admin: { ...current.admin, ...cleanAdmin } as typeof current.admin,
           inputs: { ...current.inputs, ...cleanInputs } as typeof current.inputs,
         };
       },

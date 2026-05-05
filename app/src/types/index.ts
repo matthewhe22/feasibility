@@ -184,16 +184,14 @@ export interface EquityConfig {
 export type LineFeeBasis = 'peak-drawn' | 'committed-limit' | 'undrawn-commitment';
 
 /**
- * Loan product type. Drives whether the Internal Dashboard shows DSCR-as-covenant
- * (only meaningful for term/investment lending against operating cashflow) or
- * LVR / LTC / peak-debt covenants (the lending tests for a development loan).
+ * Loan product type. Drives the dashboard covenant view (LVR / LTC / peak debt
+ * vs facility limit for a development loan; differentiated targets for residual
+ * stock / investment facilities).
  *
  *  - 'development': construction or pre-revenue facility — sized by feasibility,
  *    LVR (peak senior / GRV), LTC (peak debt / total cost) and peak debt vs
- *    facility limit. DSCR during construction is structurally negative and is
- *    NOT an underwriting gate (UAT v2 Rule 1 violation).
- *  - 'investment' / 'residual-stock': revenue-generating term loan — DSCR is
- *    the relevant covenant.
+ *    facility limit.
+ *  - 'investment' / 'residual-stock': term / hold facility against built stock.
  */
 export type FacilityType = 'development' | 'investment' | 'residual-stock';
 
@@ -254,8 +252,6 @@ export interface AdminConfig {
   contingencyGSTMode?: 'none' | 'full';
   /** Equity drawdown mode: 'equity-first' draws all equity before any senior; 'pro-rata' draws equity and senior simultaneously at a fixed ratio */
   equityDrawdownMode?: 'equity-first' | 'pro-rata';
-  /** Annual DSCR target threshold (e.g. 1.25). Used for dashboard reporting only. */
-  dscrTarget?: number;
   /** Branding: custom application title shown in header and browser tab */
   appName?: string | undefined;
   /** Branding: base64-encoded logo image (data URL) displayed in header top-left */
@@ -521,15 +517,9 @@ export interface EquityReturnSummary {
 }
 
 /**
- * Debt Service Coverage Ratio summary.
- * DSCR = Operating Cashflow before Finance / Debt Service (interest + scheduled principal).
- * Lenders typically require DSCR ≥ 1.25x.
- */
-/**
- * Covenant summary for a development loan. Surfaced on Table 12 in place of
- * DSCR rows when the senior facility's facilityType is 'development', because
- * DSCR is not a meaningful covenant on a pre-revenue construction project.
- * UAT v2 Rule 1 violation fix.
+ * Covenant summary for a development loan. Surfaced on Table 12. LVR (peak
+ * senior / GRV), LTC (peak debt / total cost) and peak senior vs facility
+ * limit are the relevant covenants for a pre-revenue construction project —
  */
 export interface DevelopmentCovenants {
   /** Peak senior debt balance / total GRV. */
@@ -556,14 +546,15 @@ export interface DevelopmentCovenants {
   withinSeniorLimit: boolean;
 }
 
-export interface DSCRSummary {
-  averageDSCR: number;
-  minimumDSCR: number;
-  targetDSCR: number; // from admin.dscrTarget
-  meetsTarget: boolean;
+/**
+ * Peak debt / equity / peak-equity-month exposure summary. Always emitted
+ * by the engine; surfaced on Table 12 alongside the LVR / LTC covenants
+ * (in DevelopmentCovenants).
+ */
+export interface PeakExposure {
   /** Peak aggregate debt balance reached across all facilities */
   peakDebt: number;
-  /** Peak equity drawn (maximum cumulative equity injection) */
+  /** Peak equity drawn (maximum cumulative equity injection, net of repatriations) */
   peakEquity: number;
   /** Month number (1-based) where peak equity was reached */
   peakEquityMonth: number;
@@ -648,9 +639,10 @@ export interface DashboardData {
     grvSoldExchanged: number;
     unsoldGRV: number;
   };
-  dscr?: DSCRSummary;
-  /** Populated when the senior facility is a development loan. Shown on
-   *  Table 12 instead of (or alongside) the DSCR rows. */
+  /** Peak debt / equity / peak-month exposure. Always populated. */
+  peakExposure: PeakExposure;
+  /** LVR / LTC / facility-limit covenants. Populated when the senior facility
+   *  is a development loan; surfaced on Table 12. */
   developmentCovenants?: DevelopmentCovenants;
   gstCompliance?: GSTCompliance;
   cashflows: MonthlyCashflow[];

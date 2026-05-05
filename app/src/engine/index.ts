@@ -1,6 +1,6 @@
 import type {
   AdminConfig, MainInputs, DashboardData, MonthlyCashflow,
-  GSTCompliance, DSCRSummary, DevelopmentCovenants, FacilityType,
+  GSTCompliance, PeakExposure, DevelopmentCovenants, FacilityType,
   CalculationWarning, SolverDiagnostics,
 } from '../types';
 import { generateTimeline } from './timeline';
@@ -217,18 +217,24 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     (s, g) => s + (Number.isFinite(g.currentSalePrice) && g.currentSalePrice > 0 ? g.currentSalePrice : 0),
     0,
   );
-  const totalGSTIncludedGRV = inputs.grvItems
-    .filter(g => g.gstIncluded && Number.isFinite(g.currentSalePrice) && g.currentSalePrice > 0)
+  // Margin-scheme supplies — routed by revenueType in resolveSupplyType so a
+  // Commercial Office / Retail / Hotel item is NOT silently coerced into the
+  // margin scheme just because gstIncluded is true.
+  const marginSchemeGRV = inputs.grvItems
+    .filter(g => Number.isFinite(g.currentSalePrice) && g.currentSalePrice > 0)
+    .filter(g => resolveSupplyType(g) === 'margin-scheme')
     .reduce((s, g) => s + g.currentSalePrice, 0);
-  const nonGSTGRV = Math.max(0, totalGRVAllItems - totalGSTIncludedGRV);
   const landPriceFinite = Number.isFinite(inputs.landPurchase.landPurchasePrice)
     ? Math.max(0, inputs.landPurchase.landPurchasePrice)
     : 0;
+  // Land cost apportioned to margin-scheme supplies under Division 75 / GSTR
+  // 2006/1: land × (margin-scheme GRV / total GRV). Capped at the margin-scheme
+  // GRV itself so the taxable margin can never go negative.
   const marginSchemeDeduction = totalGRVAllItems > 0
-    ? landPriceFinite * nonGSTGRV / totalGRVAllItems
+    ? Math.min(marginSchemeGRV, landPriceFinite * marginSchemeGRV / totalGRVAllItems)
     : 0;
-  const marginSchemeFactor = totalGSTIncludedGRV > 0
-    ? Math.max(0, 1 - marginSchemeDeduction / totalGSTIncludedGRV)
+  const marginSchemeFactor = marginSchemeGRV > 0
+    ? Math.max(0, 1 - marginSchemeDeduction / marginSchemeGRV)
     : 1;
   if (totalGRVAllItems === 0 && inputs.grvItems.length > 0) {
     localWarnings.push(
@@ -391,7 +397,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     grvDeposits: at(deposits, i),
     rentalIncome: at(rentalInc, i),
     otherIncome: at(otherInc, i),
-    gstOnRevenue: at(gstOnRevenue, i),
+    gstOnRevenue: at(gstOnRevenue, i) + at(gstOnDeposits, i),
     gstOnDeposits: at(gstOnDeposits, i),
     gstWithholding: at(gstWithholding, i),
     landLoanDrawdown: at(funding.landLoanDrawdowns, i),
@@ -486,7 +492,10 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // what the developer actually receives from settlements.  Deducting it from
   // totalProfit ensures the dashboard figure equals sum(profitDistributions)
   // from the funding waterfall, which uses periodNetCash = revenue − gstOnRevenue − costs.
-  const totalGSTOnRevenue = sum(gstOnRevenue);
+  // Include deposit-period GST so Table 1 (totalGSTOnRevenue) reconciles with
+  // Table 13 (gstOnMarginSchemeSupplies + gstOnStandardSupplies). Without this,
+  // settlement-period GST captured only the (1 − depositPct) fraction.
+  const totalGSTOnRevenue = sum(gstOnRevenue) + sum(gstOnDeposits);
 
   // Lender GST exemption: debt facility fees are modelled as GST-free assuming
   // the lender is an exempt financial institution (GSTA s.40-60). Non-bank lenders
@@ -609,8 +618,12 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const constructionSpan = inputs.constructionCosts[0]?.monthSpan || 41;
   const settlementMonths = inputs.grvItems.map(g => g.settlementMonth).filter(m => m > 0);
   const lastSettlement = settlementMonths.length > 0 ? Math.max(...settlementMonths) : 0;
+  // Sales Commencement = first presale exchange across ANY revenue type.
+  // Restricting to revenueType === 'Residential' caused mixed-use projects
+  // to show "N/A" when items were labelled e.g. 'Retail F&B' or 'Apartments'
+  // (Melbourne UAT Dh2). Use any item with a positive presale month.
   const presaleMonths = inputs.grvItems
-    .filter(g => g.preSaleExchangeMonth > 0 && g.revenueType === 'Residential')
+    .filter(g => g.preSaleExchangeMonth > 0)
     .map(g => g.preSaleExchangeMonth);
   const salesStart = presaleMonths.length > 0 ? Math.min(...presaleMonths) : 0;
 
@@ -650,50 +663,19 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     }
   }
 
-  // ===== DSCR (Debt Service Coverage Ratio) =====
-  // Monthly DSC = operating cashflow before finance / debt service (interest + fees + repayments).
-  // Annual DSCR is averaged over rolling 12-month windows where debt service > 0.
-  const monthlyOperating = cashflows.map(cf =>
-    cf.grvSettlements + cf.rentalIncome + cf.otherIncome
-    - cf.landCosts - cf.acquisitionCosts - cf.developmentCosts - cf.constructionCosts
-    - cf.contingency - cf.marketingCosts - cf.otherStandardCosts - cf.pmFees
-    - cf.sellingCostsFrontEnd - cf.sellingCostsBackEnd - cf.otherFinancingCosts
-  );
-  const monthlyDebtService = cashflows.map(cf =>
-    cf.landLoanInterest + cf.landLoanFees + cf.landLoanRepayment
-    + cf.seniorInterest + cf.seniorFees + cf.seniorRepayment
-    + cf.senior2Interest + cf.senior2Fees + cf.senior2Repayment
-    + cf.mezzInterest + cf.mezzFees + cf.mezzRepayment
-  );
-  const dscrRatios: number[] = [];
-  for (let i = 0; i < cashflows.length; i++) {
-    const ds = monthlyDebtService[i] ?? 0;
-    if (ds > 1) {
-      const op = monthlyOperating[i] ?? 0;
-      const ratio = op / ds;
-      if (Number.isFinite(ratio)) dscrRatios.push(ratio);
-    }
-  }
-  const dscrTarget = admin.dscrTarget ?? 1.25;
-  const averageDSCR = dscrRatios.length > 0 ? sum(dscrRatios) / dscrRatios.length : 0;
-  const minimumDSCR = dscrRatios.length > 0 ? Math.min(...dscrRatios) : 0;
-  const dscr: DSCRSummary = {
-    averageDSCR,
-    minimumDSCR,
-    targetDSCR: dscrTarget,
-    meetsTarget: minimumDSCR >= dscrTarget,
+  // ===== PEAK EXPOSURE =====
+  // Peak debt / peak equity / peak-equity month are reported regardless of
+  // facility type; LVR / LTC covenants live on `developmentCovenants` below.
+  const peakExposure: PeakExposure = {
     peakDebt: funding.peakDebt,
     peakEquity: funding.peakEquity,
     peakEquityMonth: funding.peakEquityMonth,
   };
 
-  // ===== DEVELOPMENT-LOAN COVENANTS (Table 12 alternative) =====
-  // DSCR is not a meaningful covenant on a development loan — peak senior /
-  // GRV (LVR) and peak debt / total cost (LTC) are. Compute these whenever
-  // the senior facility is a development loan; the dashboard will then show
-  // these rows on Table 12 instead of (or alongside) the DSCR rows.
-  // Defaults to 'development' for senior/mezz/land facilities and
-  // 'investment' for residual-stock per store/defaults.ts. Saved projects
+  // ===== DEVELOPMENT-LOAN COVENANTS (Table 12) =====
+  // LVR (peak senior / GRV) + LTC (peak debt / total cost) + peak senior vs
+  // facility limit. Defaults to 'development' for senior/mezz/land and
+  // 'investment' for residual-stock per store/defaults.ts; saved projects
   // without facilityType are treated as 'development' (back-compat).
   const seniorTypeRaw = inputs.seniorFacility?.facilityType;
   const seniorType: FacilityType = seniorTypeRaw ?? 'development';
@@ -765,15 +747,21 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     netGSTPayable: (gstOnMarginSchemeSupplies + gstOnStandardSupplies + gstWithholdingTotal) - totalGSTOnCosts,
   };
 
-  // GRV Summary
+  // GRV Summary (Table 11). Previously totalAptGRV filtered for revenueType
+  // === 'Residential' which produced $0 on any project where the user labelled
+  // residential items differently (e.g. "Apartments" in a mixed-use scheme).
+  // Now aggregates ALL GRV items so the Table 11 "Total Stock GRV" row never
+  // shows $0 when the project has revenue items. Unsold GRV is clamped at 0.
+  // (Melbourne UAT Dh1.)
   const totalAptGRV = inputs.grvItems
-    .filter(g => g.revenueType === 'Residential')
+    .filter(g => Number.isFinite(g.currentSalePrice) && g.currentSalePrice > 0)
     .reduce((s, g) => s + g.currentSalePrice, 0);
 
   // GRV sold/exchanged: items whose presale exchange month falls within the actuals window
   const lastActualPeriodNum = periods.reduce((last, p) => p.isActual ? Math.max(last, p.periodNumber) : last, 0);
   const grvSoldExchanged = inputs.grvItems
     .filter(g => g.preSaleExchangeMonth > 0 && g.preSaleExchangeMonth <= lastActualPeriodNum)
+    .filter(g => Number.isFinite(g.currentSalePrice) && g.currentSalePrice > 0)
     .reduce((s, g) => s + g.currentSalePrice, 0);
 
   return {
@@ -936,9 +924,11 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     grvSummary: {
       totalApartmentGRV: totalAptGRV,
       grvSoldExchanged: grvSoldExchanged,
-      unsoldGRV: totalAptGRV - grvSoldExchanged,
+      // Clamp at 0 — sold-but-not-yet-recognised stock can otherwise produce
+      // a negative "unsold" figure (UAT v2 #20 / Melbourne UAT Dh5).
+      unsoldGRV: Math.max(0, totalAptGRV - grvSoldExchanged),
     },
-    dscr,
+    peakExposure,
     ...(developmentCovenants ? { developmentCovenants } : {}),
     gstCompliance,
     cashflows,

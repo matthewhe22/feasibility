@@ -34,7 +34,6 @@ const baseAdmin: AdminConfig = {
   manualSCurves: [[], [], []],
   buildSCurves: {},
   contingencyGSTMode: 'none',
-  dscrTarget: 1.25,
 };
 
 function makeInputs(pmFees: CostLineItem[]): MainInputs {

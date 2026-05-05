@@ -242,9 +242,26 @@ export function spreadIncome(items: RentalIncomeItem[], periods: Period[]): numb
  * gstIncluded=false on commercial items are preserved as input-taxed (no GST).
  */
 export function resolveSupplyType(item: RevenueLineItem): GSTSupplyType {
+  // Explicit override always wins.
   if (item.supplyType) return item.supplyType;
-  if (item.gstIncluded) return 'margin-scheme';
-  return 'input-taxed';
+  // Items not marked gstIncluded are input-taxed (residential rental / non-creditable supplies).
+  if (!item.gstIncluded) return 'input-taxed';
+  // gstIncluded === true → route by revenueType so a Commercial Office / Hotel
+  // / Retail tenancy is correctly standard-rated rather than silently coerced
+  // into the margin scheme. New residential premises (Residential, Settlement
+  // Adjustments) remain on Division 75; everything else is standard-rated.
+  switch (item.revenueType) {
+    case 'Retail F&B':
+    case 'Commercial Office':
+    case 'Hotel':
+    case 'Management Rights':
+      return 'standard';
+    case 'Residential':
+    case 'Settlement Adjustments':
+      return 'margin-scheme';
+    default:
+      return 'margin-scheme';
+  }
 }
 
 /**
