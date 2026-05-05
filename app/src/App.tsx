@@ -184,12 +184,12 @@ function App() {
 
   useEffect(() => {
     document.title = admin.projectName
-      ? `${admin.projectName} — ${appTitle} | Property Development Feasibility`
-      : `${appTitle} | Property Development Feasibility, Cashflow & IRR`;
+      ? `${admin.projectName} — ${appTitle} | Property Development Financial Analysis`
+      : `${appTitle} | Property Development Financial Analysis`;
 
     const desc = admin.projectName
-      ? `${admin.projectName} feasibility — monthly cashflow, senior debt, GST, IRR and equity waterfall modelled in Pencil.`
-      : 'Pencil is a browser-based property development feasibility engine. Model land, construction, GST, senior debt, IRR and equity waterfalls with Australian QS-grade accuracy.';
+      ? `${admin.projectName} feasibility — multi-tower cashflow, senior debt, GST and IRR modelled in Pencil.`
+      : 'Professional property development feasibility engine for Australian projects. Multi-tower financial modelling, GST & stamp duty, capital stack, IRR & cashflow.';
     let descMeta = document.querySelector<HTMLMetaElement>('meta[name="description"]');
     if (!descMeta) {
       descMeta = document.createElement('meta');

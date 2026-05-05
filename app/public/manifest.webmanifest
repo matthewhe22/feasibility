@@ -1,7 +1,7 @@
 {
-  "name": "Pencil — Feasibility Engine",
+  "name": "Pencil Feasibility Model",
   "short_name": "Pencil",
-  "description": "Browser-based property development feasibility engine. Model land, construction, GST, senior debt, IRR and equity waterfalls with Australian QS-grade accuracy.",
+  "description": "Professional property development feasibility engine for Australian projects. Multi-tower financial modelling, GST & stamp duty, capital stack, IRR & cashflow.",
   "lang": "en-AU",
   "start_url": "/",
   "scope": "/",

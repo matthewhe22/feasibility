@@ -1,4 +1,4 @@
-# Pencil — Feasibility Engine
+# Capconnex Pencil — Feasibility Model
 # Public marketing surface is indexable; the admin portal is not.
 
 User-agent: *
@@ -12,4 +12,4 @@ Disallow: /*?*utm_
 Disallow: /*?*fbclid=
 Disallow: /*?*gclid=
 
-Sitemap: https://pencil-feasibility.vercel.app/sitemap.xml
+Sitemap: https://pencil.capconnex.com.au/sitemap.xml
