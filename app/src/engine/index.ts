@@ -1,6 +1,7 @@
 import type {
   AdminConfig, MainInputs, DashboardData, MonthlyCashflow,
-  GSTCompliance, DSCRSummary, CalculationWarning, SolverDiagnostics,
+  GSTCompliance, DSCRSummary, DevelopmentCovenants, FacilityType,
+  CalculationWarning, SolverDiagnostics,
 } from '../types';
 import { generateTimeline } from './timeline';
 import { spreadCosts, spreadLandPayments, clearSCurveWarnings, getSCurveWarnings, buildCostVariance } from './costSpreading';
@@ -686,6 +687,40 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     peakEquityMonth: funding.peakEquityMonth,
   };
 
+  // ===== DEVELOPMENT-LOAN COVENANTS (Table 12 alternative) =====
+  // DSCR is not a meaningful covenant on a development loan — peak senior /
+  // GRV (LVR) and peak debt / total cost (LTC) are. Compute these whenever
+  // the senior facility is a development loan; the dashboard will then show
+  // these rows on Table 12 instead of (or alongside) the DSCR rows.
+  // Defaults to 'development' for senior/mezz/land facilities and
+  // 'investment' for residual-stock per store/defaults.ts. Saved projects
+  // without facilityType are treated as 'development' (back-compat).
+  const seniorTypeRaw = inputs.seniorFacility?.facilityType;
+  const seniorType: FacilityType = seniorTypeRaw ?? 'development';
+  const grvForCovenants = totalGRV(inputs.grvItems);
+  let developmentCovenants: DevelopmentCovenants | undefined;
+  if (seniorType === 'development') {
+    const peakSeniorBalance = Math.max(...funding.seniorBalance, 0);
+    const seniorLimit = inputs.seniorFacility?.facilityLimit ?? 0;
+    const lvrTarget = inputs.seniorFacility?.lvrTarget ?? 0.65;
+    const ltcTarget = inputs.seniorFacility?.ltcTarget ?? 0.7;
+    const lvr = grvForCovenants > 0 ? peakSeniorBalance / grvForCovenants : 0;
+    const ltc = totalCost > 0 ? funding.peakDebt / totalCost : 0;
+    developmentCovenants = {
+      lvr,
+      ltc,
+      peakDebt: funding.peakDebt,
+      peakSenior: peakSeniorBalance,
+      seniorLimit,
+      peakSeniorPctLimit: seniorLimit > 0 ? peakSeniorBalance / seniorLimit : 0,
+      lvrTarget,
+      ltcTarget,
+      meetsLVR: grvForCovenants > 0 && lvr <= lvrTarget,
+      meetsLTC: totalCost > 0 && ltc <= ltcTarget,
+      withinSeniorLimit: seniorLimit > 0 ? peakSeniorBalance <= seniorLimit : true,
+    };
+  }
+
   // ===== GST COMPLIANCE SCHEDULE =====
   let marginSchemeSupplies = 0;
   let standardRatedSupplies = 0;
@@ -904,6 +939,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       unsoldGRV: totalAptGRV - grvSoldExchanged,
     },
     dscr,
+    ...(developmentCovenants ? { developmentCovenants } : {}),
     gstCompliance,
     cashflows,
     warnings: [

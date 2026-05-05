@@ -275,6 +275,7 @@ export const defaultEquityAdditional: EquityConfig = {
 // ===== DEBT FACILITIES =====
 export const defaultLandLoan: DebtFacility = {
   name: 'Land Loan Facility',
+  facilityType: 'development',
   facilityLimit: 120000000,
   startMonth: 30,
   maturityMonth: 33,
@@ -293,6 +294,7 @@ export const defaultLandLoan: DebtFacility = {
 
 export const defaultMezzanine: DebtFacility = {
   name: 'Mezzanine Finance',
+  facilityType: 'development',
   facilityLimit: 0,
   startMonth: 0,
   maturityMonth: 0,
@@ -311,6 +313,7 @@ export const defaultMezzanine: DebtFacility = {
 
 export const defaultSeniorFacility: DebtFacility = {
   name: 'Senior Construction Facility',
+  facilityType: 'development',
   facilityLimit: 767034632,
   startMonth: 33,
   maturityMonth: 65,
@@ -329,6 +332,7 @@ export const defaultSeniorFacility: DebtFacility = {
 
 export const defaultSeniorFacility2: DebtFacility = {
   name: 'Senior Facility #2',
+  facilityType: 'development',
   facilityLimit: 0,
   startMonth: 33,
   maturityMonth: 33,
@@ -347,6 +351,7 @@ export const defaultSeniorFacility2: DebtFacility = {
 
 export const defaultResidualStock: DebtFacility = {
   name: 'Residual Stock Facility',
+  facilityType: 'residual-stock',
   facilityLimit: 0,
   startMonth: 0,
   maturityMonth: 0,

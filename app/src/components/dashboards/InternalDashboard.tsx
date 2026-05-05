@@ -538,8 +538,35 @@ export function InternalDashboard() {
             <DashValue label="Payback Period (months)" value={data.otherIndicators.paybackPeriodMonths ?? 0} unit="#" indent />
           </TableBox>
 
-          {/* DSCR & Peak Equity */}
-          {data.dscr && (
+          {/* Table 12 — branches on facility type. For a development senior
+              loan we show LVR / LTC / peak-debt covenants (UAT v2 Rule 1: DSCR
+              is not a meaningful covenant on a pre-revenue construction
+              project). Otherwise we fall back to the legacy DSCR table. */}
+          {data.developmentCovenants ? (
+            <TableBox>
+              <TableHeader>Table 12 - Development Loan Covenants</TableHeader>
+              <DashValue label="LVR (Peak Senior / GRV)" value={data.developmentCovenants.lvr} unit="%" />
+              <DashValue label="LVR Target" value={data.developmentCovenants.lvrTarget} unit="%" indent />
+              <div className={`flex justify-between items-center py-0.5 px-2 text-xs pl-4 ${data.developmentCovenants.meetsLVR ? 'text-green-700' : 'text-red-700'}`}>
+                <span>LVR Met?</span><span>{data.developmentCovenants.meetsLVR ? 'Yes' : 'No'}</span>
+              </div>
+              <DashValue label="LTC (Peak Debt / Total Cost)" value={data.developmentCovenants.ltc} unit="%" />
+              <DashValue label="LTC Target" value={data.developmentCovenants.ltcTarget} unit="%" indent />
+              <div className={`flex justify-between items-center py-0.5 px-2 text-xs pl-4 ${data.developmentCovenants.meetsLTC ? 'text-green-700' : 'text-red-700'}`}>
+                <span>LTC Met?</span><span>{data.developmentCovenants.meetsLTC ? 'Yes' : 'No'}</span>
+              </div>
+              <DashValue label="Peak Senior Balance" value={data.developmentCovenants.peakSenior} bold />
+              <DashValue label="Senior Limit" value={data.developmentCovenants.seniorLimit} indent />
+              <DashValue label="Peak Senior / Limit" value={data.developmentCovenants.peakSeniorPctLimit} unit="%" indent />
+              <div className={`flex justify-between items-center py-0.5 px-2 text-xs pl-4 ${data.developmentCovenants.withinSeniorLimit ? 'text-green-700' : 'text-red-700'}`}>
+                <span>Within Senior Limit?</span><span>{data.developmentCovenants.withinSeniorLimit ? 'Yes' : 'No'}</span>
+              </div>
+              <DashValue label="Peak Total Debt" value={data.developmentCovenants.peakDebt} bold />
+              {data.dscr && (
+                <DashValue label="Peak Equity (net of repatriations)" value={data.dscr.peakEquity} bold />
+              )}
+            </TableBox>
+          ) : data.dscr ? (
             <TableBox>
               <TableHeader>Table 12 - Debt Service &amp; Peak Exposure</TableHeader>
               <DashValue label="Average DSCR" value={data.dscr.averageDSCR} unit="ratio" />
@@ -552,7 +579,7 @@ export function InternalDashboard() {
               <DashValue label="Peak Equity (net of repatriations)" value={data.dscr.peakEquity} bold />
               <DashValue label="Peak Equity Month (period #)" value={data.dscr.peakEquityMonth} unit="#" indent />
             </TableBox>
-          )}
+          ) : null}
 
           {/* GST Compliance Schedule */}
           {data.gstCompliance && (
