@@ -38,13 +38,20 @@ interface AppState {
 
   admin: AdminConfig;
   setAdmin: (admin: Partial<AdminConfig>) => void;
+  /** Replace admin wholesale (no merge). Use when loading a project record so that
+   *  fields removed in the persisted payload are not silently retained from the
+   *  prior session — see batch-1 fix for project-load state drift. */
+  replaceAdmin: (admin: AdminConfig) => void;
 
   inputs: MainInputs;
   setInputs: (inputs: Partial<MainInputs>) => void;
+  /** Replace inputs wholesale (no merge). Use when loading a project record so the
+   *  prior project's fields cannot bleed through into the new project. */
+  replaceInputs: (inputs: MainInputs) => void;
   updateInputField: <K extends keyof MainInputs>(key: K, value: MainInputs[K]) => void;
 
   dashboardData: DashboardData | null;
-  setDashboardData: (data: DashboardData) => void;
+  setDashboardData: (data: DashboardData | null) => void;
 
   isCalculating: boolean;
   setIsCalculating: (v: boolean) => void;
@@ -176,9 +183,11 @@ export const useStore = create<AppState>()(
 
       admin: defaultAdmin,
       setAdmin: (admin) => set((s) => ({ admin: { ...s.admin, ...admin } })),
+      replaceAdmin: (admin) => set({ admin }),
 
       inputs: defaultInputs,
       setInputs: (inputs) => set((s) => ({ inputs: { ...s.inputs, ...inputs } })),
+      replaceInputs: (inputs) => set({ inputs }),
       updateInputField: (key, value) => set((s) => ({ inputs: { ...s.inputs, [key]: value } })),
 
       // dashboardData is NOT persisted (excluded via partialize below) —

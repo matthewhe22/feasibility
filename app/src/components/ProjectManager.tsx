@@ -27,8 +27,13 @@ function fmt(d: Date) {
 
 interface Props {
   onClose: () => void;
-  /** Called after a project is loaded so the parent can recalculate. */
-  onLoad?: () => void;
+  /** Called after a project is loaded so the parent can recalculate.
+   *
+   *  IMPORTANT: the loaded admin/inputs are passed explicitly so the parent
+   *  cannot use stale React-closure values when it kicks off the recalc.
+   *  This is the fix for the "Inputs ↔ calc-engine state drift" UAT v2 P0.
+   */
+  onLoad?: (loaded?: { admin: import('../types').AdminConfig; inputs: import('../types').MainInputs }) => void;
 }
 
 /** Compose the user-visible record name from project + version. */
@@ -40,7 +45,7 @@ function composeName(projectName: string, versionName: string): string {
 }
 
 export function ProjectManager({ onClose, onLoad }: Props) {
-  const { admin, inputs, dashboardData, setAdmin, setInputs, setDashboardData, currentProjectId, setCurrentProjectId, projectList } = useStore();
+  const { admin, inputs, dashboardData, setAdmin, replaceAdmin, replaceInputs, setDashboardData, currentProjectId, setCurrentProjectId, projectList } = useStore();
 
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [saveProjectName, setSaveProjectName] = useState(admin.projectName || '');
@@ -103,14 +108,26 @@ export function ProjectManager({ onClose, onLoad }: Props) {
     try {
       const rec = await loadProject(id);
       if (!rec) { setMsg('Project not found.'); return; }
-      setAdmin(rec.admin);
-      setInputs(rec.inputs);
-      if (rec.dashboardData) setDashboardData(rec.dashboardData);
+      // Wholesale replace — never partial-merge over the previous project's inputs.
+      // The previous setAdmin/setInputs implementation merged top-level keys into
+      // the existing object, so any field present in the prior project but absent
+      // in the loaded record would leak through. That, plus the cached
+      // dashboardData below, was the root of the v2-UAT "state drift" P0.
+      replaceAdmin(rec.admin);
+      replaceInputs(rec.inputs);
+      // Do NOT hydrate cached dashboardData. It can be stale relative to the
+      // loaded inputs (different calc revision, different inputs version) and
+      // we'd flash the wrong figures on Dashboard/Cashflow/Checks until the
+      // recalc lands. Force null so the UI shows "Calculating…" until fresh
+      // results arrive — recalc fires below via onLoad with explicit values.
+      setDashboardData(null);
       setCurrentId(id);
       setSaveProjectName(rec.admin.projectName ?? '');
       setSaveVersionName(rec.admin.versionName ?? rec.description ?? '');
       setMsg(`Loaded "${rec.name}". Recalculating…`);
-      onLoad?.();
+      // Pass the just-loaded values explicitly so the parent's calculate()
+      // cannot accidentally read stale closure values from useStore destructure.
+      onLoad?.({ admin: rec.admin, inputs: rec.inputs });
     } catch (e) {
       setMsg(String(e));
     } finally {
