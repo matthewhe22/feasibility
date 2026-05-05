@@ -55,9 +55,9 @@ function makePeriods(n: number): Period[] {
   ];
   const result = spreadSettlements(items, periods);
   assertClose(sum(result), 1200000, 0.01, 'spreadSettlements: total equals sale price');
-  assertClose(result[9], 400000, 0.01, 'spreadSettlements: month 10 gets 1/3');
-  assertClose(result[10], 400000, 0.01, 'spreadSettlements: month 11 gets 1/3');
-  assertClose(result[11], 400000, 0.01, 'spreadSettlements: month 12 gets 1/3');
+  assertClose(result[9] ?? 0, 400000, 0.01, 'spreadSettlements: month 10 gets 1/3');
+  assertClose(result[10] ?? 0, 400000, 0.01, 'spreadSettlements: month 11 gets 1/3');
+  assertClose(result[11] ?? 0, 400000, 0.01, 'spreadSettlements: month 12 gets 1/3');
 }
 
 // Settlement month before presale exchange → should emit a warning
@@ -247,7 +247,7 @@ function makePeriods(n: number): Period[] {
     const curve = STANDARD_BUILD_S_CURVES[months];
     assert(curve != null && curve.length === months,
       `STANDARD_BUILD_S_CURVES: length ${months} present`);
-    const s = sum(curve);
+    const s = sum(curve ?? []);
     assertClose(s, 1.0, 1e-9, `STANDARD_BUILD_S_CURVES[${months}] sums to 1.0`);
   }
 }
@@ -264,8 +264,8 @@ function makePeriods(n: number): Period[] {
   ];
   const r = spreadLandPayments(stages, periods);
   assertClose(sum(r), 100, 0.01, 'spreadLandPayments: invalid stages skipped');
-  assertClose(r[0], 50, 0.01, 'spreadLandPayments: month 1 half of stage 1');
-  assertClose(r[1], 50, 0.01, 'spreadLandPayments: month 2 half of stage 1');
+  assertClose(r[0] ?? 0, 50, 0.01, 'spreadLandPayments: month 1 half of stage 1');
+  assertClose(r[1] ?? 0, 50, 0.01, 'spreadLandPayments: month 2 half of stage 1');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -279,8 +279,8 @@ function makePeriods(n: number): Period[] {
   ];
   const r = spreadIncome(items, periods);
   assertClose(sum(r), 10000, 0.01, 'spreadIncome: units × baseRate total');
-  assertClose(r[2], 2500, 0.01, 'spreadIncome: even split per month');
-  assertClose(r[5], 2500, 0.01, 'spreadIncome: spread across full span');
+  assertClose(r[2] ?? 0, 2500, 0.01, 'spreadIncome: even split per month');
+  assertClose(r[5] ?? 0, 2500, 0.01, 'spreadIncome: spread across full span');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

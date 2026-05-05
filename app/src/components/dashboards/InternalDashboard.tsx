@@ -368,14 +368,6 @@ export function InternalDashboard() {
                       <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(cs.senior2Amount)}</td>
                     </tr>
                   )}
-                  {cs.senior3Amount > 0 && (
-                    <tr className="border-b">
-                      <td className="px-2 py-0.5">Senior Facility #3</td>
-                      <td className="px-2 py-0.5 text-right">{formatPercent(cs.senior3LTC)}</td>
-                      <td className="px-2 py-0.5 text-right">{formatPercent(cs.senior3LVR)}</td>
-                      <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(cs.senior3Amount)}</td>
-                    </tr>
-                  )}
                   <tr className="border-b">
                     <td className="px-2 py-0.5">Mezzanine (Principal)</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(cs.mezzLTC)}</td>
@@ -425,14 +417,6 @@ export function InternalDashboard() {
                       <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.senior2Total)}</td>
                     </tr>
                   )}
-                  {ds.senior3Principal > 0 && (
-                    <tr className="border-b">
-                      <td className="px-2 py-0.5">Senior #3</td>
-                      <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.senior3Principal)}</td>
-                      <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.senior3Interest)}</td>
-                      <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.senior3Total)}</td>
-                    </tr>
-                  )}
                   <tr className="border-b">
                     <td className="px-2 py-0.5">Mezzanine</td>
                     <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(ds.mezzPrincipal)}</td>
@@ -460,7 +444,6 @@ export function InternalDashboard() {
                     <th scope="col" className="px-2 py-1 text-left"></th>
                     <th scope="col" className="px-2 py-1 text-right">Senior #1</th>
                     <th scope="col" className="px-2 py-1 text-right">Senior #2</th>
-                    <th scope="col" className="px-2 py-1 text-right">Senior #3</th>
                     <th scope="col" className="px-2 py-1 text-right">Mezzanine</th>
                     <th scope="col" className="px-2 py-1 text-right">Land Loan</th>
                   </tr>
@@ -470,7 +453,6 @@ export function InternalDashboard() {
                     <td className="px-2 py-0.5">Establishment Fee</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.seniorEstablishment)}</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.senior2Establishment)}</td>
-                    <td className="px-2 py-0.5 text-right">{formatPercent(dr.senior3Establishment)}</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.mezzEstablishment)}</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.landEstablishment)}</td>
                   </tr>
@@ -478,7 +460,6 @@ export function InternalDashboard() {
                     <td className="px-2 py-0.5">Line Fee</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.seniorLineFee)}</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.senior2LineFee)}</td>
-                    <td className="px-2 py-0.5 text-right">{formatPercent(dr.senior3LineFee)}</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.mezzLineFee)}</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.landLineFee)}</td>
                   </tr>
@@ -486,7 +467,6 @@ export function InternalDashboard() {
                     <td className="px-2 py-0.5">Margin</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.seniorMargin)}</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.senior2Margin)}</td>
-                    <td className="px-2 py-0.5 text-right">{formatPercent(dr.senior3Margin)}</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.mezzMargin)}</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.landMargin)}</td>
                   </tr>
@@ -494,7 +474,6 @@ export function InternalDashboard() {
                     <td className="px-2 py-0.5">BBSY</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.seniorBBSY)}</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.senior2BBSY)}</td>
-                    <td className="px-2 py-0.5 text-right">{formatPercent(dr.senior3BBSY)}</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.mezzBBSY)}</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.landBBSY)}</td>
                   </tr>
@@ -502,7 +481,6 @@ export function InternalDashboard() {
                     <td className="px-2 py-1">Total all in rate</td>
                     <td className="px-2 py-1 text-right">{formatPercent(dr.seniorAllIn)}</td>
                     <td className="px-2 py-1 text-right">{formatPercent(dr.senior2AllIn)}</td>
-                    <td className="px-2 py-1 text-right">{formatPercent(dr.senior3AllIn)}</td>
                     <td className="px-2 py-1 text-right">{formatPercent(dr.mezzAllIn)}</td>
                     <td className="px-2 py-1 text-right">{formatPercent(dr.landAllIn)}</td>
                   </tr>

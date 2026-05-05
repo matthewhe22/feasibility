@@ -129,7 +129,7 @@ export function calculateNPV(monthlyEquityCF: number[], annualRate: number): num
   const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
   let npv = 0;
   for (let t = 0; t < monthlyEquityCF.length; t++) {
-    npv += monthlyEquityCF[t] / Math.pow(1 + monthlyRate, t);
+    npv += (monthlyEquityCF[t] ?? 0) / Math.pow(1 + monthlyRate, t);
   }
   return npv;
 }

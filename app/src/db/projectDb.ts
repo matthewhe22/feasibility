@@ -34,10 +34,10 @@ export interface ProjectRecord {
 // row is invisible to the rest of the app (filtered out of listProjects).
 
 export interface BrandingSettings {
-  appName?: string;
-  logoDataUrl?: string;
-  faviconDataUrl?: string;
-  appBgColor?: string;
+  appName?: string | undefined;
+  logoDataUrl?: string | undefined;
+  faviconDataUrl?: string | undefined;
+  appBgColor?: string | undefined;
 }
 
 const BRANDING_SENTINEL = '__global_branding__';

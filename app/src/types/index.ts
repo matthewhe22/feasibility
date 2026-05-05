@@ -70,7 +70,7 @@ export interface CostLineItem {
   addGST: boolean;
   ctd: number;
   ctc: number;
-  actuals?: number[]; // per-period actual spend (0-based period index); overrides forecast for actual periods
+  actuals?: number[] | undefined; // per-period actual spend (0-based period index); overrides forecast for actual periods
 }
 
 export interface ConstructionCostItem extends CostLineItem {
@@ -124,7 +124,7 @@ export interface RevenueLineItem {
   supplyType?: GSTSupplyType;
   /** Subject to GST vendor-withholding under GSTA s.72-55 (new residential premises). Defaults to true for margin-scheme residential. */
   withholdingApplies?: boolean;
-  actuals?: number[]; // per-period actual revenue (0-based period index); overrides forecast for actual periods
+  actuals?: number[] | undefined; // per-period actual revenue (0-based period index); overrides forecast for actual periods
 }
 
 
@@ -143,7 +143,7 @@ export interface RentalIncomeItem {
   monthSpan: number;
   /** GST treatment of this income stream. Default 'input-taxed'. */
   supplyType?: GSTSupplyType;
-  actuals?: number[]; // per-period actual income (0-based period index); overrides forecast for actual periods
+  actuals?: number[] | undefined; // per-period actual income (0-based period index); overrides forecast for actual periods
 }
 
 // ===== FINANCING =====
@@ -191,10 +191,10 @@ export interface DebtFacility {
   // Per-period actual values (0-based index = period index).
   // In actual periods these override the model-calculated values for reporting;
   // the waterfall calculation itself is unchanged (no redistribution).
-  actualsDrawdown?: number[];
-  actualsRepayment?: number[];
-  actualsInterest?: number[];
-  actualsFees?: number[]; // combined line fee + establishment fee for the period
+  actualsDrawdown?: number[] | undefined;
+  actualsRepayment?: number[] | undefined;
+  actualsInterest?: number[] | undefined;
+  actualsFees?: number[] | undefined; // combined line fee + establishment fee for the period
 }
 
 // ===== ADMIN =====
@@ -225,13 +225,13 @@ export interface AdminConfig {
   /** Annual DSCR target threshold (e.g. 1.25). Used for dashboard reporting only. */
   dscrTarget?: number;
   /** Branding: custom application title shown in header and browser tab */
-  appName?: string;
+  appName?: string | undefined;
   /** Branding: base64-encoded logo image (data URL) displayed in header top-left */
-  logoDataUrl?: string;
+  logoDataUrl?: string | undefined;
   /** Branding: base64-encoded favicon image (data URL) applied to browser tab */
-  faviconDataUrl?: string;
+  faviconDataUrl?: string | undefined;
   /** Branding: CSS colour for the page background (e.g. '#f3f4f6') */
-  appBgColor?: string;
+  appBgColor?: string | undefined;
 }
 
 // ===== MAIN INPUTS =====
@@ -303,11 +303,7 @@ export interface MainInputs {
   mezzanine: DebtFacility;
   seniorFacility: DebtFacility;
   seniorFacility2: DebtFacility;
-  seniorFacility3: DebtFacility;
   residualStockFacility: DebtFacility;
-  additionalLoan1: DebtFacility;
-  additionalLoan2: DebtFacility;
-  additionalLoan3: DebtFacility;
   otherFinancingCosts: CostLineItem[];
 }
 
@@ -352,26 +348,10 @@ export interface MonthlyCashflow {
   senior2Repayment: number;
   senior2Interest: number;
   senior2Fees: number;
-  senior3Drawdown: number;
-  senior3Repayment: number;
-  senior3Interest: number;
-  senior3Fees: number;
   mezzDrawdown: number;
   mezzRepayment: number;
   mezzInterest: number;
   mezzFees: number;
-  addl1Drawdown: number;
-  addl1Repayment: number;
-  addl1Interest: number;
-  addl1Fees: number;
-  addl2Drawdown: number;
-  addl2Repayment: number;
-  addl2Interest: number;
-  addl2Fees: number;
-  addl3Drawdown: number;
-  addl3Repayment: number;
-  addl3Interest: number;
-  addl3Fees: number;
   equityInjection: number;
   equityRepatriation: number;
   profitDistribution: number;
@@ -379,11 +359,7 @@ export interface MonthlyCashflow {
   landLoanBalance: number;
   seniorBalance: number;
   senior2Balance: number;
-  senior3Balance: number;
   mezzBalance: number;
-  addl1Balance: number;
-  addl2Balance: number;
-  addl3Balance: number;
   equityBalance: number;
   netCashflow: number;
   cumulativeCashflow: number;
@@ -435,9 +411,6 @@ export interface CapitalStack {
   senior2Amount: number;
   senior2LTC: number;
   senior2LVR: number;
-  senior3Amount: number;
-  senior3LTC: number;
-  senior3LVR: number;
   mezzAmount: number;
   mezzLTC: number;
   mezzLVR: number;
@@ -454,9 +427,6 @@ export interface DebtSummary {
   senior2Principal: number;
   senior2Interest: number;
   senior2Total: number;
-  senior3Principal: number;
-  senior3Interest: number;
-  senior3Total: number;
   mezzPrincipal: number;
   mezzInterest: number;
   mezzTotal: number;
@@ -476,11 +446,6 @@ export interface DebtRates {
   senior2Margin: number;
   senior2BBSY: number;
   senior2AllIn: number;
-  senior3Establishment: number;
-  senior3LineFee: number;
-  senior3Margin: number;
-  senior3BBSY: number;
-  senior3AllIn: number;
   mezzEstablishment: number;
   mezzLineFee: number;
   mezzMargin: number;

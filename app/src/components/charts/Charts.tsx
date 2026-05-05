@@ -178,7 +178,7 @@ export function ChartsTab() {
             <PieChart>
               <Pie data={costPieData} cx="50%" cy="50%" outerRadius={120} innerRadius={60} dataKey="value"
                 label={({ name, value }) => `${name}: ${fmtM(value)}`} labelLine={{ stroke: '#666' }}>
-                {costPieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                {costPieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length] ?? '#000'} />)}
               </Pie>
               <Tooltip formatter={fmtCur} />
             </PieChart>
@@ -191,7 +191,7 @@ export function ChartsTab() {
             <PieChart>
               <Pie data={revPieData} cx="50%" cy="50%" outerRadius={120} innerRadius={60} dataKey="value"
                 label={({ name, value }) => `${name}: ${fmtM(value)}`} labelLine={{ stroke: '#666' }}>
-                {revPieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                {revPieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length] ?? '#000'} />)}
               </Pie>
               <Tooltip formatter={fmtCur} />
             </PieChart>

@@ -360,8 +360,8 @@ export function ChecksTab() {
 
   // ── 10. PM FEE RATE CHECK ────────────────────────────────────────────────────
   {
-    const pmRate = inputs.pmFees.length > 0 && inputs.pmFees[0].units > 0
-      ? inputs.pmFees[0].units
+    const pmRate = inputs.pmFees.length > 0 && (inputs.pmFees[0]?.units ?? 0) > 0
+      ? (inputs.pmFees[0]?.units ?? 0.02)
       : 0.02;
     const expectedPMFee = pmRate * (
       sum(inputs.landPurchase.paymentStages.map(s =>

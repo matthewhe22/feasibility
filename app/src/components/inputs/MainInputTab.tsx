@@ -206,22 +206,26 @@ function parseBuildSCurvesCSV(csvText: string): Record<number, number[]> {
   const lines = csvText.split(/\r?\n/).filter(l => l.trim());
   if (lines.length < 2) return {};
 
-  const headers = lines[0].split(',').map(h => h.trim());
+  const headers = (lines[0] ?? '').split(',').map(h => h.trim());
   const result: Record<number, number[]> = {};
 
   // Map column index to build duration
   const colMap: { colIdx: number; duration: number }[] = [];
   for (let c = 1; c < headers.length; c++) {
-    const m = headers[c].match(/^(\d+)\s*Month\s*Build$/i);
+    const h = headers[c];
+    if (!h) continue;
+    const m = h.match(/^(\d+)\s*Month\s*Build$/i);
     if (m) {
-      colMap.push({ colIdx: c, duration: parseInt(m[1]) });
+      colMap.push({ colIdx: c, duration: parseInt(m[1] ?? '0') });
     }
   }
 
   for (const { colIdx, duration } of colMap) {
     const weights: number[] = [];
     for (let r = 1; r < lines.length; r++) {
-      const cols = lines[r].split(',');
+      const line = lines[r];
+      if (!line) continue;
+      const cols = line.split(',');
       const val = parseFloat(cols[colIdx] ?? '0');
       weights.push(isNaN(val) ? 0 : val);
     }
@@ -266,7 +270,9 @@ function ActualCostsEditor({ label, items, onChange }: {
   const updateActual = (itemIdx: number, periodIdx: number, raw: string) => {
     const v = parseFloat(raw);
     const updated = [...items];
-    const item = { ...updated[itemIdx] };
+    const orig = updated[itemIdx];
+    if (!orig) return;
+    const item = { ...orig };
     const actuals = [...(item.actuals ?? new Array(periodIdx + 1).fill(0))];
     while (actuals.length <= periodIdx) actuals.push(0);
     actuals[periodIdx] = isNaN(v) ? 0 : Math.max(0, v);
@@ -277,7 +283,9 @@ function ActualCostsEditor({ label, items, onChange }: {
 
   const clearActuals = (itemIdx: number) => {
     const updated = [...items];
-    updated[itemIdx] = { ...updated[itemIdx], actuals: undefined };
+    const orig = updated[itemIdx];
+    if (!orig) return;
+    updated[itemIdx] = { ...orig, actuals: undefined };
     onChange(updated);
   };
 
@@ -345,12 +353,15 @@ function CostLineTable({ items, onChange, defaultCostType }: {
   /** Used for new placeholder rows when the table is empty. */
   defaultCostType?: CostLineItem['costType'];
 }) {
-  const updateItem = (idx: number, field: keyof CostLineItem, value: any) => {
+  const updateItem = (idx: number, field: keyof CostLineItem, value: unknown) => {
     const updated = [...items];
-    updated[idx] = { ...updated[idx], [field]: value };
+    const orig = updated[idx];
+    if (!orig) return;
+    const next = { ...orig, [field]: value };
     if (field === 'units' || field === 'baseRate') {
-      updated[idx].totalCosts = updated[idx].units * updated[idx].baseRate;
+      next.totalCosts = next.units * next.baseRate;
     }
+    updated[idx] = next;
     onChange(updated);
   };
 
@@ -507,9 +518,11 @@ function GRVTable({ items, onChange }: {
   items: RevenueLineItem[];
   onChange: (items: RevenueLineItem[]) => void;
 }) {
-  const updateItem = (idx: number, field: keyof RevenueLineItem, value: any) => {
+  const updateItem = (idx: number, field: keyof RevenueLineItem, value: unknown) => {
     const updated = [...items];
-    updated[idx] = { ...updated[idx], [field]: value };
+    const orig = updated[idx];
+    if (!orig) return;
+    updated[idx] = { ...orig, [field]: value };
     onChange(updated);
   };
 
@@ -750,7 +763,6 @@ function ActualsSection() {
       landLoan:        clearFacility(inputs.landLoan),
       seniorFacility:  clearFacility(inputs.seniorFacility),
       seniorFacility2: clearFacility(inputs.seniorFacility2),
-      seniorFacility3: clearFacility(inputs.seniorFacility3),
       mezzanine:       clearFacility(inputs.mezzanine),
     });
     setUploadStatus(null);
@@ -942,12 +954,6 @@ function ActualsSection() {
               facility={inputs.seniorFacility2}
               actualPeriods={currentMonth}
               onChange={f => setInputs({ seniorFacility2: f })}
-            />
-            <FinancingActualsEditor
-              label={inputs.seniorFacility3?.name || 'Senior Facility #3'}
-              facility={inputs.seniorFacility3}
-              actualPeriods={currentMonth}
-              onChange={f => setInputs({ seniorFacility3: f })}
             />
             <FinancingActualsEditor
               label={inputs.mezzanine?.name || 'Mezzanine'}
@@ -1441,7 +1447,7 @@ export function MainInputTab() {
                           type="text" value={sc.description}
                           onChange={e => {
                             const updated = [...inputs.sellingCosts];
-                            updated[idx] = { ...updated[idx], description: e.target.value };
+                            updated[idx] = { ...sc, description: e.target.value };
                             setInputs({ sellingCosts: updated });
                           }}
                           className="w-full bg-transparent text-xs border-0 p-0 focus:ring-0"
@@ -1451,7 +1457,7 @@ export function MainInputTab() {
                         <input type="text" value={(sc.salesCommission * 100).toFixed(4)}
                           onChange={e => {
                             const updated = [...inputs.sellingCosts];
-                            updated[idx] = { ...updated[idx], salesCommission: parseFloat(e.target.value) / 100 || 0 };
+                            updated[idx] = { ...sc, salesCommission: parseFloat(e.target.value) / 100 || 0 };
                             setInputs({ sellingCosts: updated });
                           }}
                           className="w-full text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
@@ -1461,7 +1467,7 @@ export function MainInputTab() {
                         <input type="text" value={(sc.preCommissionPercent * 100).toFixed(1)}
                           onChange={e => {
                             const updated = [...inputs.sellingCosts];
-                            updated[idx] = { ...updated[idx], preCommissionPercent: parseFloat(e.target.value) / 100 || 0 };
+                            updated[idx] = { ...sc, preCommissionPercent: parseFloat(e.target.value) / 100 || 0 };
                             setInputs({ sellingCosts: updated });
                           }}
                           className="w-full text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
@@ -1471,7 +1477,7 @@ export function MainInputTab() {
                         <input type="text" value={(sc.depositPercent * 100).toFixed(1)}
                           onChange={e => {
                             const updated = [...inputs.sellingCosts];
-                            updated[idx] = { ...updated[idx], depositPercent: parseFloat(e.target.value) / 100 || 0 };
+                            updated[idx] = { ...sc, depositPercent: parseFloat(e.target.value) / 100 || 0 };
                             setInputs({ sellingCosts: updated });
                           }}
                           className="w-full text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
@@ -1526,9 +1532,6 @@ export function MainInputTab() {
                   mezzanine: { ...zeroDebt, name: 'Mezzanine' },
                   seniorFacility: { ...zeroDebt, name: 'Senior Facility' },
                   residualStockFacility: { ...zeroDebt, name: 'Residual Stock' },
-                  additionalLoan1: { ...zeroDebt, name: 'Additional Loan #1' },
-                  additionalLoan2: { ...zeroDebt, name: 'Additional Loan #2' },
-                  additionalLoan3: { ...zeroDebt, name: 'Additional Loan #3' },
                 });
               }}
               className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"
