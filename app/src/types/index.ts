@@ -71,6 +71,20 @@ export interface CostLineItem {
   ctd: number;
   ctc: number;
   actuals?: number[] | undefined; // per-period actual spend (0-based period index); overrides forecast for actual periods
+  /**
+   * PM-fee specific. Rate applied to total non-PM costs (incl. GST on those
+   * costs) to derive the PM fee total. Decimal — 0.02 = 2%. Only meaningful on
+   * `pmFees[0]`; ignored on every other cost section.
+   *
+   * Why a dedicated field: the v1 engine read the PM fee rate from the
+   * generic `units` column. The Inputs UI labels that column "Units" and on
+   * edit recomputes `totalCosts = units × baseRate`. A user expressing
+   * "PM Fee = $500K" naturally typed `units=1, baseRate=500000` — and the
+   * engine then read units=1 as a 100% rate, producing the v2-UAT $94–98M PM
+   * fee bug. With `feeRatePercent` separated out, the rate is no longer
+   * overloaded onto Units and the Inputs UI can validate it as 0..1.
+   */
+  feeRatePercent?: number;
 }
 
 export interface ConstructionCostItem extends CostLineItem {

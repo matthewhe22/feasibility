@@ -1412,6 +1412,41 @@ export function MainInputTab() {
               defaultUnits={inputs.preliminary.projectLots}
               defaultState={inputs.landPurchase.stampDutyState as BenchmarkState}
             />
+            {/* Dedicated PM fee rate input — was previously overloaded onto the
+                generic "Units" column of the first PM line, which produced the
+                v2-UAT P0 100%-of-cost bug when users typed a count or dollar
+                value. The engine reads `feeRatePercent` only. */}
+            <div className="mb-3 flex items-center gap-3 bg-yellow-50 border border-yellow-200 rounded px-3 py-2">
+              <label
+                className="text-xs font-medium text-gray-700 w-44 shrink-0"
+                title="PM Fee = this rate × (all other costs incl. GST). Typical 1.5–3.5%."
+              >
+                PM Fee Rate (% of eligible costs)
+              </label>
+              <input
+                type="number"
+                step="0.001"
+                min="0"
+                max="0.99"
+                value={inputs.pmFees[0]?.feeRatePercent ?? 0.02}
+                onChange={e => {
+                  const raw = parseFloat(e.target.value);
+                  const next = Number.isFinite(raw) ? raw : 0.02;
+                  if (inputs.pmFees.length === 0) return;
+                  const head = inputs.pmFees[0];
+                  if (!head) return;
+                  const updated = [
+                    { ...head, feeRatePercent: next },
+                    ...inputs.pmFees.slice(1),
+                  ];
+                  setInputs({ pmFees: updated });
+                }}
+                className="w-28 text-xs text-right bg-white border border-gray-300 rounded px-2 py-1"
+              />
+              <span className="text-xs text-gray-500">
+                = {((inputs.pmFees[0]?.feeRatePercent ?? 0.02) * 100).toFixed(2)}%
+              </span>
+            </div>
             <CostLineTable items={inputs.pmFees}
               defaultCostType="Development & Project Management Fees"
               onChange={items => setInputs({ pmFees: items })} />

@@ -124,10 +124,25 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     sum(marketingCosts) + sum(otherStdCosts) + sum(otherFinCosts) +
     sum(frontEndCommByPeriod) + sum(backEndCommByPeriod) +
     prelimGSTOnCosts;
-  // PM fee rate comes from the item's `units` field (e.g. 0.02 = 2%)
-  const pmFeeRate = (inputs.pmFees.length > 0 && (inputs.pmFees[0]?.units ?? 0) > 0)
-    ? (inputs.pmFees[0]?.units ?? 0.02)
-    : 0.02;
+  // PM fee rate comes from the dedicated feeRatePercent field on pmFees[0].
+  // Historically the engine read the rate from the generic `units` column,
+  // which the Inputs UI also exposes as a quantity. A user typing
+  // `units=1, baseRate=500000` to express "$500K PM Fee" produced rate=1
+  // (100% of all cost), which is the v2-UAT P0 PM Fee bug.
+  //
+  // Migration: useStore's persist.migrate (v2→v3) copies legacy values from
+  // `units` into `feeRatePercent` *only* when `units` is in (0, 1) — a
+  // plausible rate range. Outside that range we default to 0.02 (2%) and
+  // emit a calculation warning so the user can correct it explicitly.
+  const rawRate = inputs.pmFees[0]?.feeRatePercent;
+  let pmFeeRate = 0.02;
+  if (typeof rawRate === 'number' && Number.isFinite(rawRate) && rawRate > 0 && rawRate < 1) {
+    pmFeeRate = rawRate;
+  } else if (typeof rawRate === 'number' && rawRate !== 0) {
+    localWarnings.push(
+      `PM Fee rate ${rawRate} out of plausible range (0,1) — using 0.02 (2%) instead.`,
+    );
+  }
   let dynamicPMFeeTotal = pmFeeRate * totalCostsExcPM;
   let pmFeesWithTotal = inputs.pmFees.map((f, idx) =>
     idx === 0 ? { ...f, totalCosts: dynamicPMFeeTotal } : f

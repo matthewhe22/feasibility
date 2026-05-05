@@ -164,10 +164,13 @@ export const defaultOtherStandardCosts: CostLineItem[] = [
 ];
 
 // ===== PM FEES =====
+// PM Fee rate now lives on `feeRatePercent` rather than being overloaded onto
+// the generic `units` column — see engine/index.ts and the v2-UAT P0 fix.
 export const defaultPMFees: CostLineItem[] = [
   {
     code: '6001', description: 'Project Management Fees', costType: 'Development & Project Management Fees',
-    units: 0.02, baseRate: 21327785, totalCosts: 23200301,
+    units: 1, baseRate: 23200301, totalCosts: 23200301,
+    feeRatePercent: 0.02,
     sCurve: 'Evenly Split', monthStart: 22, monthSpan: 52,
     addGST: true, ctd: 9176909, ctc: 14023392,
   },

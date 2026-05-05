@@ -360,9 +360,12 @@ export function ChecksTab() {
 
   // ── 10. PM FEE RATE CHECK ────────────────────────────────────────────────────
   {
-    const pmRate = inputs.pmFees.length > 0 && (inputs.pmFees[0]?.units ?? 0) > 0
-      ? (inputs.pmFees[0]?.units ?? 0.02)
-      : 0.02;
+    // Read the PM-fee rate from the dedicated feeRatePercent field — must
+    // match engine/index.ts. Fallback to 0.02 (2%) for legacy projects whose
+    // pmFees[0] does not yet have feeRatePercent set.
+    const rawPmRate = inputs.pmFees[0]?.feeRatePercent;
+    const pmRate = (typeof rawPmRate === 'number' && rawPmRate > 0 && rawPmRate < 1)
+      ? rawPmRate : 0.02;
     const expectedPMFee = pmRate * (
       sum(inputs.landPurchase.paymentStages.map(s =>
         s.percentOfLand > 0 ? s.percentOfLand * inputs.landPurchase.landPurchasePrice : s.amount
