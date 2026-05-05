@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://pencil.capconnex.com.au/sitemap.xml
