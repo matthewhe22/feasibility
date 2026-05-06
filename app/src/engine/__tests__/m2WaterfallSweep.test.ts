@@ -46,7 +46,7 @@ function fixture(presale: boolean): MainInputs {
     grvItems: [{ code: 'G', description: 'A', revenueType: 'Residential', units: 1, totalArea: 100,
       currentSalePrice: 18_000_000, gstIncluded: true,
       preSaleExchangeMonth: presale ? 8 : 0, preSaleSpan: presale ? 6 : 0,
-      settlementMonth: 22, settlementSpan: 3 } as any],
+      settlementMonth: 22, settlementSpan: 3 } as unknown as MainInputs['grvItems'][number]],
     rentalIncome: [], otherIncome: [],
     equityDeveloper: { name: 'D', fixedAmount: 5_000_000, percentage: 1, interestRate: 0, interestCompound: 0, repayEquityBeforeDebt: 0, equityContribution: 5_000_000, profitShare: 1, drawdownPriority: 1 },
     equityJV: { name:'',fixedAmount:0,percentage:0,interestRate:0,interestCompound:0,repayEquityBeforeDebt:0,equityContribution:0,profitShare:0,drawdownPriority:1 },
@@ -86,7 +86,7 @@ function fixture(presale: boolean): MainInputs {
 {
   const r = runCalculations(baseAdmin, fixture(false));
   const cf = r.cashflows;
-  const tot = (k: keyof typeof cf[0]) => cf.reduce((s, c) => s + ((c as any)[k] || 0), 0);
+  const tot = (k: 'sellingCostsFrontEnd' | 'sellingCostsBackEnd') => cf.reduce((s, c) => s + ((c[k] as number) || 0), 0);
   const totalCommission = 18_000_000 * 0.025;
   const fe = tot('sellingCostsFrontEnd');
   const be = tot('sellingCostsBackEnd');

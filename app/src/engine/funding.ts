@@ -901,7 +901,7 @@ function runFundingWaterfall(
     // insufficient (genuine default scenario, separately flagged below).
     // Repayment order honours the configured repaymentSequence.
     if (i === n - 1) {
-      let debtResidual = snrRunningBalance + snr2RunningBalance + mzRunningBalance;
+      const debtResidual = snrRunningBalance + snr2RunningBalance + mzRunningBalance;
       if (debtResidual > 1 && totalEqRepatriated > 1) {
         const clawback = Math.min(debtResidual, totalEqRepatriated);
         // Reverse equity repatriation by reducing the most-recent eqRepatriations entry.

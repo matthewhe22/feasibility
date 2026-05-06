@@ -44,7 +44,7 @@ function fixture(): MainInputs {
     frontEndSellingCosts: [], backEndSellingCosts: [], lettingFees: [],
     grvItems: [{ code: 'G', description: 'A', revenueType: 'Residential', units: 1, totalArea: 100,
       currentSalePrice: 30_000_000, gstIncluded: true,
-      preSaleExchangeMonth: 0, preSaleSpan: 0, settlementMonth: 22, settlementSpan: 3 } as any],
+      preSaleExchangeMonth: 0, preSaleSpan: 0, settlementMonth: 22, settlementSpan: 3 } as unknown as MainInputs['grvItems'][number]],
     rentalIncome: [], otherIncome: [],
     equityDeveloper: { name: 'D', fixedAmount: 5_000_000, percentage: 1, interestRate: 0, interestCompound: 0, repayEquityBeforeDebt: 0, equityContribution: 5_000_000, profitShare: 1, drawdownPriority: 1 },
     equityJV: { name:'',fixedAmount:0,percentage:0,interestRate:0,interestCompound:0,repayEquityBeforeDebt:0,equityContribution:0,profitShare:0,drawdownPriority:1 },
