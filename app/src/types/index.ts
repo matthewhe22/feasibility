@@ -373,6 +373,8 @@ export interface MonthlyCashflow {
   landLoanRepayment: number;
   landLoanInterest: number;
   landLoanFees: number;
+  /** LL2 — Memo of the senior-takeout transaction at construction start. */
+  landLoanTakeoutBySenior?: number;
   seniorDrawdown: number;
   seniorRepayment: number;
   seniorInterest: number;
