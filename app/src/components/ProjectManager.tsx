@@ -47,7 +47,9 @@ function composeName(projectName: string, versionName: string): string {
 export function ProjectManager({ onClose, onLoad }: Props) {
   const { admin, inputs, dashboardData, setAdmin, replaceAdmin, replaceInputs, setDashboardData, currentProjectId, setCurrentProjectId, projectList } = useStore();
 
-  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  // R21 — distinguish "loading" (null) from "empty list" (empty array). Without
+  // this, the count flickers to "(0)" while the IndexedDB read is in flight.
+  const [projects, setProjects] = useState<ProjectRecord[] | null>(null);
   const [saveProjectName, setSaveProjectName] = useState(admin.projectName || '');
   const [saveVersionName, setSaveVersionName] = useState(admin.versionName || '');
   const currentId = currentProjectId;
@@ -276,8 +278,22 @@ export function ProjectManager({ onClose, onLoad }: Props) {
 
           {/* Project list */}
           <section>
-            <h3 className="text-sm font-semibold text-gray-700 mb-3">Saved projects ({projects.length})</h3>
-            {projects.length === 0 ? (
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">
+              Saved projects {projects == null ? '' : `(${projects.length})`}
+            </h3>
+            {projects == null ? (
+              // R21 — loading skeleton so the count doesn't flicker to "(0)".
+              <div className="space-y-2" aria-busy="true" aria-label="Loading saved projects">
+                {[0, 1, 2].map(i => (
+                  <div key={i} className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50 animate-pulse">
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <div className="h-3 w-1/2 bg-gray-200 rounded" />
+                      <div className="h-2 w-1/3 bg-gray-200 rounded" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : projects.length === 0 ? (
               <p className="text-sm text-gray-400 italic">No saved projects yet.</p>
             ) : (
               <div className="space-y-2">

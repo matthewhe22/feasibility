@@ -840,9 +840,18 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
 
   // GRV sold/exchanged: items whose presale exchange month falls within the actuals window
   const lastActualPeriodNum = periods.reduce((last, p) => p.isActual ? Math.max(last, p.periodNumber) : last, 0);
+  // R13 — GRV Sold/Exchanged. An item is "sold/exchanged" when ANY of:
+  //   1. Its presale exchange month falls in the actuals window (presale-led project), OR
+  //   2. Its settlement month falls in the actuals window (project sells without a
+  //      formal presale period — e.g. Box Hill subdivision lots that settle direct).
+  // The pre-fix gate used (1) only, so projects with full settlements but no presales
+  // reported $0 sold/exchanged at any historical state.
   const grvSoldExchanged = inputs.grvItems
-    .filter(g => g.preSaleExchangeMonth > 0 && g.preSaleExchangeMonth <= lastActualPeriodNum)
     .filter(g => Number.isFinite(g.currentSalePrice) && g.currentSalePrice > 0)
+    .filter(g =>
+      (g.preSaleExchangeMonth > 0 && g.preSaleExchangeMonth <= lastActualPeriodNum) ||
+      (g.settlementMonth > 0 && g.settlementMonth <= lastActualPeriodNum)
+    )
     .reduce((s, g) => s + g.currentSalePrice, 0);
 
   return {
