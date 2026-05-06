@@ -103,7 +103,7 @@ console.log(`  JV Interest Compound: ${inputs.equityJV.interestCompound === 1 ? 
 
 const data = runCalculations(admin, inputs);
 const er = data.equityReturns;
-const cf = data.feasibility;
+const _cf = data.feasibility;
 
 console.log('\n=== JV Partner Equity Returns (Output) ===\n');
 console.log(`  Coupon Interest Percent (from UI): ${(er.jvPartner.couponInterestPercent * 100).toFixed(2)}%`);

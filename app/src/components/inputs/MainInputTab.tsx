@@ -1090,7 +1090,7 @@ export function MainInputTab() {
     if (!file) return;
     try {
       const result = await parseSCurveFile(file);
-      let summary: string[] = [];
+      const summary: string[] = [];
 
       const nextAdmin: Partial<typeof admin> = {};
 
