@@ -47,9 +47,16 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
     headerBg: 'bg-green-800 text-white',
     rows: [
       { label: 'GRV Settlements', getValue: c => c.grvSettlements, textColor: 'text-green-700' },
+      // R9 — surfacing memo: GRV deposits at exchange period (held in trust, not
+      // recognised as cashflow inflow; included for transparency).
+      { label: 'GRV Deposits (memo, held in trust)', getValue: c => c.grvDeposits, textColor: 'text-gray-500' },
       { label: 'Rental Income', getValue: c => c.rentalIncome, textColor: 'text-green-700' },
       { label: 'Other Income', getValue: c => c.otherIncome, textColor: 'text-green-700' },
-      { label: 'GST on Revenue (remitted to ATO)', getValue: c => c.gstOnRevenue, textColor: 'text-orange-700' },
+      { label: 'GST on Revenue (remitted via BAS)', getValue: c => c.gstOnRevenue, textColor: 'text-orange-700' },
+      // R8 — surfacing memo: GST withholding (TAA 1953 Sch 1, s.14-250). Post
+      // PR #28 the netCashflow no longer deducts withholding (attribution-only),
+      // but it remains on the cashflow row for compliance reporting visibility.
+      { label: 'GST Withholding (s.14-250 — memo, attribution only)', getValue: c => c.gstWithholding ?? 0, textColor: 'text-gray-500' },
       {
         label: 'Total Revenue (net of GST on Revenue)',
         getValue: c => c.grvSettlements + c.rentalIncome + c.otherIncome - c.gstOnRevenue,

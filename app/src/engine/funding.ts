@@ -4,7 +4,12 @@ import { sum } from '../utils';
 // Collect warnings for equity backstop overruns — reset per engine run
 const _fundingWarnings: string[] = [];
 export function clearFundingWarnings(): void { _fundingWarnings.length = 0; }
-export function getFundingWarnings(): string[] { return [..._fundingWarnings]; }
+export function getFundingWarnings(): string[] {
+  // De-dupe by exact string. solveFunding iterates internally (up to maxIterations
+  // ~50) and is called twice from runCalculations (prelim + final), so per-period
+  // warnings can be pushed dozens of times. Each unique message should appear once.
+  return [...new Set(_fundingWarnings)];
+}
 
 // Zero-value facility used as a safe fallback when an optional facility is missing
 // (e.g. when loading a project saved before Senior Facility #2 was added).
