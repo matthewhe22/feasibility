@@ -791,7 +791,24 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       standardRatedSupplies += item.currentSalePrice;
       gstOnStandardSupplies += item.currentSalePrice * gstRate / (1 + gstRate);
     }
-    else if (supplyType === 'input-taxed') inputTaxedSupplies += item.currentSalePrice;
+    else if (supplyType === 'input-taxed') {
+      // B05 — Suppress the s.11-15 input-taxed contradiction warning when the
+      // user has merely left gstIncluded=false on a residential item (legacy
+      // default fallback). Per GSTA s.40-65, NEW residential first-sale is a
+      // taxable supply (margin scheme via Div 75) — NOT input-taxed. Only the
+      // SECOND-and-subsequent sale of residential is input-taxed (s.40-65(2)).
+      // The legacy gstIncluded=false → input-taxed inference is correct for
+      // long-term residential rental but mis-classifies plain residential
+      // first-sale subdivisions and triggers a false-positive ITC warning.
+      // Fix: count toward inputTaxedSupplies only when the user has EXPLICITLY
+      // set supplyType='input-taxed' OR when the revenueType is non-residential.
+      // Residential items remain in the GST schedule (margin-scheme path
+      // handles the actual GST math); only the contradiction-warning surface
+      // skips them.
+      const isAmbiguousResidential =
+        item.revenueType === 'Residential' && !item.supplyType;
+      if (!isAmbiguousResidential) inputTaxedSupplies += item.currentSalePrice;
+    }
     else if (supplyType === 'going-concern') goingConcernSupplies += item.currentSalePrice;
   }
   const taxableMargin = Math.max(0, marginSchemeSupplies - marginSchemeDeduction);

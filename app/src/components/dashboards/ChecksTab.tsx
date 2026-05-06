@@ -30,6 +30,7 @@ function statusColor(s: CheckStatus) {
     case 'WARN': return 'bg-yellow-100 text-yellow-800';
     case 'FAIL': return 'bg-red-100 text-red-800';
     case 'INFO': return 'bg-blue-50 text-blue-700';
+    case 'N/A':  return 'bg-gray-100 text-gray-600';
   }
 }
 
@@ -278,31 +279,42 @@ export function ChecksTab() {
   }
 
   // ── 6. EQUITY BALANCE ───────────────────────────────────────────────────────
-  // Total equity injected should be fully returned as repatriation (profit is separate)
+  // Total equity returned to the developer = principal repatriation + profit
+  // distribution. On a profitable project the developer should receive AT
+  // LEAST what they put in (PASS). On a loss-making project, returned <
+  // injected (FAIL — the gap is the realised loss).
+  // B04 — previously this check compared injection vs repatriation alone,
+  // ignoring profitDistribution. On Sydney Tower v1 ($117.3M injected, $117.3M
+  // repatriated, $112.4M profit) the check displayed a $68,915 'deficit'
+  // because principal returned was $68k short of injection — but the developer
+  // received $229.7M total. Including profit in the comparison produces an
+  // accurate verdict; the principal-only sub-accounting is preserved in notes.
   {
     const totalInjected = sum(cf.map(c => c.equityInjection));
     const totalRepatriated = sum(cf.map(c => c.equityRepatriation));
     const totalProfit = sum(cf.map(c => c.profitDistribution));
+    const totalReturned = totalRepatriated + totalProfit;
+    const variance = totalReturned - totalInjected;
+    const status: CheckStatus =
+      Math.abs(variance) <= 100 ? 'PASS'
+      : variance > 0 ? 'PASS'                       // returned > injected (profit) → PASS
+      : f.totalProfit < 0 ? 'FAIL'                   // loss-making + deficit → FAIL
+      : Math.abs(variance) < 1_000 ? 'WARN'          // small principal residual on a profitable project
+      : 'FAIL';
     checks.push({
       id: 'equity-balance',
       category: 'Equity',
-      // R5 — labelling. The original "Equity principal fully returned"
-      // description showed WARN even when there was a $59M+ deficit on a
-      // loss-making project. Now we describe the actual relationship: equity
-      // injection vs repatriation. FAIL when injection > repatriation by more
-      // than $1k (a real cash deficit), upgraded to FAIL on a loss-making
-      // project regardless of the gap (the missing equity is the loss).
-      description: 'Equity injection ≈ repatriation (no equity deficit)',
-      expected: formatCurrency(totalInjected),
-      actual: formatCurrency(totalRepatriated),
-      variance: formatCurrency(totalRepatriated - totalInjected),
-      status: near(totalInjected, totalRepatriated, 100) ? 'PASS'
-        : f.totalProfit < 0 ? 'FAIL'
-        : 'WARN',
-      notes: `Injected: ${formatCurrency(totalInjected)}, Repatriated: ${formatCurrency(totalRepatriated)}, Profit: ${formatCurrency(totalProfit)}.` +
-        (totalRepatriated < totalInjected
-          ? ` Deficit ${formatCurrency(totalInjected - totalRepatriated)} — equity not fully recovered.` +
-            (f.totalProfit < 0 ? ' Project is loss-making; this is a real loss of equity.' : '')
+      description: 'Equity returned (principal + profit) ≥ injected',
+      expected: `≥ ${formatCurrency(totalInjected)}`,
+      actual: formatCurrency(totalReturned),
+      variance: formatCurrency(variance),
+      status,
+      notes: `Injected: ${formatCurrency(totalInjected)}, Principal repatriated: ${formatCurrency(totalRepatriated)}, ` +
+        `Profit distributed: ${formatCurrency(totalProfit)}, Total returned: ${formatCurrency(totalReturned)}.` +
+        (variance < -100 && f.totalProfit < 0
+          ? ` Project is loss-making; deficit ${formatCurrency(-variance)} is a real loss of equity.`
+          : variance < -100
+          ? ` Small principal-side residual; likely cap-int rounding in the waterfall sweep.`
           : ''),
     });
   }
@@ -552,46 +564,84 @@ export function ChecksTab() {
   }
 
   // Funding warnings — WARN by default; FAIL on solver-non-convergence (severity error)
-  fundingWarns.forEach((w, i) => {
-    const isSolverError = w.severity === 'error';
+  // B07 — guarantee a Funding row even when there are no warnings, so the
+  // total-checks count doesn't silently shrink when all is well.
+  if (fundingWarns.length === 0) {
     checks.push({
-      id: `funding-warn-${i}`,
+      id: 'funding-ok',
       category: 'Funding',
-      description: w.message,
-      expected: 'Within facility limits / converged',
-      actual: 'See message',
-      status: isSolverError ? 'FAIL' : 'WARN',
-      notes: isSolverError
-        ? 'Debt solver did not converge — finance costs and facility sizes may be inaccurate.'
-        : 'Funding constraint or covenant flag from the cashflow solver.',
+      description: 'No funding/solver warnings',
+      expected: 'No warnings',
+      actual: 'No warnings',
+      status: 'PASS',
+      notes: 'All facility covenants respected; debt solver converged within tolerance.',
     });
-  });
+  } else {
+    fundingWarns.forEach((w, i) => {
+      const isSolverError = w.severity === 'error';
+      checks.push({
+        id: `funding-warn-${i}`,
+        category: 'Funding',
+        description: w.message,
+        expected: 'Within facility limits / converged',
+        actual: 'See message',
+        status: isSolverError ? 'FAIL' : 'WARN',
+        notes: isSolverError
+          ? 'Debt solver did not converge — finance costs and facility sizes may be inaccurate.'
+          : 'Funding constraint or covenant flag from the cashflow solver.',
+      });
+    });
+  }
 
-  // Revenue warnings — WARN
-  revenueWarns.forEach((w, i) => {
+  // Revenue warnings — WARN. B07 — empty case shown as PASS.
+  if (revenueWarns.length === 0) {
     checks.push({
-      id: `revenue-warn-${i}`,
+      id: 'revenue-ok',
       category: 'Revenue',
-      description: w.message,
-      expected: 'Valid revenue inputs',
-      actual: 'See message',
-      status: 'WARN',
-      notes: 'Revenue line item input ordering or span overflow.',
+      description: 'No revenue input warnings',
+      expected: 'No warnings',
+      actual: 'No warnings',
+      status: 'PASS',
+      notes: 'All revenue items have valid timing inputs.',
     });
-  });
+  } else {
+    revenueWarns.forEach((w, i) => {
+      checks.push({
+        id: `revenue-warn-${i}`,
+        category: 'Revenue',
+        description: w.message,
+        expected: 'Valid revenue inputs',
+        actual: 'See message',
+        status: 'WARN',
+        notes: 'Revenue line item input ordering or span overflow.',
+      });
+    });
+  }
 
-  // GST warnings — WARN
-  gstWarns.forEach((w, i) => {
+  // GST warnings — WARN. B07 — empty case shown as PASS.
+  if (gstWarns.length === 0) {
     checks.push({
-      id: `gst-warn-${i}`,
+      id: 'gst-ok',
       category: 'GST',
-      description: w.message,
-      expected: 'Valid GST configuration',
-      actual: 'See message',
-      status: 'WARN',
-      notes: 'GST configuration or supply-type routing flag.',
+      description: 'No GST configuration warnings',
+      expected: 'No warnings',
+      actual: 'No warnings',
+      status: 'PASS',
+      notes: 'GST rate, supply-type routing and cost-side classification all internally consistent.',
     });
-  });
+  } else {
+    gstWarns.forEach((w, i) => {
+      checks.push({
+        id: `gst-warn-${i}`,
+        category: 'GST',
+        description: w.message,
+        expected: 'Valid GST configuration',
+        actual: 'See message',
+        status: 'WARN',
+        notes: 'GST configuration or supply-type routing flag.',
+      });
+    });
+  }
 
   // General/uncategorised — WARN
   generalWarns.forEach((w, i) => {

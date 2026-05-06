@@ -323,8 +323,19 @@ export function InternalDashboard() {
                     <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.jvPartner.totalEquityRepatriation)}</td>
                     <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.developer.totalEquityRepatriation)}</td>
                   </tr>
+                  {/* B06 — "Profit Share Balance" was misleading: the engine
+                      populates both this column and the totalProfitShare row
+                      with the same value (sum of waterfall profitDistributions)
+                      to keep the Total = JV + Dev column-sum invariant. The
+                      duplicated row created the illusion of an outstanding
+                      profit-share liability of $410M+ on highly leveraged
+                      profitable projects (e.g. Project Demo) when in reality
+                      the figure was just the cumulative profit distributed.
+                      Renamed to "Profit Distributed (cumulative)" to make the
+                      flow-vs-balance distinction explicit; "Total Profit
+                      Share" remains as the bold summary line. */}
                   <tr className="border-b border-gray-100">
-                    <td className="px-2 py-0.5">Profit Share Balance</td>
+                    <td className="px-2 py-0.5" title="Cumulative profit distributed by the waterfall to date. Not an outstanding balance.">Profit Distributed (cumulative)</td>
                     <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.total.profitShareBalance)}</td>
                     <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.jvPartner.profitShareBalance)}</td>
                     <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.developer.profitShareBalance)}</td>
