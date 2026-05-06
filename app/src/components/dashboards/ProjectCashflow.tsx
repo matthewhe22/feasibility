@@ -105,6 +105,8 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
       { label: 'Land Loan Repayment', getValue: c => c.landLoanRepayment },
       { label: 'Land Loan Interest', getValue: c => c.landLoanInterest },
       { label: 'Land Loan Fees', getValue: c => c.landLoanFees },
+      // LL2 — Memo of the senior-takeout transaction at construction start.
+      { label: 'Senior Takeout of Land Loan (memo)', getValue: c => c.landLoanTakeoutBySenior ?? 0, textColor: 'text-gray-500' },
       { label: 'Land Loan Balance', closingBalance: true, getValue: c => c.landLoanBalance, bold: true, bg: 'bg-orange-50' },
     ],
   },

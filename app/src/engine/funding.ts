@@ -96,6 +96,12 @@ export interface FundingResult {
   landLoanRepayments: number[];
   landLoanInterest: number[];
   landLoanFees: number[];
+  /** LL2 — Senior takeout of land loan at construction start. Captures the
+   *  amount senior absorbs from the land loan (principal + accrued interest)
+   *  in one period for UI display. Underlying flows still appear in
+   *  landLoanRepayments[i] and seniorDrawdowns[i]; this memo labels the
+   *  combined transaction so the cashflow UI can render one row. */
+  landLoanTakeoutBySenior: number[];
 
   seniorBalance: number[];
   seniorDrawdowns: number[];
@@ -460,6 +466,11 @@ function runFundingWaterfall(
   let snr2RunningBalance  = 0;
   let mzRunningBalance    = 0;
   let llAccruedInterest   = 0;
+  // LL2 — Track the senior-takeout transaction at construction start as a
+  // single per-period figure for UI display. landLoanRepayments[i] +
+  // seniorDrawdowns[i] still record the underlying flows; this memo just
+  // labels the combined transaction so it can render as one row.
+  const landLoanTakeoutBySenior = new Array(n).fill(0);
 
   let cumulativeEquity    = 0;
   let jvCumulative        = 0;
@@ -546,7 +557,15 @@ function runFundingWaterfall(
       }
     }
 
-    // ── 3. Land loan interest (accrued quarterly) ──────────────────────────────
+    // ── 3. Land loan interest (accrued; cash-pay or capitalised per flag) ────
+    // LL1: when landLoan.isCapitalised is true, accrued interest compounds into
+    // llRunningBalance (no cash outflow during the holding period); when false
+    // (default) interest is paid in cash each payment-frequency cycle. The
+    // flag was previously ignored — interest was always cash-paid even on
+    // facilities the user marked as capitalised. This is the more common
+    // practice: most land loans are interest-only paid in cash during the
+    // bridge period; some are capitalised so the developer holds no cash
+    // burden until takeout.
     if (llOpenBalance > 0) {
       const accrued = periodInterest(llOpenBalance, landLoan.interestRate, days, daysPerYear);
       llAccruedInterest += accrued;
@@ -556,22 +575,65 @@ function runFundingWaterfall(
       if ((monthsSinceLLStart + 1) % freq === 0) {
         llInterest[i]      = llAccruedInterest;
         totalLandInterest += llAccruedInterest;
-        bankBalance       -= llAccruedInterest;
-        llAccruedInterest  = 0;
+        if (landLoan.isCapitalised) {
+          // Capitalised: compound into balance; no cash impact this period.
+          // The takeout transaction (step 4) will repay this in full from senior.
+          llRunningBalance += llAccruedInterest;
+          // Track as a synthetic drawdown for cashflow balance — interest
+          // creates new debt rather than draining cash.
+          llDrawdowns[i] += llAccruedInterest;
+        } else {
+          // Cash-pay (default): direct outflow.
+          bankBalance -= llAccruedInterest;
+        }
+        llAccruedInterest = 0;
       }
     }
 
-    // ── 4. Land loan repayment at senior start (refinanced into senior) ────────
+    // ── 4. Senior takeout of land loan at construction start (LL2). ───────────
+    // The senior facility refinances the land loan in full: senior drawdown
+    // pays principal + any unpaid accrued interest directly. No net cash
+    // movement to the project — it's a balance-sheet swap (land debt → senior
+    // debt). Tracked separately via the dedicated memo so the cashflow UI
+    // shows this as a single "Senior Takeout of Land Loan: $X" line rather
+    // than two unbalanced rows.
+    //
+    // Covenant guard: if the takeout would push senior past its covenant cap,
+    // emit a [FUNDING] warning. The takeout still happens (real-world senior
+    // does refinance the land loan), but the project is in covenant breach
+    // territory — the user must adjust facility / equity.
     if (hasSenior && i === snrStartIdx && llRunningBalance > 0) {
+      // First, settle any unpaid accrued interest into the running balance so
+      // the takeout amount captures the full obligation.
       if (llAccruedInterest > 0) {
+        llRunningBalance += llAccruedInterest;
+        // For capitalised land-loan, treat as a final synthetic drawdown
+        // (matches the LL1 capitalised path); for cash-pay, this period would
+        // have already paid the cycle's accrued, so this branch is rare. In
+        // both cases, recognise as part of total interest.
+        if (landLoan.isCapitalised) {
+          llDrawdowns[i]    += llAccruedInterest;
+        }
         llInterest[i]     += llAccruedInterest;
         totalLandInterest += llAccruedInterest;
-        bankBalance       -= llAccruedInterest;
         llAccruedInterest  = 0;
       }
-      llRepayments[i]  = llRunningBalance;
-      bankBalance     -= llRunningBalance;
-      llRunningBalance = 0;
+      const takeoutAmount = llRunningBalance;
+      // Senior absorbs the takeout: drawdown + balance increase, no cash impact.
+      snrDrawdowns[i]   += takeoutAmount;
+      snrRunningBalance += takeoutAmount;
+      // Land loan: explicit repayment, no cash decrement (senior paid it).
+      llRepayments[i]   += takeoutAmount;
+      llRunningBalance   = 0;
+      // Track for UI display.
+      landLoanTakeoutBySenior[i] = takeoutAmount;
+
+      // Covenant guard: warn if takeout pushed senior past covenant cap.
+      if (snrRunningBalance > seniorAutoSizeCap + 1) {
+        _fundingWarnings.push(
+          `[FUNDING] Senior takeout of land loan ($${Math.round(takeoutAmount).toLocaleString()}) at period ${i + 1} pushed Senior #1 balance to $${Math.round(snrRunningBalance).toLocaleString()} — above covenant cap $${Math.round(seniorAutoSizeCap).toLocaleString()}. Project would breach LTC/LVR. Increase Senior facility or equity, OR reduce land loan principal.`
+        );
+      }
     }
     llBalance[i] = llRunningBalance;
 
@@ -1020,6 +1082,7 @@ function runFundingWaterfall(
     landLoanRepayments: llRepayments,
     landLoanInterest: llInterest,
     landLoanFees: llFees,
+    landLoanTakeoutBySenior,
 
     seniorBalance: snrBalance,
     seniorDrawdowns: snrDrawdowns,
@@ -1075,7 +1138,7 @@ function createEmptyResult(n: number): FundingResult {
   const z = () => new Array(n).fill(0);
   return {
     landLoanBalance: z(), landLoanDrawdowns: z(), landLoanRepayments: z(),
-    landLoanInterest: z(), landLoanFees: z(),
+    landLoanInterest: z(), landLoanFees: z(), landLoanTakeoutBySenior: z(),
     seniorBalance: z(), seniorDrawdowns: z(), seniorRepayments: z(),
     seniorInterest: z(), seniorFees: z(),
     senior2Balance: z(), senior2Drawdowns: z(), senior2Repayments: z(),

@@ -437,6 +437,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     landLoanRepayment: at(funding.landLoanRepayments, i),
     landLoanInterest: at(funding.landLoanInterest, i),
     landLoanFees: at(funding.landLoanFees, i),
+    landLoanTakeoutBySenior: at(funding.landLoanTakeoutBySenior, i),
     seniorDrawdown: at(funding.seniorDrawdowns, i),
     seniorRepayment: at(funding.seniorRepayments, i),
     seniorInterest: at(funding.seniorInterest, i),
