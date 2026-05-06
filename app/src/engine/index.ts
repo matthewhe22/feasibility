@@ -294,16 +294,29 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       }
     }
 
-    // Deposit GST — GST liability attaches when deposits are received (GSTA s.9-70).
-    // Allocate across presale span; together with settleGSTAmount above the total
-    // equals item.currentSalePrice × effectiveFactor × 1/11.
+    // M1 — Deposit GST recognition. Pre-fix the engine attributed deposit GST
+    // to the EXCHANGE month (GSTA s.9-70: GST liability attaches when consideration
+    // is received). For property feasibility *cashflow* modelling under Australian
+    // conveyancing practice, presale deposits are held by a stakeholder
+    // (lawyer/agent) and are NOT consideration for the developer until applied at
+    // settlement. GSTR 2006/2 + Lebara Mobile (2009 FCA) / Reliance Carpets (HCA
+    // 2008) line of authority: a stakeholder-held deposit is not consideration
+    // until released — so GST is not attributable until settlement.
+    //
+    // Therefore deposit GST is now recognised at the SETTLEMENT period (mirroring
+    // the deposit cash, which is also released at settlement). The per-period
+    // settle GST (gstOnRevenue) is computed on the settlement balance only;
+    // gstOnDeposits supplements at settlement period to capture the deposit-GST
+    // portion. Total GST per item = settle GST + deposit GST = full margin-scheme
+    // liability, recognised at settlement.
     if (hasPresale) {
       const depositGST = item.currentSalePrice * depositPct * gstRate / (1 + gstRate) * effectiveFactor;
-      const span = Math.max(1, item.preSaleSpan);
+      const settleSpanRaw = item.settlementSpan ?? 1;
+      const span = Math.max(1, Number.isFinite(settleSpanRaw) ? settleSpanRaw : 1);
+      const startIdx = item.settlementMonth - 1;
       const perMonth = depositGST / span;
-      const startIdx = item.preSaleExchangeMonth - 1;
-      for (let i = 0; i < span; i++) {
-        const idx = startIdx + i;
+      for (let k = 0; k < span; k++) {
+        const idx = startIdx + k;
         if (idx >= 0 && idx < n) gstOnDeposits[idx] += perMonth;
       }
     }

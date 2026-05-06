@@ -66,7 +66,7 @@ function getFirstRevenueRepayment(seq: ('senior'|'mezz'|'equity')[], facility: '
   const cf = r.cashflows;
   // First period where the facility gets repaid
   for (let i = 0; i < cf.length; i++) {
-    const repay = facility === 'senior' ? cf[i].seniorRepayment : cf[i].mezzRepayment;
+    const c = cf[i]; if (!c) continue; const repay = facility === 'senior' ? c.seniorRepayment : c.mezzRepayment;
     if (repay > 0) return i;
   }
   return -1;
@@ -93,8 +93,8 @@ function getFirstRevenueRepayment(seq: ('senior'|'mezz'|'equity')[], facility: '
 {
   const r = runCalculations(baseAdmin, fixture());
   const cf = r.cashflows;
-  const firstSnr = cf.findIndex(c => c.seniorRepayment > 0);
-  const firstMezz = cf.findIndex(c => c.mezzRepayment > 0);
+  const firstSnr = cf.findIndex(c => (c.seniorRepayment ?? 0) > 0);
+  const firstMezz = cf.findIndex(c => (c.mezzRepayment ?? 0) > 0);
   assert(firstSnr >= 0 && firstSnr <= firstMezz,
     `M3 — default sequence is senior-first (no admin override)`);
 }
