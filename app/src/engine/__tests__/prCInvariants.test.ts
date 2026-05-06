@@ -119,12 +119,20 @@ function fixture(opts: { gstIncluded?: boolean; revenueType?: string; settled?: 
 
 // ── R15: input-taxed + ITC contradiction warning emitted. ────────────────────
 {
-  // gstIncluded=false on Residential routes to input-taxed via resolveSupplyType.
-  // But also need addGST=true on costs to get gstOnCosts > 0 (that's the default in fixture).
-  const r = runCalculations(baseAdmin, fixture({ gstIncluded: false }));
+  // B05 — the test previously used Residential gstIncluded=false to trigger
+  // the warning. After B05 the legacy gstIncluded=false → input-taxed
+  // inference is suppressed for Residential items (s.40-65 first-sale = taxable),
+  // so to genuinely test the s.11-15 contradiction we now set EXPLICIT
+  // supplyType='input-taxed' on the revenue item AND use a non-residential
+  // type so the user is unambiguously declaring an input-taxed supply (e.g.
+  // residential rental treated as Hotel, long-term commercial sublease, etc.).
+  const fx = fixture({});
+  fx.grvItems[0]!.revenueType = 'Hotel';
+  fx.grvItems[0]!.supplyType = 'input-taxed';
+  const r = runCalculations(baseAdmin, fx);
   const warns = (r.warnings ?? []).join(' | ');
   assert(/input-taxed contradiction/i.test(warns) || /s\.11-15/.test(warns),
-    `R15 — engine warns about input-taxed + ITC. Warnings: ${warns.slice(0, 200)}`);
+    `R15 — engine warns about explicit input-taxed + ITC. Warnings: ${warns.slice(0, 200)}`);
 }
 
 // ── R16: applyGSTWithholding default = true on margin-scheme projects. ────────
