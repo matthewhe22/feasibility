@@ -359,18 +359,34 @@ function runFundingWaterfall(
   }, 0);
   const nrv = totalGRV - gstOnResidential - backEndSelling - frontEndSelling;
 
-  // ===== Facility limits (LTC / LVR) =====
+  // ===== Facility limits (LTC / LVR) — M4: auto-size to covenant caps =====
+  // The user-configured facilityLimit represents the term-sheet commitment.
+  // The LTC/LVR caps are the covenant ceilings. Pre-fix the engine bound
+  // senior at min(facility, ltc, lvr), so even with LTC/LVR headroom remaining
+  // a low facilityLimit caused the equity backstop to fire on underfunded
+  // projects. M4: senior/mezz auto-size up to min(ltcCap, lvrCap), with a
+  // funding warning when the actual peak balance exceeds the user-configured
+  // facilityLimit. LTC/LVR caps are NEVER breached.
   const seniorLtcLimit  = senior.ltcTarget  > 0 ? tdc * senior.ltcTarget  : Infinity;
   const seniorLvrLimit  = senior.lvrTarget  > 0 ? nrv * senior.lvrTarget  : Infinity;
-  const seniorLimit     = Math.min(senior.facilityLimit,  seniorLtcLimit,  seniorLvrLimit);
+  const seniorCovenantCap = Math.min(seniorLtcLimit, seniorLvrLimit);
+  const seniorRequestedLimit = senior.facilityLimit > 0 ? senior.facilityLimit : seniorCovenantCap;
+  const seniorLimit     = Math.min(seniorRequestedLimit, seniorCovenantCap);
+  // Auto-size cap (covenant-bound) — the engine may grow senior up to this
+  // ceiling if the requested facilityLimit is hit and there's still cost gap.
+  const seniorAutoSizeCap = seniorCovenantCap;
 
   const senior2LtcLimit = senior2.ltcTarget > 0 ? tdc * senior2.ltcTarget : Infinity;
   const senior2LvrLimit = senior2.lvrTarget > 0 ? nrv * senior2.lvrTarget : Infinity;
-  const senior2Limit    = Math.min(senior2.facilityLimit, senior2LtcLimit, senior2LvrLimit);
+  const senior2CovenantCap = Math.min(senior2LtcLimit, senior2LvrLimit);
+  const senior2Limit    = Math.min(senior2.facilityLimit > 0 ? senior2.facilityLimit : senior2CovenantCap, senior2CovenantCap);
 
   const mezzLtcLimit    = mezz.ltcTarget    > 0 ? tdc * mezz.ltcTarget    : Infinity;
   const mezzLvrLimit    = mezz.lvrTarget    > 0 ? nrv * mezz.lvrTarget    : Infinity;
-  const mezzLimit       = Math.min(mezz.facilityLimit,    mezzLtcLimit,    mezzLvrLimit);
+  const mezzCovenantCap = Math.min(mezzLtcLimit, mezzLvrLimit);
+  const mezzRequestedLimit = mezz.facilityLimit > 0 ? mezz.facilityLimit : mezzCovenantCap;
+  const mezzLimit       = Math.min(mezzRequestedLimit, mezzCovenantCap);
+  const mezzAutoSizeCap = mezzCovenantCap;
 
   // ===== Equity caps (per entity) =====
   const totalCostsExcFin  = sum(monthlyCostsExcFinance);
@@ -705,10 +721,11 @@ function runFundingWaterfall(
     // ── 9. Gap fill ────────────────────────────────────────────────────────────
     if (bankBalance < 0) {
       if (equityDrawdownMode === 'pro-rata' && seniorDrawActive) {
-        // Pro-rata: split the gap proportionally between Developer equity and senior each period
+        // Pro-rata: split the gap proportionally between Developer equity and senior each period.
+        // M4 — Auto-size senior up to the covenant cap (not the requested limit).
         const gap = -bankBalance;
         const eqAvail  = Math.max(0, developerCap - (cumulativeEquity - jvCumulative));
-        const snrAvail = Math.max(0, seniorLimit - snrRunningBalance);
+        const snrAvail = Math.max(0, seniorAutoSizeCap - snrRunningBalance);
         const totalAvail = eqAvail + snrAvail;
         if (totalAvail > 0) {
           const eqDraw  = Math.min(gap * (eqAvail  / totalAvail), eqAvail);
@@ -742,7 +759,10 @@ function runFundingWaterfall(
           if (bankBalance >= 0) break;
 
           if (entry.type === 'senior' && seniorDrawActive) {
-            const avail = Math.max(0, seniorLimit - snrRunningBalance);
+            // M4 — Auto-size headroom: avail is computed against the covenant
+            // cap, not the requested facilityLimit. If the balance grows beyond
+            // facilityLimit, the engine surfaces an 'Auto-sized senior' notice.
+            const avail = Math.max(0, seniorAutoSizeCap - snrRunningBalance);
             if (avail > 0) {
               const draw         = Math.min(-bankBalance, avail);
               snrDrawdowns[i]   += draw;
@@ -758,7 +778,8 @@ function runFundingWaterfall(
               bankBalance        += draw;
             }
           } else if (entry.type === 'mezz' && hasMezz && i >= mezzStartIdx) {
-            const avail = Math.max(0, mezzLimit - totalMezzDrawn);
+            // M4 — Auto-size headroom (mirror senior).
+            const avail = Math.max(0, mezzAutoSizeCap - totalMezzDrawn);
             if (avail > 0) {
               const draw         = Math.min(-bankBalance, avail);
               mzDrawdowns[i]    += draw;
@@ -948,14 +969,28 @@ function runFundingWaterfall(
     // above its committed limit, the model is implicitly relying on an
     // accordion the lender hasn't committed. Surface so the term sheet can be
     // restructured (or interest paid current rather than capitalised).
-    if (mezzLimit > 0 && mzRunningBalance > mezzLimit + 1) {
+    if (mzRunningBalance > mezzAutoSizeCap + 1) {
       _fundingWarnings.push(
-        `Period ${i + 1}: Mezz balance $${Math.round(mzRunningBalance).toLocaleString()} exceeds committed limit $${Math.round(mezzLimit).toLocaleString()} (capitalised interest pushed over cap). Restructure: pay mezz interest current, or increase the commitment.`
+        `Period ${i + 1}: Mezz balance $${Math.round(mzRunningBalance).toLocaleString()} exceeds covenant cap $${Math.round(mezzAutoSizeCap).toLocaleString()} — capitalised interest pushed above LTC/LVR ceiling. Restructure: pay interest current or increase commitment.`
+      );
+    } else if (mezzRequestedLimit > 0 && mezzRequestedLimit < mezzAutoSizeCap && mzRunningBalance > mezzRequestedLimit + 1) {
+      _fundingWarnings.push(
+        `[INFO] Auto-sized Mezz from requested limit $${Math.round(mezzRequestedLimit).toLocaleString()} up to $${Math.round(mzRunningBalance).toLocaleString()} (covenant cap $${Math.round(mezzAutoSizeCap).toLocaleString()}) to cover cost shortfall. LTC/LVR caps respected.`
       );
     }
-    if (seniorLimit > 0 && snrRunningBalance > seniorLimit + 1) {
+    // M4 — Distinguish auto-size (within covenant) from genuine over-cap
+    // (capitalised interest pushed beyond covenant).
+    if (snrRunningBalance > seniorAutoSizeCap + 1) {
       _fundingWarnings.push(
-        `Period ${i + 1}: Senior #1 balance $${Math.round(snrRunningBalance).toLocaleString()} exceeds committed limit $${Math.round(seniorLimit).toLocaleString()}.`
+        `Period ${i + 1}: Senior #1 balance $${Math.round(snrRunningBalance).toLocaleString()} exceeds covenant cap $${Math.round(seniorAutoSizeCap).toLocaleString()} — capitalised interest has pushed above LTC/LVR ceiling. Restructure: pay interest current or increase commitment.`
+      );
+    } else if (seniorRequestedLimit > 0 && seniorRequestedLimit < seniorAutoSizeCap && snrRunningBalance > seniorRequestedLimit + 1) {
+      // Note: this warning is emitted multiple times across periods; the
+      // de-dupe in getFundingWarnings (PR #30 / R4) collapses identical
+      // messages. We use a single representative message rather than
+      // per-period to avoid spamming.
+      _fundingWarnings.push(
+        `[INFO] Auto-sized Senior #1 from requested limit $${Math.round(seniorRequestedLimit).toLocaleString()} up to $${Math.round(snrRunningBalance).toLocaleString()} (covenant cap $${Math.round(seniorAutoSizeCap).toLocaleString()}) to cover cost shortfall. LTC/LVR caps respected.`
       );
     }
     if (senior2Limit > 0 && snr2RunningBalance > senior2Limit + 1) {
