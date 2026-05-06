@@ -368,36 +368,62 @@ export function InternalDashboard() {
                   </tr>
                 </thead>
                 <tbody>
+                  {/* R12 — All facility rows now explicitly labelled "(Committed)" so
+                      the metric (peak commitment, not outstanding) is unambiguous. */}
                   <tr className="border-b">
-                    <td className="px-2 py-0.5">Senior Facility #1</td>
+                    <td className="px-2 py-0.5">Senior Facility #1 (Committed)</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(cs.seniorLTC)}</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(cs.seniorLVR)}</td>
                     <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(cs.seniorAmount)}</td>
                   </tr>
                   {cs.senior2Amount > 0 && (
                     <tr className="border-b">
-                      <td className="px-2 py-0.5">Senior Facility #2</td>
+                      <td className="px-2 py-0.5">Senior Facility #2 (Committed)</td>
                       <td className="px-2 py-0.5 text-right">{formatPercent(cs.senior2LTC)}</td>
                       <td className="px-2 py-0.5 text-right">{formatPercent(cs.senior2LVR)}</td>
                       <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(cs.senior2Amount)}</td>
                     </tr>
                   )}
                   <tr className="border-b">
-                    <td className="px-2 py-0.5">Mezzanine (Principal)</td>
+                    <td className="px-2 py-0.5">Mezzanine (Committed)</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(cs.mezzLTC)}</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(cs.mezzLVR)}</td>
                     <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(cs.mezzAmount)}</td>
                   </tr>
                   <tr className="border-b">
-                    <td className="px-2 py-0.5">Equity (Net of Repatriation)</td>
+                    <td className="px-2 py-0.5" title="Peak equity outstanding — max of cumulative-injected minus cumulative-repatriated across the timeline.">Equity (Peak Outstanding)</td>
                     <td className="px-2 py-0.5 text-right">{formatPercent(cs.equityLTC)}</td>
-                    <td className="px-2 py-0.5 text-right">{formatPercent(cs.equityLVR)}</td>
+                    {/* R11 — equity-vs-NRV isn't a meaningful ratio (equity isn't debt;
+                        no LVR concept). Render a dash instead of the misleading number. */}
+                    <td className="px-2 py-0.5 text-right text-gray-400">—</td>
                     <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(cs.equityAmount)}</td>
                   </tr>
                   <tr className="bg-blue-100 font-bold">
-                    <td className="px-2 py-1" colSpan={3}>Total</td>
+                    <td className="px-2 py-1" colSpan={3}>Total Capital Committed</td>
                     <td className="px-2 py-1 text-right font-mono">{formatCurrency(cs.total)}</td>
                   </tr>
+                  {/* R18 — Headline-honest funding posture vs Total Cost. Cap stack >100%
+                      means over-committed (legitimate when revolving lines size to peak need
+                      that's larger than total cost); <100% means underfunded — equity backstop
+                      will fire (covered separately by funding warnings). The percentage alone
+                      is misleading without the dollar variance. */}
+                  {(() => {
+                    const variance = cs.total - data.feasibility.totalCost;
+                    const pctOfCost = data.feasibility.totalCost > 0 ? cs.total / data.feasibility.totalCost : 0;
+                    const sign = variance > 1000 ? 'over' : variance < -1000 ? 'under' : 'matched';
+                    const noteColor = sign === 'matched' ? 'text-gray-500'
+                      : sign === 'over' ? 'text-orange-600' : 'text-red-600';
+                    const noteText = sign === 'matched'
+                      ? 'Funding matches total cost'
+                      : sign === 'over'
+                        ? `Over-committed by ${formatCurrency(variance)} (${(pctOfCost * 100).toFixed(1)}% of cost). Typical for revolving facilities sized to peak need; not necessarily a problem.`
+                        : `Underfunded by ${formatCurrency(-variance)} (${(pctOfCost * 100).toFixed(1)}% of cost). Equity backstop will fire — see funding warnings.`;
+                    return (
+                      <tr>
+                        <td colSpan={4} className={`px-2 py-1 text-[10px] ${noteColor} italic`}>{noteText}</td>
+                      </tr>
+                    );
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -492,7 +518,7 @@ export function InternalDashboard() {
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.landBBSY)}</td>
                   </tr>
                   <tr className="bg-blue-100 font-bold">
-                    <td className="px-2 py-1">Total all in rate</td>
+                    <td className="px-2 py-1">Interest rate (BBSY + Margin)</td>
                     <td className="px-2 py-1 text-right">{formatPercent(dr.seniorAllIn)}</td>
                     <td className="px-2 py-1 text-right">{formatPercent(dr.senior2AllIn)}</td>
                     <td className="px-2 py-1 text-right">{formatPercent(dr.mezzAllIn)}</td>
