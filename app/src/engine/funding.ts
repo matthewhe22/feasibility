@@ -873,6 +873,72 @@ function runFundingWaterfall(
       }
     }
 
+    // ── 10b. Final-period equity clawback (M2). ─────────────────────────────
+    // At project end, if any debt remains AND any equity has been repatriated,
+    // claw back the equity to fully repay the debt. Cap-int residual on debt
+    // must be 0 except when project revenue + total equity is collectively
+    // insufficient (genuine default scenario, separately flagged below).
+    // Repayment order honours the configured repaymentSequence.
+    if (i === n - 1) {
+      let debtResidual = snrRunningBalance + snr2RunningBalance + mzRunningBalance;
+      if (debtResidual > 1 && totalEqRepatriated > 1) {
+        const clawback = Math.min(debtResidual, totalEqRepatriated);
+        // Reverse equity repatriation by reducing the most-recent eqRepatriations entry.
+        // Walk back through the timeline for the period that has the most repatriation.
+        let remaining = clawback;
+        for (let k = i; k >= 0 && remaining > 1; k--) {
+          const reverse = Math.min(remaining, eqRepatriations[k] ?? 0);
+          if (reverse > 0) {
+            eqRepatriations[k] = (eqRepatriations[k] ?? 0) - reverse;
+            // JV repatriation pro-rata reversal — we keep the JV/Dev split proportional
+            // to the original return (totalEqRepatriated already includes JV).
+            const jvShare = (totalJVRepatriated > 0 && totalEqRepatriated > 0)
+              ? (jvRepatriations[k] ?? 0) / (eqRepatriations[k] + reverse)
+              : 0;
+            const jvReverse = reverse * jvShare;
+            jvRepatriations[k] = Math.max(0, (jvRepatriations[k] ?? 0) - jvReverse);
+            totalJVRepatriated -= jvReverse;
+            totalEqRepatriated -= reverse;
+            remaining -= reverse;
+          }
+        }
+        // Now apply the clawback to debt in repaymentSequence order. Re-use the
+        // tranche order to mirror the cash-sweep semantics.
+        let toApply = clawback - remaining; // actually clawed-back amount
+        for (const t of repaymentSequence) {
+          if (toApply <= 1) break;
+          if (t === 'senior') {
+            if (snrRunningBalance > 0) {
+              const r = Math.min(snrRunningBalance, toApply);
+              snrRepayments[i] = (snrRepayments[i] ?? 0) + r;
+              snrRunningBalance -= r;
+              toApply -= r;
+            }
+            if (toApply > 1 && snr2RunningBalance > 0) {
+              const r = Math.min(snr2RunningBalance, toApply);
+              snr2Repayments[i] = (snr2Repayments[i] ?? 0) + r;
+              snr2RunningBalance -= r;
+              toApply -= r;
+            }
+          } else if (t === 'mezz') {
+            if (mzRunningBalance > 0) {
+              const r = Math.min(mzRunningBalance, toApply);
+              mzRepayments[i] = (mzRepayments[i] ?? 0) + r;
+              mzRunningBalance -= r;
+              toApply -= r;
+            }
+          }
+        }
+      }
+      // Default check: if debt remains AFTER clawback exhausted, surface as default.
+      const remainingDebt = snrRunningBalance + snr2RunningBalance + mzRunningBalance;
+      if (remainingDebt > 1) {
+        _fundingWarnings.push(
+          `Project default: $${Math.round(remainingDebt).toLocaleString()} of debt unpaid at project end after equity clawback exhausted. Loss capitalised against equity (not residual debt).`
+        );
+      }
+    }
+
     // ── 11. Record closing balances ────────────────────────────────────────────
     snrBalance[i]   = Math.max(0, snrRunningBalance);
     snr2Balance[i]  = Math.max(0, snr2RunningBalance);

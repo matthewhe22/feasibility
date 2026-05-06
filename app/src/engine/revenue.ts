@@ -137,8 +137,18 @@ export function calculateSellingCommissions(
     if (!grv || !sc || grv.currentSalePrice === 0) continue;
 
     const totalCommission = grv.currentSalePrice * sc.salesCommission;
-    const fe = totalCommission * sc.preCommissionPercent;
-    const be = totalCommission * (1 - sc.preCommissionPercent);
+    // M2 — Items with no presale (preSaleExchangeMonth = 0) have no presale-
+    // exchange event for front-end commission to attribute against. The user-
+    // configured preCommissionPercent (e.g. 50/50) assumes a presale window
+    // exists. Without one, the entire commission is paid at settlement (treat
+    // as back-end). Pre-fix the engine still split the commission per the
+    // configured percentage but only spread the back-end portion — the front-
+    // end portion remained in totalCost without ever appearing in the cashflow,
+    // creating a phantom $X reconciliation residual on settlement-only
+    // projects. This routing fixes that.
+    const hasPresale = grv.preSaleExchangeMonth > 0 && grv.preSaleSpan > 0;
+    const fe = hasPresale ? totalCommission * sc.preCommissionPercent : 0;
+    const be = totalCommission - fe;
     frontEnd += fe;
     backEnd += be;
   }
@@ -162,7 +172,12 @@ export function spreadBackEndCommissions(
     if (!Number.isFinite(grv.settlementMonth) || grv.settlementMonth <= 0) continue;
 
     const totalCommission = grv.currentSalePrice * sc.salesCommission;
-    const backEnd = totalCommission * (1 - sc.preCommissionPercent);
+    // M2 — Mirror calculateSellingCommissions: when no presale, the entire
+    // commission falls at settlement (treat as back-end). Without this, the
+    // back-end spread used the configured (1 - preCommissionPercent) and
+    // dropped the front-end portion entirely from the cashflow.
+    const hasPresale = grv.preSaleExchangeMonth > 0 && grv.preSaleSpan > 0;
+    const backEnd = hasPresale ? totalCommission * (1 - sc.preCommissionPercent) : totalCommission;
     if (backEnd <= 0) continue;
 
     const startIdx = grv.settlementMonth - 1;
