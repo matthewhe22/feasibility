@@ -579,7 +579,7 @@ export function InternalDashboard() {
               <DashValue label="Going-Concern Supplies" value={data.gstCompliance.goingConcernSupplies} />
               <DashValue label="Creditable Acquisitions (ex-GST)" value={data.gstCompliance.creditableAcquisitions} />
               <DashValue label="ITC Claimable" value={data.gstCompliance.itcClaimable} indent />
-              <DashValue label="GST Withholding (s.72-55)" value={data.gstCompliance.gstWithholdingTotal} indent />
+              <DashValue label="GST Withholding (TAA 1953 Sch 1, s.14-250)" value={data.gstCompliance.gstWithholdingTotal} indent />
               <div className="h-1 bg-gray-300" />
               <DashValue label="Net GST Payable to ATO" value={data.gstCompliance.netGSTPayable} bold highlight />
             </TableBox>

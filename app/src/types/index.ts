@@ -136,7 +136,7 @@ export interface RevenueLineItem {
   gstIncluded: boolean;
   /** GST supply classification. Defaults: gstIncluded=true → 'margin-scheme'; false → 'standard' for commercial, 'input-taxed' otherwise */
   supplyType?: GSTSupplyType;
-  /** Subject to GST vendor-withholding under GSTA s.72-55 (new residential premises). Defaults to true for margin-scheme residential. */
+  /** Subject to GST vendor-withholding under TAA 1953 Sch 1, s.14-250 (new residential premises). Defaults to true for margin-scheme residential. */
   withholdingApplies?: boolean;
   actuals?: number[] | undefined; // per-period actual revenue (0-based period index); overrides forecast for actual periods
 }
@@ -246,7 +246,7 @@ export interface AdminConfig {
   buildSCurves: Record<number, number[]>; // keyed by build duration (12–60), monthly weights
   /** Months to delay ITC recovery after the GST cost is incurred (0 = same-period, standard for feasibility; 1-3 for realistic quarterly BAS lag) */
   itcRecoveryLagMonths?: number;
-  /** Whether GSTA s.72-55 vendor-withholding applies to new residential settlements. Defaults to false (assume net settlement modelled) */
+  /** Whether TAA 1953 Sch 1, s.14-250 vendor-withholding applies to new residential settlements. Defaults to false (assume net settlement modelled) */
   applyGSTWithholding?: boolean;
   /** Contingency reserve GST treatment. 'none' = no GST (reserve until spent on invoiced supplies), 'full' = apply gstRate on contingency (legacy) */
   contingencyGSTMode?: 'none' | 'full';
@@ -361,7 +361,7 @@ export interface MonthlyCashflow {
   gstOnRevenue: number;
   /** GST on deposits received during presale period (BAS liability in period received, GSTA s.9-70) */
   gstOnDeposits?: number;
-  /** GST withholding retained by purchaser at settlement (GSTA s.72-55). Cash reduction, remitted direct to ATO. */
+  /** GST withholding retained by purchaser at settlement (TAA 1953 Sch 1, s.14-250). Cash reduction, remitted direct to ATO. */
   gstWithholding?: number;
   // Funding
   landLoanDrawdown: number;

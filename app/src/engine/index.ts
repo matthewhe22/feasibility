@@ -242,7 +242,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     );
   }
 
-  // GST withholding (GSTA s.72-55) — purchaser of new residential premises withholds
+  // GST withholding (TAA 1953 Sch 1, s.14-250) — purchaser of new residential premises withholds
   // 1/11 of the GST-exclusive price and remits directly to ATO. Models the cash effect:
   // developer receives net-of-withholding at settlement; ATO receives withholding.
   const applyWithholding = admin.applyGSTWithholding === true;
@@ -276,7 +276,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       gstOnRevenue[i] += periodShare * settleGSTAmount;
     }
 
-    // Withholding (GSTA s.72-55) — applies to the full supply at settlement.
+    // Withholding (TAA 1953 Sch 1, s.14-250) — applies to the full supply at settlement.
     // The purchaser withholds 1/11 of the full GST-exclusive price regardless of
     // how much was paid as deposit; this is correct per the ATO's remittance rules.
     const itemWithholds = item.withholdingApplies ?? isMarginScheme;
@@ -492,7 +492,12 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // what the developer actually receives from settlements.  Deducting it from
   // totalProfit ensures the dashboard figure equals sum(profitDistributions)
   // from the funding waterfall, which uses periodNetCash = revenue − gstOnRevenue − costs.
-  const totalGSTOnRevenue = sum(gstOnRevenue);
+  //
+  // Includes BOTH settlement-period GST (gstOnRevenue) AND deposit-period GST
+  // (gstOnDeposits) — GSTA s.9-70 attributes the GST liability when the deposit
+  // is received. The per-period cashflow row aggregates the two as a single
+  // gstOnRevenue field, so the feasibility total must match (Box Hill UAT bug 6).
+  const totalGSTOnRevenue = sum(gstOnRevenue) + sum(gstOnDeposits);
 
   // Lender GST exemption: debt facility fees are modelled as GST-free assuming
   // the lender is an exempt financial institution (GSTA s.40-60). Non-bank lenders
@@ -741,7 +746,12 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     creditableAcquisitions,
     itcClaimable: totalGSTOnCosts,
     gstWithholdingTotal,
-    netGSTPayable: (gstOnMarginSchemeSupplies + gstOnStandardSupplies + gstWithholdingTotal) - totalGSTOnCosts,
+    // Withholding under TAA 1953 Sch 1, s.14-250 is remitted directly to the ATO
+    // by the purchaser at settlement. The developer claims this as a CREDIT on
+    // their BAS (Form NAT 74045) — so the net BAS payable is gross supplies minus
+    // both ITC and the already-withheld amount. Was previously ADDED in error,
+    // producing a $W swing equal to twice the withholding (Box Hill UAT bug 1).
+    netGSTPayable: (gstOnMarginSchemeSupplies + gstOnStandardSupplies) - gstWithholdingTotal - totalGSTOnCosts,
   };
 
   // GRV Summary (Table 11). Previously totalAptGRV filtered for revenueType

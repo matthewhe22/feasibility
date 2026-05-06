@@ -1197,14 +1197,14 @@ export function MainInputTab() {
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-gray-600 w-40 shrink-0" title="GSTA s.72-55: purchaser of new residential premises withholds 1/11 at settlement and remits to ATO. Reduces developer cash at settlement.">GST Withholding (res.)</span>
+              <span className="text-xs font-medium text-gray-600 w-40 shrink-0" title="TAA 1953 Sch 1, s.14-250 (GST at Settlement, Cth): purchaser of new residential premises (or potential residential land) withholds 1/11 at settlement and remits direct to the ATO. Reduces developer cash at settlement; developer claims a credit on BAS for the withheld amount.">GST Withholding (res.)</span>
               <select
                 value={admin.applyGSTWithholding ? 'yes' : 'no'}
                 onChange={e => setAdmin({ applyGSTWithholding: e.target.value === 'yes' })}
                 className="text-xs bg-yellow-50 border border-gray-300 rounded px-2 py-1"
               >
                 <option value="no">Off (default – net settlement modelled)</option>
-                <option value="yes">On (s.72-55 withholding applies)</option>
+                <option value="yes">On (s.14-250 withholding applies)</option>
               </select>
             </div>
             <div className="flex items-center gap-2">
