@@ -130,6 +130,20 @@ export function AISettingsPage() {
     }
   };
 
+  // L1 — useMemo MUST run before any early-return so React's hook bookkeeping
+  // doesn't shift when settings transitions from null → populated. Body
+  // guards against null settings (returns empty groups); both downstream
+  // consumers (lines ~235 and ~246) check `modelsByProvider[p].length > 0`
+  // first so empty arrays render as nothing — safe.
+  const modelsByProvider = useMemo(() => {
+    const groups: Record<AIProvider, AIModelOption[]> = { gemini: [], deepseek: [] };
+    if (!settings) return groups;
+    for (const m of settings.allowedModels) {
+      if (groups[m.provider]) groups[m.provider].push(m);
+    }
+    return groups;
+  }, [settings]);
+
   if (loadError) {
     return (
       <div>
@@ -159,14 +173,7 @@ export function AISettingsPage() {
   const currentProvider: AIProvider = selectedOption?.provider ?? 'gemini';
   const providerInfo = PROVIDERS[currentProvider];
 
-  // Group models by provider for the radio group.
-  const modelsByProvider = useMemo(() => {
-    const groups: Record<AIProvider, AIModelOption[]> = { gemini: [], deepseek: [] };
-    for (const m of settings.allowedModels) {
-      if (groups[m.provider]) groups[m.provider].push(m);
-    }
-    return groups;
-  }, [settings.allowedModels]);
+
 
   return (
     <div>

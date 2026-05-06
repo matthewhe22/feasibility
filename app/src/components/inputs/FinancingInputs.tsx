@@ -78,7 +78,11 @@ function DebtSection({ title, facility, isLandLoan = false, onChange }: {
   isLandLoan?: boolean;
   onChange: (f: DebtFacility) => void;
 }) {
-  const update = (field: keyof DebtFacility, value: any) => {
+  // L4 — generic-bound update: TS now type-checks every call site against the
+  // concrete field type. `lineFeeBasis` (string union) and `lenderIsGSTExempt`
+  // (boolean) consumers below are exercised — the signature catches future
+  // misuse like `update('interestRate', 'five percent')`.
+  const update = <K extends keyof DebtFacility>(field: K, value: DebtFacility[K]) => {
     onChange({ ...facility, [field]: value });
   };
 
