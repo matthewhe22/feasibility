@@ -1,14 +1,186 @@
 import type { Period, MainInputs, DebtFacility } from '../types';
 import { sum } from '../utils';
 
-// Collect warnings for equity backstop overruns — reset per engine run
+// ===========================================================================
+// FUNDING WARNINGS — two-tier accumulator.
+//
+// Tier 1: `_fundingWarnings` (string[]) — one-shot warnings emitted ONCE per
+//   model run from non-iterative emit sites (land-loan timing, project default,
+//   misconfiguration notes). Deduped by exact string in `getFundingWarnings`.
+//
+// Tier 2: `_pendingFundingState` (per-(kind,facility) accumulator) — per-period
+//   findings that the iterative solver would otherwise emit dozens of times as
+//   $X drifts each iteration. Reset at the START of each iteration; the LAST
+//   iteration's data is the converged truth. Flushed once after the outer loop
+//   into `_summaryWarnings`. Each call to solveFunding overwrites the prior
+//   call's summaries (by stable key), so the prelim+final solve pair produces
+//   ONE summary per (kind, facility), not two.
+//
+// The split exists because an array dedupe by exact string can't catch
+// "Period 36 balance $111,591,453" vs "Period 37 balance $112,398,091" — same
+// underlying covenant breach, different cents. Q1 fix: consolidate at source.
+// ===========================================================================
+
 const _fundingWarnings: string[] = [];
-export function clearFundingWarnings(): void { _fundingWarnings.length = 0; }
+
+interface CovenantOvershoot {
+  peakBalance: number;
+  cap: number;
+  peakPeriod: number;
+  affectedPeriods: Set<number>;
+}
+interface AutoSize {
+  requested: number;
+  finalPeak: number;
+  cap: number;
+}
+interface EquityBackstopOvershoot {
+  peakAmount: number;
+  peakCap: number;
+  peakPeriod: number;
+  affectedPeriods: Set<number>;
+}
+
+interface PendingFundingState {
+  covenantOvershoot: Map<string, CovenantOvershoot>;
+  autoSize: Map<string, AutoSize>;
+  facilityLimitOvershoot: Map<string, CovenantOvershoot>;
+  equityBackstop: EquityBackstopOvershoot | null;
+}
+
+const _pendingFundingState: PendingFundingState = {
+  covenantOvershoot: new Map(),
+  autoSize: new Map(),
+  facilityLimitOvershoot: new Map(),
+  equityBackstop: null,
+};
+
+const _summaryWarnings = new Map<string, string>();
+
+function resetPendingFundingState(): void {
+  _pendingFundingState.covenantOvershoot.clear();
+  _pendingFundingState.autoSize.clear();
+  _pendingFundingState.facilityLimitOvershoot.clear();
+  _pendingFundingState.equityBackstop = null;
+}
+
+function facilityLabel(key: string): string {
+  switch (key) {
+    case 'senior': return 'Senior #1';
+    case 'senior2': return 'Senior #2';
+    case 'mezz': return 'Mezz';
+    default: return key;
+  }
+}
+
+function recordCovenantOvershoot(facility: string, period: number, balance: number, cap: number): void {
+  const m = _pendingFundingState.covenantOvershoot;
+  const cur = m.get(facility);
+  if (!cur) {
+    m.set(facility, { peakBalance: balance, cap, peakPeriod: period, affectedPeriods: new Set([period]) });
+  } else {
+    cur.affectedPeriods.add(period);
+    if (balance > cur.peakBalance) { cur.peakBalance = balance; cur.peakPeriod = period; }
+    if (cap > cur.cap) cur.cap = cap;
+  }
+}
+
+function recordFacilityLimitOvershoot(facility: string, period: number, balance: number, limit: number): void {
+  const m = _pendingFundingState.facilityLimitOvershoot;
+  const cur = m.get(facility);
+  if (!cur) {
+    m.set(facility, { peakBalance: balance, cap: limit, peakPeriod: period, affectedPeriods: new Set([period]) });
+  } else {
+    cur.affectedPeriods.add(period);
+    if (balance > cur.peakBalance) { cur.peakBalance = balance; cur.peakPeriod = period; }
+  }
+}
+
+function recordAutoSize(facility: string, requested: number, finalPeak: number, cap: number): void {
+  const m = _pendingFundingState.autoSize;
+  const cur = m.get(facility);
+  if (!cur) {
+    m.set(facility, { requested, finalPeak, cap });
+  } else {
+    if (finalPeak > cur.finalPeak) cur.finalPeak = finalPeak;
+  }
+}
+
+function recordEquityBackstopOvershoot(period: number, amount: number, cap: number): void {
+  const cur = _pendingFundingState.equityBackstop;
+  if (!cur) {
+    _pendingFundingState.equityBackstop = {
+      peakAmount: amount, peakCap: cap, peakPeriod: period, affectedPeriods: new Set([period]),
+    };
+  } else {
+    cur.affectedPeriods.add(period);
+    if (amount > cur.peakAmount) { cur.peakAmount = amount; cur.peakPeriod = period; cur.peakCap = cap; }
+  }
+}
+
+function fmtMoney(n: number): string { return `$${Math.round(n).toLocaleString()}`; }
+function fmtPeriodRange(set: Set<number>): string {
+  const arr = [...set].sort((a, b) => a - b);
+  if (arr.length === 0) return '';
+  if (arr.length === 1) return `month ${arr[0]}`;
+  // detect contiguous run
+  const min = arr[0]!, max = arr[arr.length - 1]!;
+  if (max - min === arr.length - 1) return `months ${min}–${max}`;
+  if (arr.length <= 4) return `months ${arr.join(', ')}`;
+  return `months ${min}–${max} (${arr.length} periods)`;
+}
+
+function flushPendingFundingSummaries(): void {
+  // Convert accumulated state to consolidated messages. Stable keys mean a
+  // second solveFunding call (final after prelim) overwrites prior summaries.
+
+  for (const [facility, info] of _pendingFundingState.covenantOvershoot) {
+    const overshoot = info.peakBalance - info.cap;
+    const msg =
+      `[FUNDING] ${facilityLabel(facility)} covenant cap exceeded by ${fmtMoney(overshoot)} ` +
+      `— peak ${fmtMoney(info.peakBalance)} vs cap ${fmtMoney(info.cap)} ` +
+      `(peak month ${info.peakPeriod}, affected ${fmtPeriodRange(info.affectedPeriods)}). ` +
+      `Capitalised interest pushed balance above LTC/LVR ceiling — restructure: pay interest ` +
+      `current or increase commitment.`;
+    _summaryWarnings.set(`covenant-overshoot:${facility}`, msg);
+  }
+
+  for (const [facility, info] of _pendingFundingState.facilityLimitOvershoot) {
+    const overshoot = info.peakBalance - info.cap;
+    const msg =
+      `[FUNDING] ${facilityLabel(facility)} balance exceeded committed facility limit by ${fmtMoney(overshoot)} ` +
+      `— peak ${fmtMoney(info.peakBalance)} vs limit ${fmtMoney(info.cap)} ` +
+      `(peak month ${info.peakPeriod}, affected ${fmtPeriodRange(info.affectedPeriods)}). ` +
+      `Capitalised interest pushed balance above committed limit.`;
+    _summaryWarnings.set(`limit-overshoot:${facility}`, msg);
+  }
+
+  for (const [facility, info] of _pendingFundingState.autoSize) {
+    const msg =
+      `[INFO] Auto-sized ${facilityLabel(facility)} ${fmtMoney(info.requested)} → ${fmtMoney(info.finalPeak)} ` +
+      `(within covenant cap ${fmtMoney(info.cap)}) to cover cost shortfall. LTC/LVR caps respected.`;
+    _summaryWarnings.set(`auto-size:${facility}`, msg);
+  }
+
+  if (_pendingFundingState.equityBackstop) {
+    const info = _pendingFundingState.equityBackstop;
+    const msg =
+      `Equity backstop ${fmtMoney(info.peakAmount)} exceeds remaining Developer cap ${fmtMoney(info.peakCap)} ` +
+      `(peak month ${info.peakPeriod}, affected ${fmtPeriodRange(info.affectedPeriods)}) — project is underfunded.`;
+    _summaryWarnings.set('equity-backstop-overshoot', msg);
+  }
+}
+
+export function clearFundingWarnings(): void {
+  _fundingWarnings.length = 0;
+  _summaryWarnings.clear();
+  resetPendingFundingState();
+}
 export function getFundingWarnings(): string[] {
-  // De-dupe by exact string. solveFunding iterates internally (up to maxIterations
-  // ~50) and is called twice from runCalculations (prelim + final), so per-period
-  // warnings can be pushed dozens of times. Each unique message should appear once.
-  return [...new Set(_fundingWarnings)];
+  // Tier 1 (one-shot) deduped by exact string + Tier 2 (consolidated summaries
+  // keyed by kind:facility, last solveFunding call wins). solveFunding iterates
+  // internally and is called twice from runCalculations (prelim + final).
+  return [...new Set(_fundingWarnings), ..._summaryWarnings.values()];
 }
 
 // Zero-value facility used as a safe fallback when an optional facility is missing
@@ -214,6 +386,10 @@ export function solveFunding(
 
   for (let iter = 0; iter < maxIterations; iter++) {
     iterationsRun = iter + 1;
+    // Reset per-iteration accumulator: per-period covenant breaches, auto-size
+    // running peaks, and equity backstop overshoots are populated fresh each
+    // iteration — the LAST iteration's data is the converged truth (Q1 fix).
+    resetPendingFundingState();
     const tdc = sum(monthlyCostsExcFinance)
       + prevSeniorFinCosts + prevMezzFinCosts
       + prevSenior2FinCosts;
@@ -248,6 +424,12 @@ export function solveFunding(
     prevPeakSnr2Balance = result.senior2FacilitySize;
     prevPeakMezzBalance = result.mezzFacilitySize;
   }
+
+  // Q1 — flush the consolidated per-(kind,facility) summaries from the FINAL
+  // converged iteration into _summaryWarnings. This call's writes overwrite any
+  // prior solveFunding call's summaries by stable key (so the prelim+final
+  // solve pair produces ONE summary per kind, not two).
+  flushPendingFundingSummaries();
 
   result.converged = converged;
   result.iterations = iterationsRun;
@@ -629,10 +811,12 @@ function runFundingWaterfall(
       landLoanTakeoutBySenior[i] = takeoutAmount;
 
       // Covenant guard: warn if takeout pushed senior past covenant cap.
+      // Q1: route through the consolidator — the takeout-specific message is
+      // preserved as a one-shot warning so the user sees the cause; the peak
+      // / period-range is captured by the consolidated covenant-overshoot
+      // summary emitted at end of solve.
       if (snrRunningBalance > seniorAutoSizeCap + 1) {
-        _fundingWarnings.push(
-          `[FUNDING] Senior takeout of land loan ($${Math.round(takeoutAmount).toLocaleString()}) at period ${i + 1} pushed Senior #1 balance to $${Math.round(snrRunningBalance).toLocaleString()} — above covenant cap $${Math.round(seniorAutoSizeCap).toLocaleString()}. Project would breach LTC/LVR. Increase Senior facility or equity, OR reduce land loan principal.`
-        );
+        recordCovenantOvershoot('senior', i + 1, snrRunningBalance, seniorAutoSizeCap);
       }
     }
     llBalance[i] = llRunningBalance;
@@ -877,9 +1061,8 @@ function runFundingWaterfall(
         const developerUsed = cumulativeEquity - jvCumulative;
         const developerRemaining = Math.max(0, developerCap - developerUsed);
         if (backstop > developerRemaining + 1) {
-          _fundingWarnings.push(
-            `Period ${i + 1}: equity backstop $${Math.round(backstop).toLocaleString()} exceeds remaining Developer cap $${Math.round(developerRemaining).toLocaleString()} — project is underfunded`
-          );
+          // Q1 — consolidate per-period equity-backstop overshoots
+          recordEquityBackstopOvershoot(i + 1, backstop, developerRemaining);
         }
         eqInjections[i] += backstop;
         cumulativeEquity += backstop;
@@ -1031,34 +1214,25 @@ function runFundingWaterfall(
     // above its committed limit, the model is implicitly relying on an
     // accordion the lender hasn't committed. Surface so the term sheet can be
     // restructured (or interest paid current rather than capitalised).
+    // Q1 — consolidate per-period covenant breaches & auto-size INFOs.
+    // Iterations of the solver drift $X each pass; the consolidator keeps the
+    // peak across iterations and emits ONE summary at end of converged solve.
     if (mzRunningBalance > mezzAutoSizeCap + 1) {
-      _fundingWarnings.push(
-        `Period ${i + 1}: Mezz balance $${Math.round(mzRunningBalance).toLocaleString()} exceeds covenant cap $${Math.round(mezzAutoSizeCap).toLocaleString()} — capitalised interest pushed above LTC/LVR ceiling. Restructure: pay interest current or increase commitment.`
-      );
+      recordCovenantOvershoot('mezz', i + 1, mzRunningBalance, mezzAutoSizeCap);
     } else if (mezzRequestedLimit > 0 && mezzRequestedLimit < mezzAutoSizeCap && mzRunningBalance > mezzRequestedLimit + 1) {
-      _fundingWarnings.push(
-        `[INFO] Auto-sized Mezz from requested limit $${Math.round(mezzRequestedLimit).toLocaleString()} up to $${Math.round(mzRunningBalance).toLocaleString()} (covenant cap $${Math.round(mezzAutoSizeCap).toLocaleString()}) to cover cost shortfall. LTC/LVR caps respected.`
-      );
+      recordAutoSize('mezz', mezzRequestedLimit, mzRunningBalance, mezzAutoSizeCap);
     }
     // M4 — Distinguish auto-size (within covenant) from genuine over-cap
-    // (capitalised interest pushed beyond covenant).
+    // (capitalised interest pushed beyond covenant). Q1 — consolidate per-period
+    // emits via the accumulator: peak / period-range / single summary at end.
     if (snrRunningBalance > seniorAutoSizeCap + 1) {
-      _fundingWarnings.push(
-        `Period ${i + 1}: Senior #1 balance $${Math.round(snrRunningBalance).toLocaleString()} exceeds covenant cap $${Math.round(seniorAutoSizeCap).toLocaleString()} — capitalised interest has pushed above LTC/LVR ceiling. Restructure: pay interest current or increase commitment.`
-      );
+      recordCovenantOvershoot('senior', i + 1, snrRunningBalance, seniorAutoSizeCap);
     } else if (seniorRequestedLimit > 0 && seniorRequestedLimit < seniorAutoSizeCap && snrRunningBalance > seniorRequestedLimit + 1) {
-      // Note: this warning is emitted multiple times across periods; the
-      // de-dupe in getFundingWarnings (PR #30 / R4) collapses identical
-      // messages. We use a single representative message rather than
-      // per-period to avoid spamming.
-      _fundingWarnings.push(
-        `[INFO] Auto-sized Senior #1 from requested limit $${Math.round(seniorRequestedLimit).toLocaleString()} up to $${Math.round(snrRunningBalance).toLocaleString()} (covenant cap $${Math.round(seniorAutoSizeCap).toLocaleString()}) to cover cost shortfall. LTC/LVR caps respected.`
-      );
+      recordAutoSize('senior', seniorRequestedLimit, snrRunningBalance, seniorAutoSizeCap);
     }
     if (senior2Limit > 0 && snr2RunningBalance > senior2Limit + 1) {
-      _fundingWarnings.push(
-        `Period ${i + 1}: Senior #2 balance $${Math.round(snr2RunningBalance).toLocaleString()} exceeds committed limit $${Math.round(senior2Limit).toLocaleString()}.`
-      );
+      // Q1 — consolidate per-period Senior #2 facility-limit overshoots
+      recordFacilityLimitOvershoot('senior2', i + 1, snr2RunningBalance, senior2Limit);
     }
 
     peakDebt = Math.max(peakDebt,
