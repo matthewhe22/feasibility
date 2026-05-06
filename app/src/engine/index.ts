@@ -860,8 +860,14 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       mezzAllIn,
       landEstablishment: inputs.landLoan?.establishmentFeePercent ?? 0,
       landLineFee: inputs.landLoan?.lineFeePercent ?? 0,
-      landMargin: inputs.landLoan?.interestRate ?? 0,
-      landBBSY: 0,
+      // Display breakdown — DebtFacility carries margin and bbsy as separate
+      // fields (FinancingInputs form binds both). Previously this cell mapped
+      // landMargin to interestRate (the legacy all-in rate) and hardcoded BBSY
+      // to 0, which displayed the right total but the wrong split. Box Hill
+      // UAT bug 4. Falls back to interestRate split across margin only when
+      // bbsy is unset, preserving back-compat with older saved projects.
+      landMargin: inputs.landLoan?.margin ?? inputs.landLoan?.interestRate ?? 0,
+      landBBSY: inputs.landLoan?.bbsy ?? 0,
       landAllIn,
     },
     keyDates: {
