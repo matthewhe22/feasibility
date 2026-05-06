@@ -3,7 +3,7 @@ import { formatCurrency, formatPercent, sum } from '../../utils';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type CheckStatus = 'PASS' | 'WARN' | 'FAIL' | 'INFO';
+type CheckStatus = 'PASS' | 'WARN' | 'FAIL' | 'INFO' | 'N/A';
 
 interface CheckResult {
   id: string;

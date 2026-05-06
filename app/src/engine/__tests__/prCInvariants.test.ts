@@ -128,7 +128,6 @@ function fixture(opts: { gstIncluded?: boolean; revenueType?: string; settled?: 
   // residential rental treated as Hotel, long-term commercial sublease, etc.).
   const fx = fixture({});
   fx.grvItems[0]!.revenueType = 'Hotel';
-  // @ts-expect-error — runtime field not on the public type but accepted by the engine
   fx.grvItems[0]!.supplyType = 'input-taxed';
   const r = runCalculations(baseAdmin, fx);
   const warns = (r.warnings ?? []).join(' | ');
