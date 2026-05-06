@@ -303,7 +303,14 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     }
   }
 
-  const monthlyGSTNet = gstOnRevenue.map((r, i) => r - gstOnCosts[i]);
+  // R1: solveFunding's bankBalance subtracts gstOnRevenue per period; netCashflow
+  // uses cf.gstOnRevenue which combines settlement-period AND deposit-period GST.
+  // Pass the COMBINED array to the solver so the two views agree per period — this
+  // is what closes the sum(netCashflow) ≈ 0 invariant. Without this, the solver
+  // distributes profit based on a partial view (settle GST only) and netCashflow
+  // ends up short by sum(gstOnDeposits).
+  const gstOnRevenueWithDeposits = gstOnRevenue.map((r, i) => r + (gstOnDeposits[i] ?? 0));
+  const monthlyGSTNet = gstOnRevenueWithDeposits.map((r, i) => r - gstOnCosts[i]);
 
   // ===== 4. TOTAL COSTS (exc financing) =====
   const monthlyCostsExcFinance = new Array(n).fill(0);
@@ -321,14 +328,18 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // itcRecoveryLagMonths=0 (default) matches Excel same-period treatment.
   // Set to 1–3 for realistic quarterly BAS lag in lender-facing models.
   //
-  // GST withholding: when applyGSTWithholding=true, purchasers of new residential
-  // premises withhold 1/11 of the price at settlement and remit directly to the ATO.
-  // The developer's cash inflow is therefore net of withholding — subtract it here.
+  // GST withholding (TAA 1953 Sch 1, s.14-250) is attribution-only for cashflow
+  // purposes: the purchaser remits 1/11 of the price directly to the ATO, but
+  // that amount is already part of gstOnRevenue (the full GST liability on the
+  // supply). Subtracting BOTH gstWithholding from cash receipts AND gstOnRevenue
+  // from the bank balance double-counts the same dollar. We model the developer
+  // as if they collected gross price and remit gstOnRevenue via BAS; the
+  // withholding line on the cashflow row is preserved as an information-only
+  // memo of the attribution split. Closes Box Hill UAT R1 + R2.
   const itcLag = admin.itcRecoveryLagMonths ?? 0;
   const totalMonthlyRevenue = settlements.map((s, i) =>
     s + (rentalInc[i] ?? 0) + (otherInc[i] ?? 0)
     + (i >= itcLag ? (gstOnCosts[i - itcLag] ?? 0) : 0)
-    - (gstWithholding[i] ?? 0)
   );
 
   const equityDrawdownMode = admin.equityDrawdownMode ?? 'equity-first';
@@ -336,7 +347,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // Two-pass PM fee: preliminary solve estimates finance costs so they can be
   // included in the PM fee base (matching Excel's GST+finance inclusive base).
   const prelimFunding = solveFunding(
-    periods, monthlyCostsExcFinance, totalMonthlyRevenue, monthlyGSTNet, gstOnRevenue,
+    periods, monthlyCostsExcFinance, totalMonthlyRevenue, monthlyGSTNet, gstOnRevenueWithDeposits,
     inputs, admin.daysPerYear, admin.tolerance, 100, equityDrawdownMode,
   );
   const prelimFinCosts =
@@ -368,7 +379,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     monthlyCostsExcFinance,
     totalMonthlyRevenue,
     monthlyGSTNet,
-    gstOnRevenue,
+    gstOnRevenueWithDeposits,
     inputs,
     admin.daysPerYear,
     admin.tolerance,
@@ -455,10 +466,11 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       - cf.otherStandardCosts - cf.pmFees - cf.sellingCostsFrontEnd
       - cf.sellingCostsBackEnd - cf.otherFinancingCosts - cf.gstOnCosts
       - cf.gstOnRevenue
-      // GST withholding — purchaser withholds at settlement and remits to ATO.
-      // Developer's cash inflow is already net of withholding via monthlyRevenue,
-      // so this entry cancels out in the net cashflow.
-      - (cf.gstWithholding ?? 0)
+      // GST withholding is attribution-only — see comment on totalMonthlyRevenue
+      // above. cf.gstOnRevenue already represents the full GST liability on the
+      // supply (settlement + deposit). Subtracting cf.gstWithholding here would
+      // double-count the portion of gstOnRevenue paid by the purchaser directly
+      // to the ATO. Box Hill UAT R1 + R2.
       // Financing costs — always deducted (capitalised amounts cancel against their drawdown entry)
       - cf.landLoanInterest - cf.landLoanFees
       - cf.seniorInterest  - cf.seniorFees
@@ -587,8 +599,14 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const senior2LVR  = nrvValue  > 0 ? senior2Amount / nrvValue  : 0;
   const mezzLTC     = totalCost > 0 ? mezzAmount    / totalCost : 0;
   const mezzLVR     = nrvValue  > 0 ? mezzAmount    / nrvValue  : 0;
-  const equityLTC   = totalCost > 0 ? funding.totalEquityInjected / totalCost : 0;
-  const equityLVR   = nrvValue  > 0 ? funding.totalEquityInjected / nrvValue  : 0;
+  // Capital stack equity LTC/LVR uses peak equity outstanding (max of
+  // cumulative-injected − cumulative-repatriated across the timeline), to match
+  // the senior/mezz convention of using committed facility limit (peak commitment).
+  // Using cumulative totalEquityInjected here would inflate the stack when
+  // equity is drawn and returned mid-project (e.g. deposit-GST timing under R1).
+  const equityPeak = funding.peakEquity ?? funding.totalEquityInjected;
+  const equityLTC   = totalCost > 0 ? equityPeak / totalCost : 0;
+  const equityLVR   = nrvValue  > 0 ? equityPeak / nrvValue  : 0;
 
   // KPIs
   const equityContrib = funding.totalEquityInjected;
