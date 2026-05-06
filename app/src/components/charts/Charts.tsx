@@ -3,6 +3,7 @@ import {
   AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart,
 } from 'recharts';
+import type { ValueType } from 'recharts/types/component/DefaultTooltipContent';
 import { useStore } from '../../store/useStore';
 import { formatCurrency } from '../../utils';
 
@@ -17,9 +18,15 @@ function ChartBox({ title, children }: { title: string; children: React.ReactNod
   );
 }
 
-const fmtM = (v: any) => `$${(Number(v) / 1e6).toFixed(0)}M`;
+// L2/L3 — Recharts Tooltip / Pie label formatter contract: ValueType is
+// `number | string | ReadonlyArray<number | string>` from
+// recharts/types/component/DefaultTooltipContent. The arrays case is rare
+// (stacked-band tooltips) and produces NaN here — acceptable since we don't
+// configure stacked-band. Number() handles number, numeric-string, and
+// undefined (→ NaN) cleanly.
+const fmtM = (v: ValueType | undefined) => `$${(Number(v) / 1e6).toFixed(0)}M`;
 const fmtTick = (v: number) => `${(v / 1e6).toFixed(0)}M`;
-const fmtCur = (v: any) => formatCurrency(Number(v));
+const fmtCur = (v: ValueType | undefined) => formatCurrency(Number(v));
 
 export function ChartsTab() {
   const { dashboardData: data } = useStore();
