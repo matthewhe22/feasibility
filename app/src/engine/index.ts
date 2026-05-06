@@ -586,8 +586,15 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
 
   // KPIs
   const equityContrib = funding.totalEquityInjected;
-  // Cash-on-Cash = (profit + equity) / equity — matches Excel equity multiple definition
-  const cashOnCash = equityContrib > 0 ? (totalProfitAfterCoupon + equityContrib) / equityContrib : 0;
+  // Cash-on-Cash Return = Total Profit (after coupon) / Equity. This is the
+  // standard "return on equity capital" definition and is sign-aware: a
+  // loss-making project (totalProfitAfterCoupon < 0) returns a NEGATIVE CCR,
+  // matching ROI and Annual CCR. The previous "(profit + equity) / equity"
+  // formulation was an *equity multiple* (cash returned / cash invested) which
+  // is always non-negative as long as some capital comes back — it disagreed
+  // in sign with Annual CCR and ROI on loss-making projects (Box Hill UAT bug 3).
+  // The two are related by:  equityMultiple = cashOnCash + 1.
+  const cashOnCash = equityContrib > 0 ? totalProfitAfterCoupon / equityContrib : 0;
   // Annualised CoC = compound annual return: (1 + totalReturn)^(1/years) - 1
   const annualCoC = equityContrib > 0 && years > 0
     ? Math.pow(1 + totalProfitAfterCoupon / equityContrib, 1 / years) - 1
