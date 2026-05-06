@@ -569,10 +569,16 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     );
   }
 
-  // Capital stack uses facility limit (committed amount) + accrued interest/fees
-  // to match Excel reporting — not peak drawn balance.
-  const seniorAmount  = funding.seniorFacilityLimit  + funding.totalSeniorInterest  + funding.totalSeniorFees;
-  const senior2Amount = funding.senior2FacilityLimit + funding.totalSenior2Interest + funding.totalSenior2Fees;
+  // Capital stack uses facility LIMITS (committed principal) for all rows so the
+  // numerators are dimensionally consistent. Previously the senior rows added
+  // accrued interest+fees ("to match Excel reporting") while the mezz row stayed
+  // at principal only — and totalCost (the denominator) already includes
+  // totalSeniorFinCosts. Net effect: senior's interest+fees was double-counted,
+  // inflating the stack to 102.28% on Box Hill (UAT bug 5, ~\$5.1M variance vs
+  // Total Cost). With limits-only numerators the stack sums to ≤100%, where
+  // <100% means underfunded — matching the existing equity-backstop warnings.
+  const seniorAmount  = funding.seniorFacilityLimit;
+  const senior2Amount = funding.senior2FacilityLimit;
   const mezzAmount    = funding.mezzFacilitySize;
   const totalCapital  = seniorAmount + senior2Amount + mezzAmount + funding.totalEquityInjected;
   const seniorLTC   = totalCost > 0 ? seniorAmount  / totalCost : 0;
