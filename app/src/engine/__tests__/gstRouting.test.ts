@@ -152,21 +152,17 @@ const expectedGstOnStandard = 11_250_000 / 11;
 close(gst.gstOnStandardSupplies, expectedGstOnStandard, 1,
   'G3: gstOnStandardSupplies = standardRatedSupplies / 11');
 
-// G1: Table 1 (cashflow gstOnRevenue at settlement) and Table 13
-//     (gstOnMarginSchemeSupplies + gstOnStandardSupplies, full supply-value)
-//     should agree on retail vs margin classification. The absolute reconciliation
-//     to within $1 is deferred — Table 1 captures GST at settlement timing while
-//     Table 13 reports the underlying supply totals; the difference equals the
-//     deposit-period GST handled separately on the gstOnDeposits cashflow row.
+// G1: Table 1 (feasibility.gstOnRevenue) and Table 13
+//     (gstOnMarginSchemeSupplies + gstOnStandardSupplies) must reconcile.
+//     Box Hill UAT bug 6 fix: feasibility.gstOnRevenue now includes BOTH
+//     settlement-period AND deposit-period GST (per GSTA s.9-70 attribution),
+//     so the two totals agree to within rounding rather than differing by the
+//     deposit-period GST as before. applyGSTWithholding is off in this fixture
+//     so gstWithholdingTotal = 0 and the supply totals are like-for-like.
 const table1Gross = result.feasibility.gstOnRevenue;
-const table13Gross = gst.gstOnMarginSchemeSupplies + gst.gstOnStandardSupplies + gst.gstWithholdingTotal;
-// They differ by the deposit-period GST. Confirm the gap is in the right
-// direction (Table 13 ≥ Table 1) and within the expected magnitude.
-assert(table13Gross >= table1Gross - 1,
-  'G1: Table 13 gross GST is ≥ Table 1 (Table 13 reports full supply-value, Table 1 cash-realised at settlement)');
-const expectedGap = 804853; // deposit-period GST: apartments margin × factor + retail standard 10% deposit @ 1/11
-close(table13Gross - table1Gross, expectedGap, 5000,
-  'G1: gap between Table 13 and Table 1 ≈ deposit-period GST on margin-scheme apartments');
+const table13Gross = gst.gstOnMarginSchemeSupplies + gst.gstOnStandardSupplies;
+close(table1Gross, table13Gross, 1,
+  'G1: Table 1 (cashflow GST on revenue) reconciles with Table 13 supply totals');
 
 console.log(`\n${'═'.repeat(72)}`);
 console.log(`GST-ROUTING TESTS: ${passed} passed, ${failed} failed (${passed + failed} total)`);

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../store/useStore';
-import { formatCurrency, formatPercent, formatNumber } from '../../utils';
+import { formatCurrency, formatPercent, formatNumber, formatIRR } from '../../utils';
 import { listProjects, loadProject, type ProjectRecord } from '../../db/projectDb';
 import type { FeasibilitySummary } from '../../types';
 
@@ -272,7 +272,10 @@ export function InternalDashboard() {
               <DashValue label="Total Cash on Cash Return" value={k.totalCashOnCash} unit="ratio" />
               <DashValue label="Annual Cash on Cash Return" value={k.annualCashOnCash} unit="ratio" />
               <DashValue label="Return on Investment" value={k.roi} unit="%" />
-              <DashValue label="IRR" value={k.irr} unit="%" />
+              <div className="flex justify-between px-2 py-1">
+                <span className="text-xs text-gray-600">IRR</span>
+                <span className="text-xs font-mono">{formatIRR(k.irr, data.feasibility.totalProfit)}</span>
+              </div>
             </div>
             <div className="px-2 py-1 bg-gray-50 text-[10px] text-gray-400 space-y-0.5">
               <p>Cash on Cash Return = Total Profit (after coupon) / Equity</p>
@@ -309,9 +312,9 @@ export function InternalDashboard() {
                   </tr>
                   <tr className="border-b border-gray-100">
                     <td className="px-2 py-0.5">IRR</td>
-                    <td className="px-2 py-0.5 text-right">{formatPercent(er.total.irr)}</td>
-                    <td className="px-2 py-0.5 text-right">{formatPercent(er.jvPartner.irr)}</td>
-                    <td className="px-2 py-0.5 text-right">{formatPercent(er.developer.irr)}</td>
+                    <td className="px-2 py-0.5 text-right">{formatIRR(er.total.irr, data.feasibility.totalProfit)}</td>
+                    <td className="px-2 py-0.5 text-right">{formatIRR(er.jvPartner.irr, data.feasibility.totalProfit)}</td>
+                    <td className="px-2 py-0.5 text-right">{formatIRR(er.developer.irr, data.feasibility.totalProfit)}</td>
                   </tr>
                   <tr className="bg-blue-50 font-semibold"><td colSpan={4} className="px-2 py-1">EQUITY OUT</td></tr>
                   <tr className="border-b border-gray-100">
@@ -579,7 +582,7 @@ export function InternalDashboard() {
               <DashValue label="Going-Concern Supplies" value={data.gstCompliance.goingConcernSupplies} />
               <DashValue label="Creditable Acquisitions (ex-GST)" value={data.gstCompliance.creditableAcquisitions} />
               <DashValue label="ITC Claimable" value={data.gstCompliance.itcClaimable} indent />
-              <DashValue label="GST Withholding (s.72-55)" value={data.gstCompliance.gstWithholdingTotal} indent />
+              <DashValue label="GST Withholding (TAA 1953 Sch 1, s.14-250)" value={data.gstCompliance.gstWithholdingTotal} indent />
               <div className="h-1 bg-gray-300" />
               <DashValue label="Net GST Payable to ATO" value={data.gstCompliance.netGSTPayable} bold highlight />
             </TableBox>

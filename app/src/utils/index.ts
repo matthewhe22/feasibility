@@ -32,6 +32,20 @@ export function formatMillions(value: number, decimals = 1): string {
   return `$${(value / 1_000_000).toFixed(decimals)}M`;
 }
 
+// Format an IRR value with project-loss awareness. When the project profit
+// (or any sign-aware "is the deal making money?" indicator) is negative, the
+// IRR solver result is mathematically undefined or only matches the equity
+// cashflow series in a degenerate way — Newton-Raphson typically converges to a
+// large garbage value that the ±999% clip then surfaces as ">999.00%". This is
+// misleading: it suggests an exceptional return when in fact the project is
+// loss-making. Return "N/M (loss)" instead so the dashboard truthfully reports
+// "not meaningful". Box Hill UAT bug 2.
+export function formatIRR(irr: number, totalProfit: number): string {
+  if (!Number.isFinite(irr)) return 'N/A';
+  if (totalProfit < 0) return 'N/M (loss)';
+  return formatPercent(irr);
+}
+
 // Format percentage. Values outside ±999% are clipped for display so an
 // IRR solver that diverges (e.g. 5e+42% on a loss-making project — UAT v2 #17 /
 // Melbourne UAT Dh3) never produces an unreadable e+N display. The underlying

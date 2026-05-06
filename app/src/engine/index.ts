@@ -242,7 +242,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     );
   }
 
-  // GST withholding (GSTA s.72-55) — purchaser of new residential premises withholds
+  // GST withholding (TAA 1953 Sch 1, s.14-250) — purchaser of new residential premises withholds
   // 1/11 of the GST-exclusive price and remits directly to ATO. Models the cash effect:
   // developer receives net-of-withholding at settlement; ATO receives withholding.
   const applyWithholding = admin.applyGSTWithholding === true;
@@ -276,7 +276,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       gstOnRevenue[i] += periodShare * settleGSTAmount;
     }
 
-    // Withholding (GSTA s.72-55) — applies to the full supply at settlement.
+    // Withholding (TAA 1953 Sch 1, s.14-250) — applies to the full supply at settlement.
     // The purchaser withholds 1/11 of the full GST-exclusive price regardless of
     // how much was paid as deposit; this is correct per the ATO's remittance rules.
     const itemWithholds = item.withholdingApplies ?? isMarginScheme;
@@ -492,7 +492,12 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // what the developer actually receives from settlements.  Deducting it from
   // totalProfit ensures the dashboard figure equals sum(profitDistributions)
   // from the funding waterfall, which uses periodNetCash = revenue − gstOnRevenue − costs.
-  const totalGSTOnRevenue = sum(gstOnRevenue);
+  //
+  // Includes BOTH settlement-period GST (gstOnRevenue) AND deposit-period GST
+  // (gstOnDeposits) — GSTA s.9-70 attributes the GST liability when the deposit
+  // is received. The per-period cashflow row aggregates the two as a single
+  // gstOnRevenue field, so the feasibility total must match (Box Hill UAT bug 6).
+  const totalGSTOnRevenue = sum(gstOnRevenue) + sum(gstOnDeposits);
 
   // Lender GST exemption: debt facility fees are modelled as GST-free assuming
   // the lender is an exempt financial institution (GSTA s.40-60). Non-bank lenders
@@ -564,10 +569,16 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     );
   }
 
-  // Capital stack uses facility limit (committed amount) + accrued interest/fees
-  // to match Excel reporting — not peak drawn balance.
-  const seniorAmount  = funding.seniorFacilityLimit  + funding.totalSeniorInterest  + funding.totalSeniorFees;
-  const senior2Amount = funding.senior2FacilityLimit + funding.totalSenior2Interest + funding.totalSenior2Fees;
+  // Capital stack uses facility LIMITS (committed principal) for all rows so the
+  // numerators are dimensionally consistent. Previously the senior rows added
+  // accrued interest+fees ("to match Excel reporting") while the mezz row stayed
+  // at principal only — and totalCost (the denominator) already includes
+  // totalSeniorFinCosts. Net effect: senior's interest+fees was double-counted,
+  // inflating the stack to 102.28% on Box Hill (UAT bug 5, ~\$5.1M variance vs
+  // Total Cost). With limits-only numerators the stack sums to ≤100%, where
+  // <100% means underfunded — matching the existing equity-backstop warnings.
+  const seniorAmount  = funding.seniorFacilityLimit;
+  const senior2Amount = funding.senior2FacilityLimit;
   const mezzAmount    = funding.mezzFacilitySize;
   const totalCapital  = seniorAmount + senior2Amount + mezzAmount + funding.totalEquityInjected;
   const seniorLTC   = totalCost > 0 ? seniorAmount  / totalCost : 0;
@@ -581,8 +592,15 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
 
   // KPIs
   const equityContrib = funding.totalEquityInjected;
-  // Cash-on-Cash = (profit + equity) / equity — matches Excel equity multiple definition
-  const cashOnCash = equityContrib > 0 ? (totalProfitAfterCoupon + equityContrib) / equityContrib : 0;
+  // Cash-on-Cash Return = Total Profit (after coupon) / Equity. This is the
+  // standard "return on equity capital" definition and is sign-aware: a
+  // loss-making project (totalProfitAfterCoupon < 0) returns a NEGATIVE CCR,
+  // matching ROI and Annual CCR. The previous "(profit + equity) / equity"
+  // formulation was an *equity multiple* (cash returned / cash invested) which
+  // is always non-negative as long as some capital comes back — it disagreed
+  // in sign with Annual CCR and ROI on loss-making projects (Box Hill UAT bug 3).
+  // The two are related by:  equityMultiple = cashOnCash + 1.
+  const cashOnCash = equityContrib > 0 ? totalProfitAfterCoupon / equityContrib : 0;
   // Annualised CoC = compound annual return: (1 + totalReturn)^(1/years) - 1
   const annualCoC = equityContrib > 0 && years > 0
     ? Math.pow(1 + totalProfitAfterCoupon / equityContrib, 1 / years) - 1
@@ -741,7 +759,12 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     creditableAcquisitions,
     itcClaimable: totalGSTOnCosts,
     gstWithholdingTotal,
-    netGSTPayable: (gstOnMarginSchemeSupplies + gstOnStandardSupplies + gstWithholdingTotal) - totalGSTOnCosts,
+    // Withholding under TAA 1953 Sch 1, s.14-250 is remitted directly to the ATO
+    // by the purchaser at settlement. The developer claims this as a CREDIT on
+    // their BAS (Form NAT 74045) — so the net BAS payable is gross supplies minus
+    // both ITC and the already-withheld amount. Was previously ADDED in error,
+    // producing a $W swing equal to twice the withholding (Box Hill UAT bug 1).
+    netGSTPayable: (gstOnMarginSchemeSupplies + gstOnStandardSupplies) - gstWithholdingTotal - totalGSTOnCosts,
   };
 
   // GRV Summary (Table 11). Previously totalAptGRV filtered for revenueType
@@ -843,8 +866,14 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       mezzAllIn,
       landEstablishment: inputs.landLoan?.establishmentFeePercent ?? 0,
       landLineFee: inputs.landLoan?.lineFeePercent ?? 0,
-      landMargin: inputs.landLoan?.interestRate ?? 0,
-      landBBSY: 0,
+      // Display breakdown — DebtFacility carries margin and bbsy as separate
+      // fields (FinancingInputs form binds both). Previously this cell mapped
+      // landMargin to interestRate (the legacy all-in rate) and hardcoded BBSY
+      // to 0, which displayed the right total but the wrong split. Box Hill
+      // UAT bug 4. Falls back to interestRate split across margin only when
+      // bbsy is unset, preserving back-compat with older saved projects.
+      landMargin: inputs.landLoan?.margin ?? inputs.landLoan?.interestRate ?? 0,
+      landBBSY: inputs.landLoan?.bbsy ?? 0,
       landAllIn,
     },
     keyDates: {
