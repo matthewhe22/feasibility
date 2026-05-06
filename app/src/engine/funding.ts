@@ -41,11 +41,18 @@ interface EquityBackstopOvershoot {
   affectedPeriods: Set<number>;
 }
 
+interface ProjectDefault {
+  peakRemainingDebt: number;
+  peakPeriod: number;
+  affectedPeriods: Set<number>;
+}
+
 interface PendingFundingState {
   covenantOvershoot: Map<string, CovenantOvershoot>;
   autoSize: Map<string, AutoSize>;
   facilityLimitOvershoot: Map<string, CovenantOvershoot>;
   equityBackstop: EquityBackstopOvershoot | null;
+  projectDefault: ProjectDefault | null;
 }
 
 const _pendingFundingState: PendingFundingState = {
@@ -53,6 +60,7 @@ const _pendingFundingState: PendingFundingState = {
   autoSize: new Map(),
   facilityLimitOvershoot: new Map(),
   equityBackstop: null,
+  projectDefault: null,
 };
 
 const _summaryWarnings = new Map<string, string>();
@@ -62,6 +70,7 @@ function resetPendingFundingState(): void {
   _pendingFundingState.autoSize.clear();
   _pendingFundingState.facilityLimitOvershoot.clear();
   _pendingFundingState.equityBackstop = null;
+  _pendingFundingState.projectDefault = null;
 }
 
 function facilityLabel(key: string): string {
@@ -118,6 +127,21 @@ function recordEquityBackstopOvershoot(period: number, amount: number, cap: numb
   }
 }
 
+function recordProjectDefault(period: number, remainingDebt: number): void {
+  // B02 — Same per-iteration spam pattern as covenant overshoots: each
+  // iteration's residual debt drifts by a few dollars, escapes Set-dedupe.
+  // Consolidate to ONE summary message at end of converged solve.
+  const cur = _pendingFundingState.projectDefault;
+  if (!cur) {
+    _pendingFundingState.projectDefault = {
+      peakRemainingDebt: remainingDebt, peakPeriod: period, affectedPeriods: new Set([period]),
+    };
+  } else {
+    cur.affectedPeriods.add(period);
+    if (remainingDebt > cur.peakRemainingDebt) { cur.peakRemainingDebt = remainingDebt; cur.peakPeriod = period; }
+  }
+}
+
 function fmtMoney(n: number): string { return `$${Math.round(n).toLocaleString()}`; }
 function fmtPeriodRange(set: Set<number>): string {
   const arr = [...set].sort((a, b) => a - b);
@@ -168,6 +192,15 @@ function flushPendingFundingSummaries(): void {
       `Equity backstop ${fmtMoney(info.peakAmount)} exceeds remaining Developer cap ${fmtMoney(info.peakCap)} ` +
       `(peak month ${info.peakPeriod}, affected ${fmtPeriodRange(info.affectedPeriods)}) — project is underfunded.`;
     _summaryWarnings.set('equity-backstop-overshoot', msg);
+  }
+
+  if (_pendingFundingState.projectDefault) {
+    const info = _pendingFundingState.projectDefault;
+    const msg =
+      `Project default: ${fmtMoney(info.peakRemainingDebt)} of debt unpaid at project end after equity ` +
+      `clawback exhausted (residual at period ${info.peakPeriod}). ` +
+      `Loss capitalised against equity (not residual debt).`;
+    _summaryWarnings.set('project-default', msg);
   }
 }
 
@@ -789,13 +822,18 @@ function runFundingWaterfall(
       // the takeout amount captures the full obligation.
       if (llAccruedInterest > 0) {
         llRunningBalance += llAccruedInterest;
-        // For capitalised land-loan, treat as a final synthetic drawdown
-        // (matches the LL1 capitalised path); for cash-pay, this period would
-        // have already paid the cycle's accrued, so this branch is rare. In
-        // both cases, recognise as part of total interest.
-        if (landLoan.isCapitalised) {
-          llDrawdowns[i]    += llAccruedInterest;
-        }
+        // B01 — at takeout the unpaid accrued interest is de facto rolled
+        // into senior (no actual cash outflow from the developer's bank
+        // account; senior refinances it). This applies to BOTH branches:
+        //   - capitalised LL: matches the LL1 capitalised path naturally.
+        //   - cash-pay LL: when takeout happens between freq cycles, the
+        //     stub interest hasn't been cash-paid yet. The cleanest model
+        //     mirrors the cap-int branch — record as a synthetic drawdown
+        //     so the cashflow row stays balanced.
+        // Without this, netCashflow showed a residual drift of ~stub-interest
+        // each takeout (Sydney v1 −$123K, Project Demo −$765K, Project Test
+        // −$1.15M; magnitudes scaling with land-loan rate × span).
+        llDrawdowns[i]    += llAccruedInterest;
         llInterest[i]     += llAccruedInterest;
         totalLandInterest += llAccruedInterest;
         llAccruedInterest  = 0;
@@ -1197,11 +1235,12 @@ function runFundingWaterfall(
         }
       }
       // Default check: if debt remains AFTER clawback exhausted, surface as default.
+      // B02 — consolidate per-iteration spam: each iteration's residual differs
+      // by a few dollars and escapes the exact-string Set-dedupe; route through
+      // the accumulator so end-of-solve produces ONE summary message.
       const remainingDebt = snrRunningBalance + snr2RunningBalance + mzRunningBalance;
       if (remainingDebt > 1) {
-        _fundingWarnings.push(
-          `Project default: $${Math.round(remainingDebt).toLocaleString()} of debt unpaid at project end after equity clawback exhausted. Loss capitalised against equity (not residual debt).`
-        );
+        recordProjectDefault(i + 1, remainingDebt);
       }
     }
 
