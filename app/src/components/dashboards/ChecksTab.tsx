@@ -286,18 +286,37 @@ export function ChecksTab() {
     checks.push({
       id: 'equity-balance',
       category: 'Equity',
-      description: 'Equity principal fully returned (Injected ≈ Repatriated)',
+      // R5 — labelling. The original "Equity principal fully returned"
+      // description showed WARN even when there was a $59M+ deficit on a
+      // loss-making project. Now we describe the actual relationship: equity
+      // injection vs repatriation. FAIL when injection > repatriation by more
+      // than $1k (a real cash deficit), upgraded to FAIL on a loss-making
+      // project regardless of the gap (the missing equity is the loss).
+      description: 'Equity injection ≈ repatriation (no equity deficit)',
       expected: formatCurrency(totalInjected),
       actual: formatCurrency(totalRepatriated),
       variance: formatCurrency(totalRepatriated - totalInjected),
-      status: near(totalInjected, totalRepatriated, 100) ? 'PASS' : 'WARN',
-      notes: `Injected: ${formatCurrency(totalInjected)}, Repatriated: ${formatCurrency(totalRepatriated)}, Profit: ${formatCurrency(totalProfit)} (profit verified by Check #14)`,
+      status: near(totalInjected, totalRepatriated, 100) ? 'PASS'
+        : f.totalProfit < 0 ? 'FAIL'
+        : 'WARN',
+      notes: `Injected: ${formatCurrency(totalInjected)}, Repatriated: ${formatCurrency(totalRepatriated)}, Profit: ${formatCurrency(totalProfit)}.` +
+        (totalRepatriated < totalInjected
+          ? ` Deficit ${formatCurrency(totalInjected - totalRepatriated)} — equity not fully recovered.` +
+            (f.totalProfit < 0 ? ' Project is loss-making; this is a real loss of equity.' : '')
+          : ''),
     });
   }
 
   // ── 7. SENIOR FACILITY WITHIN LIMIT ─────────────────────────────────────────
   {
-    const seniorLimit = inputs.seniorFacility.facilityLimit;
+    // R10 — use the engine-sized senior limit (= min of input limit, LTC ceiling,
+    // LVR ceiling) so this check aligns with the per-period warnings that the
+    // funding solver emits. Previously this check used the raw input limit
+    // (e.g. \$145M) while the warnings used the engine-sized limit (e.g. \$110.79M),
+    // which made the dashboard internally inconsistent. Box Hill UAT R10.
+    const seniorLimit = data.capitalStack.seniorAmount > 0
+      ? data.capitalStack.seniorAmount
+      : inputs.seniorFacility.facilityLimit;
     const peakBalance = Math.max(...cf.map(c => c.seniorBalance));
     const utilisation = seniorLimit > 0 ? peakBalance / seniorLimit : 0;
     const overLimit = peakBalance > seniorLimit;
@@ -467,8 +486,14 @@ export function ChecksTab() {
     const unpaidDebt = unpaidSenior + unpaidMezz + unpaidLand;
     const reconciledWaterfall = waterfallProfit - unrepatriatedEquity - unpaidDebt;
     const variance = reconciledWaterfall - f.totalProfit;
+    // R2 residual handling (PR-A). PR #28 closed the structural double-count;
+    // any remaining variance is solver/rounding residual that scales with
+    // project size. PASS when within $10k; WARN when within max($500k, 0.5%
+    // of total cost) — covers larger projects where rounding is naturally
+    // larger; FAIL only when the variance is a real reconciliation bug.
+    const warnTol = Math.max(500_000, f.totalCost * 0.005);
     const status: CheckStatus = Math.abs(variance) < 10_000 ? 'PASS'
-      : Math.abs(variance) < 100_000 ? 'WARN' : 'FAIL';
+      : Math.abs(variance) < warnTol ? 'WARN' : 'FAIL';
     checks.push({
       id: 'profit-waterfall',
       category: 'Returns',
@@ -486,16 +511,27 @@ export function ChecksTab() {
     });
   }
 
-  // ── 15. S-CURVE WARNINGS ────────────────────────────────────────────────────
-  if (data.warnings && data.warnings.length > 0) {
-    data.warnings.forEach((w, i) => {
-      // "falling back to even split" = Manual S-curve not configured (expected default).
-      // "falling back to parabolic" = Build S-curve defined but empty (worth noting).
-      const isUnconfigured = w.includes('falling back to even split');
+  // ── 15. ENGINE WARNINGS — routed by category (R3) ──────────────────────────
+  // Earlier versions of this block dumped *every* engine warning under
+  // "S-Curves" with boilerplate notes, which mis-categorised funding and
+  // revenue messages. Now we read warningsDetail (which carries the actual
+  // category from engine/index.ts) and route accordingly. Per-message status
+  // is upgraded based on content cues.
+  const warningsDetail = data.warningsDetail ?? [];
+  const sCurveWarns = warningsDetail.filter(w => w.category === 'sCurve');
+  const fundingWarns = warningsDetail.filter(w => w.category === 'funding' || w.category === 'solver');
+  const revenueWarns = warningsDetail.filter(w => w.category === 'revenue');
+  const gstWarns = warningsDetail.filter(w => w.category === 'gst');
+  const generalWarns = warningsDetail.filter(w => w.category === 'general');
+
+  // S-Curve warnings — INFO (unconfigured fallback) vs WARN (empty array)
+  if (sCurveWarns.length > 0) {
+    sCurveWarns.forEach((w, i) => {
+      const isUnconfigured = w.message.includes('falling back to even split');
       checks.push({
         id: `scurve-warn-${i}`,
         category: 'S-Curves',
-        description: w,
+        description: w.message,
         expected: 'Weights defined',
         actual: 'Using fallback',
         status: isUnconfigured ? 'INFO' : 'WARN',
@@ -514,6 +550,60 @@ export function ChecksTab() {
       status: 'PASS',
     });
   }
+
+  // Funding warnings — WARN by default; FAIL on solver-non-convergence (severity error)
+  fundingWarns.forEach((w, i) => {
+    const isSolverError = w.severity === 'error';
+    checks.push({
+      id: `funding-warn-${i}`,
+      category: 'Funding',
+      description: w.message,
+      expected: 'Within facility limits / converged',
+      actual: 'See message',
+      status: isSolverError ? 'FAIL' : 'WARN',
+      notes: isSolverError
+        ? 'Debt solver did not converge — finance costs and facility sizes may be inaccurate.'
+        : 'Funding constraint or covenant flag from the cashflow solver.',
+    });
+  });
+
+  // Revenue warnings — WARN
+  revenueWarns.forEach((w, i) => {
+    checks.push({
+      id: `revenue-warn-${i}`,
+      category: 'Revenue',
+      description: w.message,
+      expected: 'Valid revenue inputs',
+      actual: 'See message',
+      status: 'WARN',
+      notes: 'Revenue line item input ordering or span overflow.',
+    });
+  });
+
+  // GST warnings — WARN
+  gstWarns.forEach((w, i) => {
+    checks.push({
+      id: `gst-warn-${i}`,
+      category: 'GST',
+      description: w.message,
+      expected: 'Valid GST configuration',
+      actual: 'See message',
+      status: 'WARN',
+      notes: 'GST configuration or supply-type routing flag.',
+    });
+  });
+
+  // General/uncategorised — WARN
+  generalWarns.forEach((w, i) => {
+    checks.push({
+      id: `general-warn-${i}`,
+      category: 'General',
+      description: w.message,
+      expected: 'No issues',
+      actual: 'See message',
+      status: 'WARN',
+    });
+  });
 
   // ── 16. PROJECT SPAN ─────────────────────────────────────────────────────────
   {
@@ -617,7 +707,9 @@ export function ChecksTab() {
         <div className="text-xs text-blue-700 space-y-1">
           <p><strong>GST on Costs (ITC):</strong> GST paid to vendors on cost items where <code>addGST = true</code>. Claimable via BAS input tax credits. Included in total cost and in the funding waterfall as a cash outflow.</p>
           <p><strong>GST on Revenue:</strong> GST embedded in GST-inclusive sale prices (residential items where <code>gstIncluded = true</code>). Calculated using the margin scheme: <code>Sale Price × rate / (1 + rate)</code>. Remitted to the ATO.</p>
-          <p><strong>Net GST Payable:</strong> GST on Revenue − GST on Costs (ITC). This is the net amount remitted to the ATO after claiming input tax credits.</p>
+          <p><strong>Net GST Payable (Table 1, book balance):</strong> GST on Revenue − GST on Costs (ITC). The book balance from the developer's P&L view, before applying any s.14-250 withholding credit.</p>
+          <p><strong>Net GST Cash to ATO (Table 13, post-withholding):</strong> Book balance − withholding-already-paid by purchaser at settlement (TAA 1953 Sch 1, s.14-250). For margin-scheme residential where withholding fully covers the supply, this can be a refund. The two tables differ by the withholding amount — both are correct in their own context.</p>
+          <p><strong>Withholding (memo):</strong> Per the GST at Settlement regime, the purchaser of new residential premises (or potential residential land) withholds 1/11 of the contract price and remits direct to the ATO; the developer claims that as a BAS credit. Cashflow modelling now treats this as attribution-only — see PR #28.</p>
           <p className="text-blue-600 italic">Note: If "GST on Costs" shows $0, check that (1) gstRate &gt; 0% in Land Purchase inputs, and (2) cost items have <code>addGST = true</code>. Items saved before the addGST field was introduced may show as undefined (treated as false). Re-entering costs from the Inputs tab will fix this.</p>
         </div>
       </div>

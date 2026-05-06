@@ -145,7 +145,7 @@ function Table1FeasibilitySummary({
             <CompareRow label="Standard Costs" current={current.standardCosts} previous={p('standardCosts')} />
             <CompareRow label="GST on Costs (ITC Claimable)" current={current.gst} previous={p('gst')} indent />
             <CompareRow label="GST on Revenue (Remitted to ATO)" current={current.gstOnRevenue} previous={p('gstOnRevenue')} indent />
-            <CompareRow label="Net GST Payable to ATO" current={current.gstNet} previous={p('gstNet')} indent bold />
+            <CompareRow label="Net GST Position — book balance (Revenue GST − ITC)" current={current.gstNet} previous={p('gstNet')} indent bold />
             <CompareRow label="Marketing and Advertising" current={current.marketingAndAdvertising} previous={p('marketingAndAdvertising')} />
             <CompareRow label="Sales Commissions" current={current.salesCommissions} previous={p('salesCommissions')} />
             <CompareRow label="Project Management Fee" current={current.pmFee} previous={p('pmFee')} />
@@ -167,7 +167,7 @@ function Table1FeasibilitySummary({
             <DashValue label="Standard Costs" value={current.standardCosts} />
             <DashValue label="GST on Costs (ITC Claimable)" value={current.gst} indent />
             <DashValue label="GST on Revenue (Remitted to ATO)" value={current.gstOnRevenue} indent />
-            <DashValue label="Net GST Payable to ATO" value={current.gstNet} indent bold />
+            <DashValue label="Net GST Position — book balance (Revenue GST − ITC)" value={current.gstNet} indent bold />
             <DashValue label="Marketing and Advertising" value={current.marketingAndAdvertising} />
             <DashValue label="Sales Commissions" value={current.salesCommissions} />
             <DashValue label="Project Management Fee" value={current.pmFee} />
@@ -584,7 +584,7 @@ export function InternalDashboard() {
               <DashValue label="ITC Claimable" value={data.gstCompliance.itcClaimable} indent />
               <DashValue label="GST Withholding (TAA 1953 Sch 1, s.14-250)" value={data.gstCompliance.gstWithholdingTotal} indent />
               <div className="h-1 bg-gray-300" />
-              <DashValue label="Net GST Payable to ATO" value={data.gstCompliance.netGSTPayable} bold highlight />
+              <DashValue label="Net GST Cash to ATO (after s.14-250 withholding credit)" value={data.gstCompliance.netGSTPayable} bold highlight />
             </TableBox>
           )}
 
