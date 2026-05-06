@@ -245,7 +245,13 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // GST withholding (TAA 1953 Sch 1, s.14-250) — purchaser of new residential premises withholds
   // 1/11 of the GST-exclusive price and remits directly to ATO. Models the cash effect:
   // developer receives net-of-withholding at settlement; ATO receives withholding.
-  const applyWithholding = admin.applyGSTWithholding === true;
+  // R16 — withholding default. The s.14-250 GST-at-Settlement regime is
+  // mandatory for new residential premises and potential residential land
+  // (any margin-scheme supply in this model). If admin.applyGSTWithholding is
+  // unset, default to true when the project contains any margin-scheme item,
+  // false otherwise. Explicit user choice (true/false) is honoured.
+  const hasMarginSchemeSupply = inputs.grvItems.some(g => resolveSupplyType(g) === 'margin-scheme');
+  const applyWithholding = admin.applyGSTWithholding ?? hasMarginSchemeSupply;
   const gstWithholding = new Array(n).fill(0);
   const gstOnDeposits = new Array(n).fill(0);
 
@@ -325,8 +331,11 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
 
   // ===== 5. FUNDING & DEBT SOLVING =====
   // ITC recovery: ATO refunds GST paid on costs each BAS cycle.
-  // itcRecoveryLagMonths=0 (default) matches Excel same-period treatment.
-  // Set to 1–3 for realistic quarterly BAS lag in lender-facing models.
+  // R17 — default itcRecoveryLagMonths = 1 (monthly BAS lodgement, refund
+  // received the month after the GST was paid to vendors). Set to 0 to match
+  // Excel's same-period legacy treatment, or 3 for quarterly BAS lodgers.
+  // Same-period (0) is operationally impossible; the previous default
+  // overstated developer cash by accelerating the refund.
   //
   // GST withholding (TAA 1953 Sch 1, s.14-250) is attribution-only for cashflow
   // purposes: the purchaser remits 1/11 of the price directly to the ATO, but
@@ -336,7 +345,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // as if they collected gross price and remit gstOnRevenue via BAS; the
   // withholding line on the cashflow row is preserved as an information-only
   // memo of the attribution split. Closes Box Hill UAT R1 + R2.
-  const itcLag = admin.itcRecoveryLagMonths ?? 0;
+  const itcLag = admin.itcRecoveryLagMonths ?? 1;
   const totalMonthlyRevenue = settlements.map((s, i) =>
     s + (rentalInc[i] ?? 0) + (otherInc[i] ?? 0)
     + (i >= itcLag ? (gstOnCosts[i - itcLag] ?? 0) : 0)
@@ -761,6 +770,22 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     ? taxableMargin * gstRate / (1 + gstRate)
     : 0;
   const gstWithholdingTotal = sum(gstWithholding);
+  // R15 — input-taxed supplies + creditable acquisitions contradiction.
+  // Per GSTA s.11-15(2)(a), an acquisition that relates to making input-taxed
+  // supplies is NOT a creditable acquisition; ITC cannot be claimed on the
+  // GST paid on those costs. The model doesn't apportion costs by supply mix,
+  // so when a project contains BOTH input-taxed supplies AND non-zero
+  // gstOnCosts, the developer's effective ITC claim is overstated by the
+  // input-taxed proportion. Surface a warning so the user can apportion
+  // manually (e.g. by setting addGST=false on cost items attributable to
+  // input-taxed supplies).
+  if (inputTaxedSupplies > 0 && totalGSTOnCosts > 0) {
+    const inputTaxedShare = inputTaxedSupplies / Math.max(1, totalGRVAllItems);
+    const overstatedITC = totalGSTOnCosts * inputTaxedShare;
+    localWarnings.push(
+      `GST input-taxed contradiction (s.11-15): project has $${Math.round(inputTaxedSupplies).toLocaleString()} of input-taxed supplies (${(inputTaxedShare * 100).toFixed(1)}% of GRV) but is claiming $${Math.round(totalGSTOnCosts).toLocaleString()} of ITC. Approximately $${Math.round(overstatedITC).toLocaleString()} of ITC may not be creditable — apportion costs by supply mix or set addGST=false on cost items attributable to input-taxed supplies.`
+    );
+  }
   // Creditable acquisitions = GST-inclusive value of creditable purchases (BAS G18).
   // ITC = G18 × gstRate/(1+gstRate), so G18 = ITC × (1+gstRate)/gstRate.
   const creditableAcquisitions = totalGSTOnCosts > 0 ? totalGSTOnCosts * (1 + gstRate) / gstRate : 0;
