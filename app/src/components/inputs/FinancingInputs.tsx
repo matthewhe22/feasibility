@@ -160,6 +160,49 @@ function DebtSection({ title, facility, isLandLoan = false, onChange }: {
   );
 }
 
+function RepaymentSequenceBanner() {
+  const { admin, setAdmin } = useStore();
+  // M3 — Cash-sweep order for the revenue waterfall. Default = legal priority.
+  const seq = admin.repaymentSequence ?? ['senior', 'mezz', 'equity'] as const;
+  const isLegalOrder = seq[0] === 'senior';
+  return (
+    <div className="mb-4 border border-emerald-200 rounded bg-emerald-50 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold text-emerald-800 mb-1.5">Repayment Sequence (cash-sweep order)</p>
+          <div className="flex items-center gap-1 text-xs text-emerald-900 font-medium">
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-600 text-white text-[10px] font-bold">1</span>
+            <span>{isLegalOrder ? 'Senior' : 'Mezz'}</span>
+            <span className="text-emerald-400 font-bold mx-1">→</span>
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-600 text-white text-[10px] font-bold">2</span>
+            <span>{isLegalOrder ? 'Mezz' : 'Senior'}</span>
+            <span className="text-emerald-400 font-bold mx-1">→</span>
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-600 text-white text-[10px] font-bold">3</span>
+            <span>Equity</span>
+          </div>
+        </div>
+        <select
+          className="text-xs bg-white border border-emerald-300 rounded px-2 py-1 text-emerald-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          value={isLegalOrder ? 'legal' : 'cash-sweep'}
+          onChange={e => {
+            const next = e.target.value === 'legal'
+              ? ['senior', 'mezz', 'equity'] as ('senior' | 'mezz' | 'equity')[]
+              : ['mezz', 'senior', 'equity'] as ('senior' | 'mezz' | 'equity')[];
+            setAdmin({ repaymentSequence: next });
+          }}
+          title="Senior → Mezz → Equity is the legal priority (default). Mezz → Senior → Equity is sometimes used as a cash-sweep on retail fund mandates so the highest-rate debt clears first. Equity is always last. Legal priority on default is unaffected by this setting."
+        >
+          <option value="legal">Senior → Mezz → Equity (default — legal priority)</option>
+          <option value="cash-sweep">Mezz → Senior → Equity (high-rate-first cash sweep)</option>
+        </select>
+      </div>
+      <p className="text-[10px] text-emerald-500 mt-1.5">
+        Cash-sweep order only — the LEGAL priority on default remains senior-first regardless of this setting.
+      </p>
+    </div>
+  );
+}
+
 // ===== MAIN COMPONENT =====
 
 export function FinancingInputs() {
@@ -171,6 +214,7 @@ export function FinancingInputs() {
       <div className="bg-white border border-t-0 border-gray-200 rounded-b p-4">
 
         <DrawdownSequenceBanner inputs={inputs} />
+        <RepaymentSequenceBanner />
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {/* Left column: Equity */}
