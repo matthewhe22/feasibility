@@ -497,6 +497,20 @@ function runFundingWaterfall(
           `Land Loan starts month ${landLoan.startMonth} but Senior starts month ${senior.startMonth} — land loan is repaid same period it is drawn, so no land-loan interest accrues. Confirm the bridge period (typical pattern: land-loan precedes senior by 3-6 months).`
         );
       }
+      // R19 — Land-loan interest payment-frequency convention. Interest accrues
+      // on the previous period's closing balance (llOpenBalance), so the
+      // drawdown period itself never shows an interest charge — the open
+      // balance is $0 at the start of the drawdown period. With monthly
+      // payment frequency (=1), the first interest charge appears one period
+      // after drawdown. With quarterly (=3), the first interest appears in
+      // period drawdown+3 (the 3rd full period of accrual). This is the
+      // accepted convention but visually confusing on the cashflow row, so
+      // we surface an INFO note when the frequency > 1.
+      if ((landLoan.interestPaymentFrequency ?? 1) > 1) {
+        _fundingWarnings.push(
+          `Land Loan interest payment frequency = ${landLoan.interestPaymentFrequency} months. Interest accrues monthly on the prior closing balance but is recognised in the cashflow only every ${landLoan.interestPaymentFrequency} periods (next charge: period ${landLoan.startMonth + landLoan.interestPaymentFrequency}). The drawdown period itself shows zero interest because the opening balance is zero.`
+        );
+      }
       llDrawdowns[i]     = landLoan.facilityLimit;
       llRunningBalance  += landLoan.facilityLimit;
       bankBalance       += landLoan.facilityLimit;

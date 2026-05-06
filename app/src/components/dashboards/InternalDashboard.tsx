@@ -492,7 +492,7 @@ export function InternalDashboard() {
                     <td className="px-2 py-0.5 text-right">{formatPercent(dr.landBBSY)}</td>
                   </tr>
                   <tr className="bg-blue-100 font-bold">
-                    <td className="px-2 py-1">Total all in rate</td>
+                    <td className="px-2 py-1">Interest rate (BBSY + Margin)</td>
                     <td className="px-2 py-1 text-right">{formatPercent(dr.seniorAllIn)}</td>
                     <td className="px-2 py-1 text-right">{formatPercent(dr.senior2AllIn)}</td>
                     <td className="px-2 py-1 text-right">{formatPercent(dr.mezzAllIn)}</td>

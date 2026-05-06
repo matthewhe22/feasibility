@@ -674,10 +674,28 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     return periods[monthNum - 1]?.label || 'N/A';
   }
 
-  const seniorAllIn  = (inputs.seniorFacility?.establishmentFeePercent  ?? 0) + (inputs.seniorFacility?.lineFeePercent  ?? 0) + (inputs.seniorFacility?.margin  ?? 0) + (inputs.seniorFacility?.bbsy  ?? 0);
-  const senior2AllIn = (inputs.seniorFacility2?.establishmentFeePercent ?? 0) + (inputs.seniorFacility2?.lineFeePercent ?? 0) + (inputs.seniorFacility2?.margin ?? 0) + (inputs.seniorFacility2?.bbsy ?? 0);
-  const landAllIn    = inputs.landLoan?.interestRate  ?? 0;
-  const mezzAllIn    = inputs.mezzanine?.interestRate ?? 0;
+  // R6 — unified all-in interest rate formula across all four facility columns.
+  //
+  // Canonical: all-in = BBSY + Margin (the running interest rate charged on
+  // outstanding balance). Establishment fees and line fees are pricing
+  // components separate from the running rate — they appear on their own
+  // rows in Table 8 and shouldn't be summed into the all-in. The previous
+  // formulas were inconsistent: Senior/Senior #2 included est+line+margin+bbsy,
+  // Mezz used legacy interestRate (margin only), Land used legacy interestRate
+  // (margin+bbsy combined). Now all four use the same formula, with a fall-
+  // through to the legacy interestRate field for projects saved before margin
+  // and bbsy were broken out.
+  function allInRate(f: import('../types').DebtFacility | undefined): number {
+    if (!f) return 0;
+    const margin = f.margin ?? 0;
+    const bbsy   = f.bbsy   ?? 0;
+    if (margin > 0 || bbsy > 0) return margin + bbsy;
+    return f.interestRate ?? 0;  // back-compat for older saved projects
+  }
+  const seniorAllIn  = allInRate(inputs.seniorFacility);
+  const senior2AllIn = allInRate(inputs.seniorFacility2);
+  const landAllIn    = allInRate(inputs.landLoan);
+  const mezzAllIn    = allInRate(inputs.mezzanine);
 
   // Interest-only metric (no fees) — matches Excel's "Peak Interest/Month" which shows
   // the maximum periodic interest charge across all facilities, excluding line/establishment fees.
@@ -904,8 +922,11 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       senior2AllIn,
       mezzEstablishment: inputs.mezzanine?.establishmentFeePercent ?? 0,
       mezzLineFee: inputs.mezzanine?.lineFeePercent ?? 0,
-      mezzMargin: inputs.mezzanine?.interestRate ?? 0,
-      mezzBBSY: 0,
+      // R7 — Mezz Margin/BBSY: mirror the Land-Loan fix from PR #27.
+      // Read from facility.margin/.bbsy with fall-through to interestRate when
+      // older saved projects only have the aggregate field set.
+      mezzMargin: inputs.mezzanine?.margin ?? inputs.mezzanine?.interestRate ?? 0,
+      mezzBBSY: inputs.mezzanine?.bbsy ?? 0,
       mezzAllIn,
       landEstablishment: inputs.landLoan?.establishmentFeePercent ?? 0,
       landLineFee: inputs.landLoan?.lineFeePercent ?? 0,
