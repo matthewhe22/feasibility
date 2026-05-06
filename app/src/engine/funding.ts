@@ -24,6 +24,9 @@ const EMPTY_FACILITY: DebtFacility = {
 
 export type DrawdownFacilityType = 'equity' | 'equityJV' | 'senior' | 'senior2' | 'mezz';
 
+/** M3 — Cash-sweep order for the revenue waterfall (project-end repayment). */
+export type RepaymentTranche = 'senior' | 'mezz' | 'equity';
+
 export interface DrawdownSequenceEntry {
   type: DrawdownFacilityType;
   name: string;
@@ -185,6 +188,8 @@ export function solveFunding(
   tolerance: number,
   maxIterations = 50,
   equityDrawdownMode: 'equity-first' | 'pro-rata' = 'equity-first',
+  // M3 — Cash-sweep order for the revenue waterfall. Default = legal priority.
+  repaymentSequence: readonly RepaymentTranche[] = ['senior', 'mezz', 'equity'],
 ): FundingResult {
   const n = periods.length;
 
@@ -212,6 +217,7 @@ export function solveFunding(
       inputs, tdc, daysPerYear,
       prevPeakSnrBalance, prevPeakSnr2Balance, prevPeakMezzBalance,
       equityDrawdownMode,
+      repaymentSequence,
     );
 
     const newSeniorFinCosts = result.totalSeniorInterest + result.totalSeniorFees
@@ -325,6 +331,8 @@ function runFundingWaterfall(
   peakSnr2BalancePrev = 0,
   peakMezzBalancePrev = 0,
   equityDrawdownMode: 'equity-first' | 'pro-rata' = 'equity-first',
+  // M3 — Cash-sweep order for the revenue waterfall.
+  repaymentSequence: readonly RepaymentTranche[] = ['senior', 'mezz', 'equity'],
 ): FundingResult {
   const n = periods.length;
   const landLoan = inputs.landLoan        ?? EMPTY_FACILITY;
@@ -796,26 +804,42 @@ function runFundingWaterfall(
       }
     }
 
-    // ── 10. Revenue sweep: senior1 → senior2 → mezz → equity → profit ────────
+    // ── 10. Revenue sweep — order driven by repaymentSequence (M3). ──────────
+    // Default legal priority: senior → mezz → equity. Cash-sweep alternative:
+    // mezz → senior → equity (sometimes used on retail fund mandates). Equity
+    // is enforced last by convention regardless of where it appears in the
+    // sequence. Senior #2 always follows Senior #1 inside the "senior" tranche.
     if (bankBalance > 0) {
-      if (snrRunningBalance > 0) {
-        const repay        = Math.min(bankBalance, snrRunningBalance);
-        snrRepayments[i]   = repay;
-        snrRunningBalance -= repay;
-        bankBalance       -= repay;
+      const repaySenior = () => {
+        if (bankBalance > 0 && snrRunningBalance > 0) {
+          const repay        = Math.min(bankBalance, snrRunningBalance);
+          snrRepayments[i]  += repay;
+          snrRunningBalance -= repay;
+          bankBalance       -= repay;
+        }
+        if (bankBalance > 0 && snr2RunningBalance > 0) {
+          const repay         = Math.min(bankBalance, snr2RunningBalance);
+          snr2Repayments[i]  += repay;
+          snr2RunningBalance -= repay;
+          bankBalance        -= repay;
+        }
+      };
+      const repayMezz = () => {
+        if (bankBalance > 0 && mzRunningBalance > 0) {
+          const repay        = Math.min(bankBalance, mzRunningBalance);
+          mzRepayments[i]   += repay;
+          mzRunningBalance  -= repay;
+          bankBalance       -= repay;
+        }
+      };
+      // Walk the configured sequence; equity handled separately after debt is done.
+      for (const t of repaymentSequence) {
+        if (bankBalance <= 0) break;
+        if (t === 'senior') repaySenior();
+        else if (t === 'mezz') repayMezz();
+        // 'equity' tranche handled below — equity is always processed last
       }
-      if (bankBalance > 0 && snr2RunningBalance > 0) {
-        const repay         = Math.min(bankBalance, snr2RunningBalance);
-        snr2Repayments[i]   = repay;
-        snr2RunningBalance -= repay;
-        bankBalance        -= repay;
-      }
-      if (bankBalance > 0 && mzRunningBalance > 0) {
-        const repay        = Math.min(bankBalance, mzRunningBalance);
-        mzRepayments[i]    = repay;
-        mzRunningBalance  -= repay;
-        bankBalance       -= repay;
-      }
+      // If equity isn't explicitly in the sequence, still process it last.
       if (bankBalance > 0) {
         if (i < eqDistStartIdx && i < n - 1) {
           // Before the distribution window: hold surplus in the project account.

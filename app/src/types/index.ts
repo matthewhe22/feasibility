@@ -252,6 +252,11 @@ export interface AdminConfig {
   contingencyGSTMode?: 'none' | 'full';
   /** Equity drawdown mode: 'equity-first' draws all equity before any senior; 'pro-rata' draws equity and senior simultaneously at a fixed ratio */
   equityDrawdownMode?: 'equity-first' | 'pro-rata';
+  /** M3 — Cash-sweep order for the revenue waterfall. Default ['senior','mezz','equity']
+   *  is the legal priority. ['mezz','senior','equity'] is the high-rate-first cash sweep
+   *  sometimes seen on retail fund mandates. Equity is always last by convention.
+   *  Note: the LEGAL priority on default remains senior-first regardless of this setting. */
+  repaymentSequence?: ('senior' | 'mezz' | 'equity')[];
   /** Branding: custom application title shown in header and browser tab */
   appName?: string | undefined;
   /** Branding: base64-encoded logo image (data URL) displayed in header top-left */
