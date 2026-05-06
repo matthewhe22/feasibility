@@ -19,5 +19,16 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // B12 — accept underscore-prefixed params as intentionally-unused (matches
+      // the convention used in src/components/inputs/MainInputTab.tsx and
+      // src/utils/exportToExcel.ts where `_curveIndex` / `_fmt` are placeholders
+      // for arity-required positional args we don't consume).
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      }],
+    },
   },
 ])

@@ -85,6 +85,12 @@ const TABS: { id: TabId; label: string }[] = [
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
+  // B12 — `inputs` is referenced as `typeof inputs` at line 103, which is a
+  // type-only reference. ESLint flags this as "assigned a value but only used
+  // as a type" — accepted as a known false-positive; renaming breaks the
+  // typeof binding and extracting the type via store typing isn't worth the
+  // refactor for one warning.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { activeTab, setActiveTab, admin, inputs, setAdmin, setInputs, setDashboardData, dashboardData, isCalculating, setIsCalculating, currentProjectId, setCurrentProjectId, setProjectList } = useStore();
   const [showProjectManager, setShowProjectManager] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
@@ -143,7 +149,7 @@ function App() {
             testResult,
           );
         }
-      } catch {}
+      } catch { /* swallow — startup-only path; the next calculate() will surface real errors */ }
     })();
 
     if (currentProjectId !== null) {
@@ -172,7 +178,7 @@ function App() {
           }
           return;
         }
-      } catch {}
+      } catch { /* swallow — fallthrough to calculate() */ }
       if (!cancelled) calculate();
     })();
 

@@ -1,5 +1,26 @@
+import React from 'react';
 import { useStore } from '../../store/useStore';
 import { formatCurrency, formatPercent } from '../../utils';
+
+// B12 — hoisted from inside ProjectSummary so React doesn't recreate the
+// component types on every render (react-hooks/static-components). Pure
+// presentational; takes only props.
+const Header = ({ children }: { children: React.ReactNode }) => (
+  <div className="bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded-t">{children}</div>
+);
+
+const Box = ({ children }: { children: React.ReactNode }) => (
+  <div className="border border-gray-200 rounded mb-4">{children}</div>
+);
+
+const Row = ({ label, value, bold = false, highlight = false, negative = false }: {
+  label: string; value: string; bold?: boolean; highlight?: boolean; negative?: boolean;
+}) => (
+  <div className={`flex justify-between px-3 py-1 ${bold ? 'font-bold' : ''} ${highlight ? 'bg-blue-50' : ''}`}>
+    <span className={`text-xs ${bold ? 'text-gray-800' : 'text-gray-600'}`}>{label}</span>
+    <span className={`text-xs font-mono ${negative ? 'text-red-600' : bold ? 'text-gray-800' : 'text-gray-700'}`}>{value}</span>
+  </div>
+);
 
 export function ProjectSummary() {
   const { dashboardData: data } = useStore();
@@ -32,23 +53,6 @@ export function ProjectSummary() {
   const totalCostsExcFin = totalLandCosts + totalAcquisition + totalDev + totalConst +
     totalContingency + totalMarketing + totalOther + totalPM + totalSelling + totalOtherFin;
   const totalRevenue = totalSettlements + totalRental + totalOtherInc;
-
-  const Header = ({ children }: { children: React.ReactNode }) => (
-    <div className="bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded-t">{children}</div>
-  );
-
-  const Box = ({ children }: { children: React.ReactNode }) => (
-    <div className="border border-gray-200 rounded mb-4">{children}</div>
-  );
-
-  const Row = ({ label, value, bold = false, highlight = false, negative = false }: {
-    label: string; value: string; bold?: boolean; highlight?: boolean; negative?: boolean;
-  }) => (
-    <div className={`flex justify-between px-3 py-1 ${bold ? 'font-bold' : ''} ${highlight ? 'bg-blue-50' : ''}`}>
-      <span className={`text-xs ${bold ? 'text-gray-800' : 'text-gray-600'}`}>{label}</span>
-      <span className={`text-xs font-mono ${negative ? 'text-red-600' : bold ? 'text-gray-800' : 'text-gray-700'}`}>{value}</span>
-    </div>
-  );
 
   return (
     <div>

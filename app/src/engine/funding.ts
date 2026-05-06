@@ -757,8 +757,12 @@ function runFundingWaterfall(
       // accepted convention but visually confusing on the cashflow row, so
       // we surface an INFO note when the frequency > 1.
       if ((landLoan.interestPaymentFrequency ?? 1) > 1) {
+        // B08 — Prefix with [INFO] so ChecksTab's prefix-aware routing renders
+        // this as INFO not WARN. The text after the prefix is unchanged.
+        // ChecksTab also recognises the existing [INFO] auto-size messages
+        // emitted from the funding consolidator.
         _fundingWarnings.push(
-          `Land Loan interest payment frequency = ${landLoan.interestPaymentFrequency} months. Interest accrues monthly on the prior closing balance but is recognised in the cashflow only every ${landLoan.interestPaymentFrequency} periods (next charge: period ${landLoan.startMonth + landLoan.interestPaymentFrequency}). The drawdown period itself shows zero interest because the opening balance is zero.`
+          `[INFO] Land Loan interest payment frequency = ${landLoan.interestPaymentFrequency} months. Interest accrues monthly on the prior closing balance but is recognised in the cashflow only every ${landLoan.interestPaymentFrequency} periods (next charge: period ${landLoan.startMonth + landLoan.interestPaymentFrequency}). The drawdown period itself shows zero interest because the opening balance is zero.`
         );
       }
       llDrawdowns[i]     = landLoan.facilityLimit;

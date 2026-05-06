@@ -203,7 +203,12 @@ export function ChecksTab() {
         notes: 'Set gstRate in Land Purchase inputs. Standard Australian GST rate is 10%.',
       });
     }
-    if (f.gstOnRevenue === 0 && inputs.grvItems.some(g => g.gstIncluded)) {
+    // B09 — Suppress the consequential "GST on revenue / costs is $0" warnings
+    // when gstRate is 0%. The first check ('gst-rate-zero') already covers
+    // the diagnosis; the others are downstream consequences of the same
+    // misconfiguration and just create noise. Emit them only when gstRate > 0
+    // (in which case zero-revenue / zero-cost GST is genuinely surprising).
+    if (inputs.landPurchase.gstRate > 0 && f.gstOnRevenue === 0 && inputs.grvItems.some(g => g.gstIncluded)) {
       checks.push({
         id: 'gst-revenue-zero',
         category: 'GST',
@@ -211,10 +216,10 @@ export function ChecksTab() {
         expected: '>$0',
         actual: '$0',
         status: 'WARN',
-        notes: 'GST rate may be 0% — set gstRate > 0 in Land Purchase inputs if GST applies. Standard Australian rate is 10%.',
+        notes: 'gstIncluded items present but GST on revenue is zero — supply-type routing may be coercing all items to input-taxed. Verify supplyType / revenueType.',
       });
     }
-    {
+    if (inputs.landPurchase.gstRate > 0) {
       // Check ALL cost categories that the engine applies GST to, not just dev costs
       const allGSTCostItems = [
         ...inputs.developmentCosts,
@@ -232,7 +237,7 @@ export function ChecksTab() {
           expected: '>$0',
           actual: '$0',
           status: 'WARN',
-          notes: 'GST rate may be 0% — set gstRate > 0 in Land Purchase inputs if GST applies. If GST-free is intentional, mark all cost items addGST: false.',
+          notes: 'gstRate > 0 and addGST=true on cost items, yet GST on costs is zero — a routing or schema bug. Investigate.',
         });
       }
     }
@@ -579,15 +584,23 @@ export function ChecksTab() {
   } else {
     fundingWarns.forEach((w, i) => {
       const isSolverError = w.severity === 'error';
+      // B08 — Prefix-aware severity. Messages prefixed with [INFO] are
+      // informational notes (auto-size summaries, IPF>1 disclosure) — render
+      // as INFO not WARN. The Q1 consolidator already emits auto-size with
+      // this prefix; B08 also adds it to the LL IPF>1 INFO note.
+      const isInfo = !isSolverError && /^\[INFO\]/.test(w.message);
+      const status: CheckStatus = isSolverError ? 'FAIL' : isInfo ? 'INFO' : 'WARN';
       checks.push({
         id: `funding-warn-${i}`,
         category: 'Funding',
         description: w.message,
         expected: 'Within facility limits / converged',
         actual: 'See message',
-        status: isSolverError ? 'FAIL' : 'WARN',
+        status,
         notes: isSolverError
           ? 'Debt solver did not converge — finance costs and facility sizes may be inaccurate.'
+          : isInfo
+          ? 'Informational note from the funding solver — no action required.'
           : 'Funding constraint or covenant flag from the cashflow solver.',
       });
     });

@@ -292,6 +292,9 @@ console.log(`${'='.repeat(72)}`);
 if (failed > 0) {
   console.log('\nFAILURES:');
   failures.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
-  // @ts-ignore — process is available at runtime via Node/tsx
-  if (typeof process !== 'undefined') process.exit(1);
+  // B11 — process is available at runtime via Node/tsx; cast through unknown
+  // to avoid the legacy `@ts-ignore` (which masks real errors) without pulling
+  // in @types/node just for this single use site.
+  const proc = (globalThis as { process?: { exit: (n: number) => never } }).process;
+  if (proc) proc.exit(1);
 }
