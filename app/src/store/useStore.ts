@@ -86,6 +86,9 @@ const defaultAdmin: AdminConfig = {
   itcRecoveryLagMonths: 0,
   applyGSTWithholding: false,
   contingencyGSTMode: 'full',
+  // CR1 — default repayment sequence (legal priority). PR-D introduced this
+  // field as configurable but didn't default it for fresh installs.
+  repaymentSequence: ['senior', 'mezz', 'equity'],
 };
 
 const defaultInputs: MainInputs = {
@@ -174,6 +177,67 @@ function createDebouncedLocalStorage(delayMs: number): StateStorage {
   };
 }
 
+/**
+ * CR1 — Migrate persisted store state across schema versions.
+ * Exported so it can be unit-tested directly with synthetic v3/v4 fixtures.
+ *
+ * Versions:
+ *   v2 — removed seniorFacility3 + additionalLoan1/2/3 from MainInputs.
+ *   v3 — PM fee rate moved from `pmFees[0].units` (overloaded with the generic
+ *        Units column) to dedicated `pmFees[0].feeRatePercent`.
+ *   v4 — removed `dscrTarget` from AdminConfig (DSCR removed wholesale).
+ *   v5 — default `admin.repaymentSequence = ['senior', 'mezz', 'equity']`
+ *        when missing/undefined. PR-D added the field as configurable but
+ *        without a migration step — v4 users hit the engine with undefined
+ *        and the funding solver branches on this value.
+ *
+ * The function is idempotent on each version: running v5 migration on already-
+ * migrated v5 data produces no change (the existence checks short-circuit).
+ */
+export function migratePersistedState(persisted: unknown, version: number): unknown {
+  const p = persisted as Record<string, unknown> | null;
+  if (!p || typeof p !== 'object') return p;
+  if (version < 2 && p.inputs && typeof p.inputs === 'object') {
+    const inputs = p.inputs as Record<string, unknown>;
+    delete inputs.seniorFacility3;
+    delete inputs.additionalLoan1;
+    delete inputs.additionalLoan2;
+    delete inputs.additionalLoan3;
+  }
+  if (version < 4 && p.admin && typeof p.admin === 'object') {
+    delete (p.admin as Record<string, unknown>).dscrTarget;
+  }
+  if (version < 3 && p.inputs && typeof p.inputs === 'object') {
+    // Migrate legacy PM-fee rate. Adopt legacy `units` as the rate only when
+    // it looks like a rate (strictly between 0 and 1). Anything outside that
+    // range is most likely a quantity / dollar amount the user typed when the
+    // engine silently treated it as 100%/10000%/etc — default to 0.02 (2%)
+    // and rely on the runtime warning to nudge the user.
+    const inputs = p.inputs as { pmFees?: Array<Record<string, unknown>> };
+    if (Array.isArray(inputs.pmFees) && inputs.pmFees.length > 0) {
+      const first = inputs.pmFees[0];
+      if (first && typeof first === 'object' && first['feeRatePercent'] === undefined) {
+        const legacyUnits = first['units'];
+        if (typeof legacyUnits === 'number' && legacyUnits > 0 && legacyUnits < 1) {
+          first['feeRatePercent'] = legacyUnits;
+        } else {
+          first['feeRatePercent'] = 0.02;
+        }
+      }
+    }
+  }
+  // v5 — default repaymentSequence if missing. Idempotent on v5 data
+  // (only writes when the field is genuinely missing/null/non-array).
+  if (version < 5 && p.admin && typeof p.admin === 'object') {
+    const admin = p.admin as Record<string, unknown>;
+    const existing = admin.repaymentSequence;
+    if (!Array.isArray(existing) || existing.length === 0) {
+      admin.repaymentSequence = ['senior', 'mezz', 'equity'];
+    }
+  }
+  return p;
+}
+
 export const useStore = create<AppState>()(
   persist(
     (set) => ({
@@ -212,45 +276,12 @@ export const useStore = create<AppState>()(
       //      generic Units column) to a dedicated `pmFees[0].feeRatePercent`
       //      field. See engine/index.ts and the v2-UAT P0 PM-Fee bug.
       // v4 = removed `dscrTarget` from AdminConfig — DSCR removed wholesale.
-      version: 4,
-      migrate: (persisted, version) => {
-        const p = persisted as Record<string, unknown> | null;
-        if (!p || typeof p !== 'object') return p;
-        if (version < 2 && p.inputs && typeof p.inputs === 'object') {
-          const inputs = p.inputs as Record<string, unknown>;
-          delete inputs.seniorFacility3;
-          delete inputs.additionalLoan1;
-          delete inputs.additionalLoan2;
-          delete inputs.additionalLoan3;
-        }
-        if (version < 4 && p.admin && typeof p.admin === 'object') {
-          // v3→v4: drop the legacy `dscrTarget` field from AdminConfig.
-          // The engine no longer reads it; merge() also strips it defensively.
-          delete (p.admin as Record<string, unknown>).dscrTarget;
-        }
-        if (version < 3 && p.inputs && typeof p.inputs === 'object') {
-          // Migrate the legacy PM-fee rate. We only adopt the legacy `units`
-          // value as the rate when it looks like a rate — strictly between 0
-          // and 1. Anything outside that range (e.g. 1, 100, 500000) is most
-          // likely a quantity or dollar amount the user typed when the engine
-          // silently treated it as 100% / 10000% / etc. We default such cases
-          // to 0.02 (2%) and rely on the engine's runtime warning to nudge
-          // the user to set an explicit rate.
-          const inputs = p.inputs as { pmFees?: Array<Record<string, unknown>> };
-          if (Array.isArray(inputs.pmFees) && inputs.pmFees.length > 0) {
-            const first = inputs.pmFees[0];
-            if (first && typeof first === 'object' && first['feeRatePercent'] === undefined) {
-              const legacyUnits = first['units'];
-              if (typeof legacyUnits === 'number' && legacyUnits > 0 && legacyUnits < 1) {
-                first['feeRatePercent'] = legacyUnits;
-              } else {
-                first['feeRatePercent'] = 0.02;
-              }
-            }
-          }
-        }
-        return p;
-      },
+      // v5 = CR1 — default `admin.repaymentSequence = ['senior', 'mezz', 'equity']`
+      //      when missing/undefined. PR-D (PR #31) added it as a configurable
+      //      field but no migration step — v4 users hit the engine with
+      //      undefined and the funding solver branches on this value.
+      version: 5,
+      migrate: migratePersistedState,
       // Debounce localStorage writes to coalesce rapid keystrokes into a single
       // serialization+write. 250 ms is imperceptible to users but eliminates
       // dozens of redundant writes per second when typing into input fields.

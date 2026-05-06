@@ -1096,6 +1096,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     solver: ((): SolverDiagnostics => ({
       converged: funding.converged,
       iterations: funding.iterations,
+      convergedIn: funding.convergedIn,
       maxIterations: 50,
       finalDelta: funding.convergenceDelta,
       tolerance: admin.tolerance,

@@ -608,6 +608,13 @@ export interface GSTCompliance {
 export interface SolverDiagnostics {
   converged: boolean;
   iterations: number;
+  /**
+   * CR3 — Iteration count at which convergence was achieved, or `null` if the
+   * solver hit the iteration cap. Tests should assert
+   * `convergedIn < maxIterations` on known-good fixtures so a future change
+   * pushing convergence into the high-40s (still passing) is caught early.
+   */
+  convergedIn: number | null;
   maxIterations: number;
   /** Final absolute finance-cost delta (dollars) when the solver exited. */
   finalDelta: number;

@@ -354,8 +354,17 @@ export interface FundingResult {
   mezzFacilitySize: number;
   /** Whether the iterative solver converged within tolerance */
   converged: boolean;
-  /** Number of iterations actually performed */
+  /** Number of iterations actually performed (1..maxIterations) */
   iterations: number;
+  /**
+   * CR3 — Iteration count at which convergence was achieved, or `null` if the
+   * solver hit the iteration cap. Provided for tests / diagnostics that want
+   * to assert "we converged with headroom" — `convergedIn < maxIterations`.
+   * On known-good fixtures this should be well below the cap (typically 5–20);
+   * a value approaching `maxIterations` is a calibration warning, even when
+   * `converged === true`.
+   */
+  convergedIn: number | null;
   /** Final absolute finance-cost delta when solver exited (for diagnostics) */
   convergenceDelta: number;
 }
@@ -445,6 +454,32 @@ export function solveFunding(
     const senior2Diff = Math.abs(newSenior2FinCosts - prevSenior2FinCosts);
     finalDelta = Math.max(seniorDiff, mezzDiff, senior2Diff);
 
+    // CR3 — convergence criterion + failure-mode documentation.
+    //
+    // Threshold: `tolerance` (passed in from runCalculations, default $50 in
+    // engine config — small enough that downstream KPIs are stable to <$0.01,
+    // big enough to clear typical floating-point rounding on a 50-month build).
+    // The check uses MAX(senior, mezz, senior2) finance-cost delta rather than
+    // sum, so a single facility that's still drifting holds back convergence
+    // even if the others have settled.
+    //
+    // Convergence behaviour at the iteration cap (maxIterations, default 50):
+    //   • If finalDelta < tolerance: `converged = true`, loop breaks, the
+    //     last result is exact within rounding.
+    //   • If we hit `iter === maxIterations - 1` without converging: the
+    //     loop exits with `converged = false` and `convergedIn = null`. The
+    //     LAST iteration's values are returned (final-cost estimate is still
+    //     close — within ~$tolerance × 2 typically — but the convergence
+    //     warning fires below).
+    //   • A non-converged result is NOT a crash. Finance costs and facility
+    //     sizes may be off by up to the last delta; downstream calcs proceed.
+    //   • Diagnostic signals: `convergedIn` (iteration count, null if capped),
+    //     `convergenceDelta` (final delta), `converged` (boolean).
+    //
+    // Tests should assert convergedIn < maxIterations on known-good fixtures.
+    // A fixture that suddenly takes 49 iterations to converge (still passing)
+    // is a trending signal — likely a recent change is making the solver
+    // brittle even before it crosses the cap.
     if (finalDelta < tolerance) {
       converged = true;
       break;
@@ -466,6 +501,7 @@ export function solveFunding(
 
   result.converged = converged;
   result.iterations = iterationsRun;
+  result.convergedIn = converged ? iterationsRun : null;
   result.convergenceDelta = finalDelta;
 
   if (!converged) {
@@ -1346,6 +1382,7 @@ function runFundingWaterfall(
     mezzFacilitySize: peakMezzBalance,
     // Populated in solveFunding():
     converged: false,
+    convergedIn: null,
     iterations: 0,
     convergenceDelta: 0,
   };
@@ -1374,6 +1411,7 @@ function createEmptyResult(n: number): FundingResult {
     seniorFacilitySize: 0, seniorFacilityLimit: 0,
     senior2FacilitySize: 0, senior2FacilityLimit: 0,
     mezzFacilitySize: 0,
-    converged: false, iterations: 0, convergenceDelta: Infinity,
+    converged: false,
+    convergedIn: null, iterations: 0, convergenceDelta: Infinity,
   };
 }
