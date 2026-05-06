@@ -546,7 +546,15 @@ function runFundingWaterfall(
       }
     }
 
-    // ── 3. Land loan interest (accrued quarterly) ──────────────────────────────
+    // ── 3. Land loan interest (accrued; cash-pay or capitalised per flag) ────
+    // LL1: when landLoan.isCapitalised is true, accrued interest compounds into
+    // llRunningBalance (no cash outflow during the holding period); when false
+    // (default) interest is paid in cash each payment-frequency cycle. The
+    // flag was previously ignored — interest was always cash-paid even on
+    // facilities the user marked as capitalised. This is the more common
+    // practice: most land loans are interest-only paid in cash during the
+    // bridge period; some are capitalised so the developer holds no cash
+    // burden until takeout.
     if (llOpenBalance > 0) {
       const accrued = periodInterest(llOpenBalance, landLoan.interestRate, days, daysPerYear);
       llAccruedInterest += accrued;
@@ -556,8 +564,18 @@ function runFundingWaterfall(
       if ((monthsSinceLLStart + 1) % freq === 0) {
         llInterest[i]      = llAccruedInterest;
         totalLandInterest += llAccruedInterest;
-        bankBalance       -= llAccruedInterest;
-        llAccruedInterest  = 0;
+        if (landLoan.isCapitalised) {
+          // Capitalised: compound into balance; no cash impact this period.
+          // The takeout transaction (step 4) will repay this in full from senior.
+          llRunningBalance += llAccruedInterest;
+          // Track as a synthetic drawdown for cashflow balance — interest
+          // creates new debt rather than draining cash.
+          llDrawdowns[i] += llAccruedInterest;
+        } else {
+          // Cash-pay (default): direct outflow.
+          bankBalance -= llAccruedInterest;
+        }
+        llAccruedInterest = 0;
       }
     }
 
