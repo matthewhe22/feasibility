@@ -250,8 +250,18 @@ export interface AdminConfig {
   applyGSTWithholding?: boolean;
   /** Contingency reserve GST treatment. 'none' = no GST (reserve until spent on invoiced supplies), 'full' = apply gstRate on contingency (legacy) */
   contingencyGSTMode?: 'none' | 'full';
-  /** Equity drawdown mode: 'equity-first' draws all equity before any senior; 'pro-rata' draws equity and senior simultaneously at a fixed ratio */
-  equityDrawdownMode?: 'equity-first' | 'pro-rata';
+  /** Equity drawdown mode:
+   *  - 'equity-first' (default, current behaviour): each period the gap-fill loop
+   *    fills from the lowest drawdownPriority first, so equity (priority 1) drains
+   *    fully before senior (priority 4) starts gap-filling. Backwards-compatible.
+   *  - 'pro-rata': split the period gap proportionally between developer equity and
+   *    senior, weighted by remaining covenant headroom on each.
+   *  - 'senior-first' (recommended for standard Australian dev finance): once
+   *    construction starts (i >= senior.startMonth), debt facilities fill the gap
+   *    BEFORE equity (senior → senior2 → mezz, in their existing relative order).
+   *    Equity only steps in when all debt is at LTC/LVR/facility cap. Pre-construction
+   *    periods are unchanged — equity covers land + DA per the existing priority order. */
+  equityDrawdownMode?: 'equity-first' | 'pro-rata' | 'senior-first';
   /** M3 — Cash-sweep order for the revenue waterfall. Default ['senior','mezz','equity']
    *  is the legal priority. ['mezz','senior','equity'] is the high-rate-first cash sweep
    *  sometimes seen on retail fund mandates. Equity is always last by convention.

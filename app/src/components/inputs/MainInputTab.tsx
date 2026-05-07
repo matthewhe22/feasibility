@@ -1186,14 +1186,15 @@ export function MainInputTab() {
               <span className="text-xs text-gray-400">0 = same-period (Excel match)</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-gray-600 w-40 shrink-0" title="Equity-first: all equity drawn before any senior debt. Pro-rata: equity and senior drawn simultaneously at a fixed ratio each period.">Equity Drawdown Mode</span>
+              <span className="text-xs font-medium text-gray-600 w-40 shrink-0" title="Equity-first: equity drains by drawdown priority each period before senior gap-fills. Pro-rata: equity and senior split each period gap by remaining covenant headroom. Senior-first (recommended for standard Australian dev finance): once construction starts, debt absorbs costs first; equity only covers land + DA upfront and any post-cap shortfall.">Equity Drawdown Mode</span>
               <select
                 value={admin.equityDrawdownMode ?? 'equity-first'}
-                onChange={e => setAdmin({ equityDrawdownMode: e.target.value as 'equity-first' | 'pro-rata' })}
+                onChange={e => setAdmin({ equityDrawdownMode: e.target.value as 'equity-first' | 'pro-rata' | 'senior-first' })}
                 className="text-xs bg-yellow-50 border border-gray-300 rounded px-2 py-1"
               >
                 <option value="equity-first">Equity-First (default)</option>
                 <option value="pro-rata">Pro-Rata (equity:senior concurrent)</option>
+                <option value="senior-first">Senior-First (recommended for dev finance)</option>
               </select>
             </div>
             <div className="flex items-center gap-2">

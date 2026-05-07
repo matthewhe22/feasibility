@@ -407,7 +407,7 @@ export function solveFunding(
   daysPerYear: number,
   tolerance: number,
   maxIterations = 50,
-  equityDrawdownMode: 'equity-first' | 'pro-rata' = 'equity-first',
+  equityDrawdownMode: 'equity-first' | 'pro-rata' | 'senior-first' = 'equity-first',
   // M3 — Cash-sweep order for the revenue waterfall. Default = legal priority.
   repaymentSequence: readonly RepaymentTranche[] = ['senior', 'mezz', 'equity'],
 ): FundingResult {
@@ -587,7 +587,7 @@ function runFundingWaterfall(
   peakSnrBalancePrev = 0,
   peakSnr2BalancePrev = 0,
   peakMezzBalancePrev = 0,
-  equityDrawdownMode: 'equity-first' | 'pro-rata' = 'equity-first',
+  equityDrawdownMode: 'equity-first' | 'pro-rata' | 'senior-first' = 'equity-first',
   // M3 — Cash-sweep order for the revenue waterfall.
   repaymentSequence: readonly RepaymentTranche[] = ['senior', 'mezz', 'equity'],
 ): FundingResult {
@@ -1074,6 +1074,66 @@ function runFundingWaterfall(
               const draw = Math.min(-bankBalance, avail);
               jvInjections[i] += draw; eqInjections[i] += draw;
               jvCumulative += draw; cumulativeEquity += draw; bankBalance += draw;
+            }
+          }
+        }
+      } else if (equityDrawdownMode === 'senior-first' && seniorDrawActive) {
+        // Senior-first (recommended for standard Australian dev finance): once
+        // construction has started, debt facilities absorb the gap BEFORE equity.
+        // Equity only steps in when all debt is at LTC/LVR/facility cap. Pre-
+        // construction periods (handled by the else branch below) keep the
+        // existing equity-priority behaviour, so equity still covers land + DA.
+        // Mirrors the equity-first loop body but with a debt-first iteration order.
+        const debtTypes = new Set(['senior', 'senior2', 'mezz']);
+        const debtFirstSequence = [
+          ...drawdownSequence.filter(e => debtTypes.has(e.type)),
+          ...drawdownSequence.filter(e => !debtTypes.has(e.type)),
+        ];
+        for (const entry of debtFirstSequence) {
+          if (bankBalance >= 0) break;
+
+          if (entry.type === 'senior' && seniorDrawActive) {
+            const avail = Math.max(0, seniorAutoSizeCap - snrRunningBalance);
+            if (avail > 0) {
+              const draw         = Math.min(-bankBalance, avail);
+              snrDrawdowns[i]   += draw;
+              snrRunningBalance += draw;
+              bankBalance       += draw;
+            }
+          } else if (entry.type === 'senior2' && senior2DrawActive) {
+            const avail = Math.max(0, senior2Limit - snr2RunningBalance);
+            if (avail > 0) {
+              const draw          = Math.min(-bankBalance, avail);
+              snr2Drawdowns[i]   += draw;
+              snr2RunningBalance += draw;
+              bankBalance        += draw;
+            }
+          } else if (entry.type === 'mezz' && hasMezz && i >= mezzStartIdx) {
+            const avail = Math.max(0, mezzAutoSizeCap - totalMezzDrawn);
+            if (avail > 0) {
+              const draw         = Math.min(-bankBalance, avail);
+              mzDrawdowns[i]    += draw;
+              mzRunningBalance  += draw;
+              totalMezzDrawn    += draw;
+              bankBalance       += draw;
+            }
+          } else if (entry.type === 'equity') {
+            const avail = Math.max(0, developerCap - (cumulativeEquity - jvCumulative));
+            if (avail > 0) {
+              const draw       = Math.min(-bankBalance, avail);
+              eqInjections[i] += draw;
+              cumulativeEquity += draw;
+              bankBalance      += draw;
+            }
+          } else if (entry.type === 'equityJV' && isJVActive) {
+            const avail = Math.max(0, jvCap - jvCumulative);
+            if (avail > 0) {
+              const draw         = Math.min(-bankBalance, avail);
+              jvInjections[i]   += draw;
+              eqInjections[i]   += draw;
+              jvCumulative      += draw;
+              cumulativeEquity  += draw;
+              bankBalance       += draw;
             }
           }
         }

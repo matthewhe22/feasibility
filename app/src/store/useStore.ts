@@ -190,9 +190,13 @@ function createDebouncedLocalStorage(delayMs: number): StateStorage {
  *        when missing/undefined. PR-D added the field as configurable but
  *        without a migration step — v4 users hit the engine with undefined
  *        and the funding solver branches on this value.
+ *   v6 — extended `admin.equityDrawdownMode` union with `'senior-first'` so
+ *        debt absorbs the cost gap before equity once construction starts.
+ *        Additive: missing/invalid values default to `'equity-first'` to
+ *        preserve historical behaviour for v5 fixtures without explicit mode.
  *
- * The function is idempotent on each version: running v5 migration on already-
- * migrated v5 data produces no change (the existence checks short-circuit).
+ * The function is idempotent on each version: running v6 migration on already-
+ * migrated v6 data produces no change (the existence checks short-circuit).
  */
 export function migratePersistedState(persisted: unknown, version: number): unknown {
   const p = persisted as Record<string, unknown> | null;
@@ -233,6 +237,19 @@ export function migratePersistedState(persisted: unknown, version: number): unkn
     const existing = admin.repaymentSequence;
     if (!Array.isArray(existing) || existing.length === 0) {
       admin.repaymentSequence = ['senior', 'mezz', 'equity'];
+    }
+  }
+  // v6 — extend equityDrawdownMode union with 'senior-first'. Additive only:
+  // existing projects keep their persisted mode if set; missing/null defaults
+  // to 'equity-first' (current behaviour). Idempotent on v6 — only writes when
+  // the field is missing AND we want a deterministic default. v5 projects with
+  // an explicit 'equity-first' or 'pro-rata' value pass through unchanged.
+  if (version < 6 && p.admin && typeof p.admin === 'object') {
+    const admin = p.admin as Record<string, unknown>;
+    const existing = admin.equityDrawdownMode;
+    const allowed = new Set(['equity-first', 'pro-rata', 'senior-first']);
+    if (typeof existing !== 'string' || !allowed.has(existing as string)) {
+      admin.equityDrawdownMode = 'equity-first';
     }
   }
   return p;
@@ -280,7 +297,7 @@ export const useStore = create<AppState>()(
       //      when missing/undefined. PR-D (PR #31) added it as a configurable
       //      field but no migration step — v4 users hit the engine with
       //      undefined and the funding solver branches on this value.
-      version: 5,
+      version: 6,
       migrate: migratePersistedState,
       // Debounce localStorage writes to coalesce rapid keystrokes into a single
       // serialization+write. 250 ms is imperceptible to users but eliminates
