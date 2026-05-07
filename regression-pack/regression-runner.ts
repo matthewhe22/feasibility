@@ -117,30 +117,60 @@ function checkC1_capitalStackSumsToCost(d: DashboardData): InvariantResult {
   // (10%) — finance costs absorbed inside senior cap-int.
   if (!isFiniteNumber(total) || total <= 0) return { id: 'C1', title: 'Capital stack widget reconciles', status: 'FAIL', detail: `cs.total=${total}` };
   const ratio = sources / d.feasibility.totalCost;
-  if (ratio < 0.40 || ratio > 1.10) {
+  // Per invariants.md C1: stack must be within 25% of total cost (ratio in
+  // [0.75, 1.00]; allow tiny ratio>1 from rounding). If outside that band, the
+  // engine MUST emit an explicit "Underfunded $X" / "Over-committed $X" /
+  // "additional equity required" label — silent gap is a FAIL.
+  if (ratio < 0.75 || ratio > 1.10) {
     const hasGap = (d.warnings ?? []).some(w => /underfunded|over-committed|additional equity/i.test(w));
-    return { id: 'C1', title: 'Capital stack widget reconciles', status: hasGap ? 'PASS' : 'FAIL', detail: `sources=$${sources.toFixed(0)}, totalCost=$${d.feasibility.totalCost.toFixed(0)}, ratio=${ratio.toFixed(3)}${hasGap ? ' (gap warning emitted)' : ''}` };
+    return { id: 'C1', title: 'Capital stack widget reconciles', status: hasGap ? 'PASS' : 'FAIL', detail: `sources=$${sources.toFixed(0)}, totalCost=$${d.feasibility.totalCost.toFixed(0)}, ratio=${ratio.toFixed(3)}${hasGap ? ' (gap warning emitted)' : ' — NO gap label, silent under/over-fund'}` };
   }
-  return { id: 'C1', title: 'Capital stack widget reconciles', status: 'PASS', detail: `sources=$${sources.toFixed(0)}, total=$${total.toFixed(0)}, totalCost=$${d.feasibility.totalCost.toFixed(0)}` };
+  return { id: 'C1', title: 'Capital stack widget reconciles', status: 'PASS', detail: `sources=$${sources.toFixed(0)}, total=$${total.toFixed(0)}, totalCost=$${d.feasibility.totalCost.toFixed(0)}, ratio=${ratio.toFixed(3)}` };
 }
 
 function checkD1_seniorLTCCap(d: DashboardData, inputs: MainInputs): InvariantResult {
-  const cap = inputs.seniorFacility.ltcTarget ?? 1.0;
-  const observed = d.capitalStack.seniorLTC ?? 0;
+  // Senior must be within BOTH LTC cap and LVR cap (whichever binds).
+  const ltcCap = inputs.seniorFacility.ltcTarget ?? 1.0;
+  const lvrCap = inputs.seniorFacility.lvrTarget ?? 1.0;
+  const ltc = d.capitalStack.seniorLTC ?? 0;
+  const lvr = d.capitalStack.seniorLVR ?? 0;
+  const ltcOK = ltc <= ltcCap + 1e-9;
+  const lvrOK = lvr <= lvrCap + 1e-9;
+  const breaches: string[] = [];
+  if (!ltcOK) breaches.push(`LTC ${(ltc*100).toFixed(2)}% > cap ${(ltcCap*100).toFixed(2)}%`);
+  if (!lvrOK) breaches.push(`LVR ${(lvr*100).toFixed(2)}% > cap ${(lvrCap*100).toFixed(2)}%`);
   return {
-    id: 'D1', title: 'Senior LTC ≤ cap',
-    status: observed <= cap + 1e-9 ? 'PASS' : 'FAIL',
-    detail: `observed=${(observed * 100).toFixed(2)}%, cap=${(cap * 100).toFixed(2)}%`,
+    id: 'D1', title: 'Senior LTC ≤ cap AND LVR ≤ cap',
+    status: ltcOK && lvrOK ? 'PASS' : 'FAIL',
+    detail: ltcOK && lvrOK
+      ? `LTC ${(ltc*100).toFixed(2)}% ≤ ${(ltcCap*100).toFixed(2)}%; LVR ${(lvr*100).toFixed(2)}% ≤ ${(lvrCap*100).toFixed(2)}%`
+      : `breach(es): ${breaches.join(' | ')}`,
   };
 }
 
 function checkD2_mezzLimit(d: DashboardData, inputs: MainInputs): InvariantResult {
-  const cap = inputs.mezzanine.facilityLimit ?? Infinity;
-  const observed = d.capitalStack.mezzAmount ?? 0;
+  // Mezz must be within the dollar facility limit AND the LTC/LVR caps where
+  // those caps are defined (>0). A zero cap means "not asserted" (typical for
+  // mezz LVR which often isn't covenanted).
+  const dollarCap = inputs.mezzanine.facilityLimit ?? Infinity;
+  const ltcCap = inputs.mezzanine.ltcTarget ?? 0;
+  const lvrCap = inputs.mezzanine.lvrTarget ?? 0;
+  const amount = d.capitalStack.mezzAmount ?? 0;
+  const ltc = d.capitalStack.mezzLTC ?? 0;
+  const lvr = d.capitalStack.mezzLVR ?? 0;
+  const dollarOK = amount <= dollarCap + 1e-9;
+  const ltcOK = ltcCap <= 0 || ltc <= ltcCap + 1e-9;
+  const lvrOK = lvrCap <= 0 || lvr <= lvrCap + 1e-9;
+  const breaches: string[] = [];
+  if (!dollarOK) breaches.push(`$${amount.toFixed(0)} > limit $${dollarCap.toFixed(0)}`);
+  if (!ltcOK)    breaches.push(`LTC ${(ltc*100).toFixed(2)}% > cap ${(ltcCap*100).toFixed(2)}%`);
+  if (!lvrOK)    breaches.push(`LVR ${(lvr*100).toFixed(2)}% > cap ${(lvrCap*100).toFixed(2)}%`);
   return {
-    id: 'D2', title: 'Mezz amount ≤ facility limit',
-    status: observed <= cap + 1e-9 ? 'PASS' : 'FAIL',
-    detail: `observed=$${observed.toFixed(0)}, cap=$${cap.toFixed(0)}`,
+    id: 'D2', title: 'Mezz ≤ dollar limit AND LTC/LVR caps (where defined)',
+    status: dollarOK && ltcOK && lvrOK ? 'PASS' : 'FAIL',
+    detail: dollarOK && ltcOK && lvrOK
+      ? `$${amount.toFixed(0)} ≤ $${dollarCap.toFixed(0)}` + (ltcCap > 0 ? `; LTC ${(ltc*100).toFixed(2)}% ≤ ${(ltcCap*100).toFixed(2)}%` : '') + (lvrCap > 0 ? `; LVR ${(lvr*100).toFixed(2)}% ≤ ${(lvrCap*100).toFixed(2)}%` : '')
+      : `breach(es): ${breaches.join(' | ')}`,
   };
 }
 
