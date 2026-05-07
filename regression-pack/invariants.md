@@ -92,6 +92,11 @@ A zero cap means "not asserted" (typical for mezz LVR which is often uncovenante
 **Test:** engine. On a deliberately-underfunded fixture, the solver pushes senior to its cap (LTC OR LVR, whichever binds first) and only then surfaces "additional equity required $X".
 **Fail:** equity gap reported while senior still has covenant headroom.
 
+### D3 (engine-runner) — Senior-first equity ceiling
+**Code:** `engine/funding.ts:1080-1135` (senior-first gap-fill branch, added v6).
+**Test:** engine. Under `equityDrawdownMode === 'senior-first'`: cumulative equity drawn ≤ 1.10 × pre-construction cost (sum of cost lines from period 1 to senior.startMonth−1). The 10% slack covers completion top-ups and rounding. SKIPPED on fixtures using `equity-first` (default) or `pro-rata` modes — the invariant only applies when senior-first is selected.
+**Fail:** equity drawn during construction while senior has covenant/facility headroom.
+
 ---
 
 ## E. Repayment sequence
@@ -207,10 +212,10 @@ A zero cap means "not asserted" (typical for mezz LVR which is often uncovenante
 
 ## K. Schema versioning
 
-### K1 — `persistVersion === 5`
-**Code:** `store/useStore.ts:283` `version: 5`.
+### K1 — `persistVersion === 6`
+**Code:** `store/useStore.ts` `version: 6` in the persist config (line varies).
 **Test:** static. Read literal value.
-**Fail:** version drifts without a new migration step.
+**Fail:** version drifts without a new migration step. Bumping the version requires a corresponding additive migration block in `migratePersistedState`.
 
 ### K2 — v2/v3/v4 → v5 migration is reversible-safe and idempotent
 **Code:** `store/useStore.ts:197` `migratePersistedState`.

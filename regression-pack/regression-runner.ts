@@ -174,6 +174,33 @@ function checkD2_mezzLimit(d: DashboardData, inputs: MainInputs): InvariantResul
   };
 }
 
+function checkD3_seniorFirstEquityCeiling(d: DashboardData, inputs: MainInputs, admin: AdminConfig): InvariantResult {
+  // D3 — under equityDrawdownMode === 'senior-first', cumulative equity drawn
+  // should be bounded above by the pre-construction cumulative cost (land + DA
+  // + early dev costs incurred BEFORE senior.startMonth). 10% slack covers
+  // completion top-ups and rounding. SKIP this check on fixtures using other
+  // modes — the constraint only applies under senior-first.
+  if ((admin.equityDrawdownMode ?? 'equity-first') !== 'senior-first') {
+    return { id: 'D3', title: 'Senior-first: cumulative equity ≤ pre-construction cost × 1.10', status: 'SKIP', detail: `mode=${admin.equityDrawdownMode ?? 'equity-first'} (D3 only checked under senior-first)` };
+  }
+  const snrStartIdx = inputs.seniorFacility.startMonth > 0 ? inputs.seniorFacility.startMonth - 1 : 0;
+  let preCost = 0;
+  for (let i = 0; i < snrStartIdx; i++) {
+    const cf = d.cashflows[i];
+    if (!cf) continue;
+    preCost += (cf.landCosts ?? 0) + (cf.acquisitionCosts ?? 0) + (cf.developmentCosts ?? 0)
+             + (cf.constructionCosts ?? 0) + (cf.contingency ?? 0) + (cf.marketingCosts ?? 0)
+             + (cf.otherStandardCosts ?? 0) + (cf.pmFees ?? 0);
+  }
+  const cumEquity = d.cashflows.reduce((s, cf) => s + (cf.equityInjection ?? 0), 0);
+  const ceiling = preCost * 1.10;
+  return {
+    id: 'D3', title: 'Senior-first: cumulative equity ≤ pre-construction cost × 1.10',
+    status: cumEquity <= ceiling + 100_000 ? 'PASS' : 'FAIL',
+    detail: `preCost=$${preCost.toFixed(0)}, ceiling=$${ceiling.toFixed(0)}, cumEquity=$${cumEquity.toFixed(0)}`,
+  };
+}
+
 function checkI2_ccrSignsAgree(d: DashboardData): InvariantResult {
   const t = d.kpis.totalCashOnCash, a = d.kpis.annualCashOnCash;
   const tSign = Math.sign(t), aSign = Math.sign(a);
@@ -293,13 +320,13 @@ function staticK1_persistVersionFive(): InvariantResult {
     const m = useStore.match(/version:\s*(\d+)/);
     const v = m ? parseInt(m[1], 10) : -1;
     return {
-      id: 'K1', title: 'persistVersion === 5',
-      status: v === 5 ? 'PASS' : 'FAIL',
+      id: 'K1', title: 'persistVersion === 6',
+      status: v === 6 ? 'PASS' : 'FAIL',
       detail: `version=${v}`,
     };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { id: 'K1', title: 'persistVersion === 5', status: 'SKIP', detail: msg };
+    return { id: 'K1', title: 'persistVersion === 6', status: 'SKIP', detail: msg };
   }
 }
 
@@ -331,6 +358,7 @@ function runFixture(slug: string): FixtureResult {
     checkC1_capitalStackSumsToCost(d),
     checkD1_seniorLTCCap(d, inputs),
     checkD2_mezzLimit(d, inputs),
+    checkD3_seniorFirstEquityCeiling(d, inputs, admin),
     checkE1_repaymentSequenceDefault(admin),
     checkH1_warningsConsolidated(d),
     checkI2_ccrSignsAgree(d),
