@@ -47,12 +47,18 @@ interface ProjectDefault {
   affectedPeriods: Set<number>;
 }
 
+interface CapIntCeilingHit {
+  totalCashSwitched: number;
+  affectedPeriods: Set<number>;
+}
+
 interface PendingFundingState {
   covenantOvershoot: Map<string, CovenantOvershoot>;
   autoSize: Map<string, AutoSize>;
   facilityLimitOvershoot: Map<string, CovenantOvershoot>;
   equityBackstop: EquityBackstopOvershoot | null;
   projectDefault: ProjectDefault | null;
+  capIntCeiling: Map<string, CapIntCeilingHit>;
 }
 
 const _pendingFundingState: PendingFundingState = {
@@ -61,6 +67,7 @@ const _pendingFundingState: PendingFundingState = {
   facilityLimitOvershoot: new Map(),
   equityBackstop: null,
   projectDefault: null,
+  capIntCeiling: new Map(),
 };
 
 const _summaryWarnings = new Map<string, string>();
@@ -71,6 +78,21 @@ function resetPendingFundingState(): void {
   _pendingFundingState.facilityLimitOvershoot.clear();
   _pendingFundingState.equityBackstop = null;
   _pendingFundingState.projectDefault = null;
+  _pendingFundingState.capIntCeiling.clear();
+}
+
+function recordCapIntCeilingHit(facility: string, period: number, cashAmount: number): void {
+  // FU2 — when capitalised interest would push senior balance above its M4
+  // covenant cap for a period, the engine pays that period's interest in cash
+  // instead of capitalising it. Track the affected periods + total cash-switched
+  // amount so we can surface ONE consolidated [INFO] message at the end of solve.
+  const cur = _pendingFundingState.capIntCeiling.get(facility);
+  if (!cur) {
+    _pendingFundingState.capIntCeiling.set(facility, { totalCashSwitched: cashAmount, affectedPeriods: new Set([period]) });
+  } else {
+    cur.totalCashSwitched += cashAmount;
+    cur.affectedPeriods.add(period);
+  }
 }
 
 function facilityLabel(key: string): string {
@@ -194,6 +216,14 @@ function flushPendingFundingSummaries(): void {
     _summaryWarnings.set('equity-backstop-overshoot', msg);
   }
 
+  for (const [facility, info] of _pendingFundingState.capIntCeiling) {
+    const msg =
+      `[INFO] ${facilityLabel(facility)} cap-int exceeds covenant cap at ${fmtPeriodRange(info.affectedPeriods)} ` +
+      `— ${fmtMoney(info.totalCashSwitched)} of capitalised interest switched to cash-pay this period(s) to avoid breaching ` +
+      `LTC/LVR ceiling. Bank balance absorbed the cash; revenue waterfall sees the same total interest, just timed earlier.`;
+    _summaryWarnings.set(`capint-ceiling:${facility}`, msg);
+  }
+
   if (_pendingFundingState.projectDefault) {
     const info = _pendingFundingState.projectDefault;
     const msg =
@@ -253,7 +283,7 @@ export function computeDrawdownSequence(inputs: MainInputs): DrawdownSequenceEnt
   const eq   = inputs.equityDeveloper;
   const eqJV = inputs.equityJV;
 
-  const jvActive = eqJV && (eqJV.fixedAmount > 0 || eqJV.equityContribution > 0);
+  const jvActive = eqJV && (eqJV.equityCap > 0 || eqJV.equityContribution > 0);
 
   const entries: DrawdownSequenceEntry[] = [
     ...(sf  ? [{ type: 'senior'     as DrawdownFacilityType, name: sf.name,  priority: sf.drawdownPriority  ?? 1 }] : []),
@@ -647,12 +677,12 @@ function runFundingWaterfall(
 
   // ===== Equity caps (per entity) =====
   const totalCostsExcFin  = sum(monthlyCostsExcFinance);
-  const equityFixedDeveloper = inputs.equityDeveloper.fixedAmount;
+  const equityFixedDeveloper = inputs.equityDeveloper.equityCap;
   const equityPctDeveloper   = inputs.equityDeveloper.percentage;
   const developerCap = equityFixedDeveloper > 0 ? equityFixedDeveloper : totalCostsExcFin * equityPctDeveloper;
 
-  const isJVActive = inputs.equityJV && (inputs.equityJV.fixedAmount > 0 || inputs.equityJV.equityContribution > 0);
-  const equityFixedJV = inputs.equityJV?.fixedAmount ?? 0;
+  const isJVActive = inputs.equityJV && (inputs.equityJV.equityCap > 0 || inputs.equityJV.equityContribution > 0);
+  const equityFixedJV = inputs.equityJV?.equityCap ?? 0;
   const equityPctJV   = inputs.equityJV?.percentage  ?? 0;
   const jvCap = isJVActive ? (equityFixedJV > 0 ? equityFixedJV : totalCostsExcFin * equityPctJV) : 0;
 
@@ -910,8 +940,18 @@ function runFundingWaterfall(
       snrInterest[i]      = snrInt;
       totalSeniorInterest += snrInt;
       if (senior.isCapitalised) {
-        snrRunningBalance += snrInt;
-        snrDrawdowns[i]   += snrInt;
+        // FU2 — Cap-int ceiling: if capitalising this period's interest would
+        // push the senior running balance above its M4 covenant cap, switch
+        // THIS period's interest to cash-pay instead of capitalising. Avoids
+        // the previously-observed [FUNDING] covenant overshoot caused by
+        // accrued interest accumulating on a balance already at the cap.
+        if (snrRunningBalance + snrInt > seniorAutoSizeCap + 1) {
+          bankBalance -= snrInt;
+          recordCapIntCeilingHit('senior', i + 1, snrInt);
+        } else {
+          snrRunningBalance += snrInt;
+          snrDrawdowns[i]   += snrInt;
+        }
       } else {
         bankBalance -= snrInt;
       }
@@ -932,8 +972,14 @@ function runFundingWaterfall(
         snrFees[i]        = periodFees;
         totalSeniorFees  += periodFees;
         if (senior.isCapitalised) {
-          snrRunningBalance += periodFees;
-          snrDrawdowns[i]   += periodFees;
+          // FU2 — same cap-int ceiling guard for capitalised fees.
+          if (snrRunningBalance + periodFees > seniorAutoSizeCap + 1) {
+            bankBalance -= periodFees;
+            recordCapIntCeilingHit('senior', i + 1, periodFees);
+          } else {
+            snrRunningBalance += periodFees;
+            snrDrawdowns[i]   += periodFees;
+          }
         } else {
           bankBalance -= periodFees;
         }
@@ -946,8 +992,13 @@ function runFundingWaterfall(
       snr2Interest[i]      = snr2Int;
       totalSenior2Interest += snr2Int;
       if (senior2.isCapitalised) {
-        snr2RunningBalance += snr2Int;
-        snr2Drawdowns[i]   += snr2Int;
+        if (snr2RunningBalance + snr2Int > senior2CovenantCap + 1) {
+          bankBalance -= snr2Int;
+          recordCapIntCeilingHit('senior2', i + 1, snr2Int);
+        } else {
+          snr2RunningBalance += snr2Int;
+          snr2Drawdowns[i]   += snr2Int;
+        }
       } else {
         bankBalance -= snr2Int;
       }
@@ -963,8 +1014,13 @@ function runFundingWaterfall(
         snr2Fees[i]       = periodFees;
         totalSenior2Fees += periodFees;
         if (senior2.isCapitalised) {
-          snr2RunningBalance += periodFees;
-          snr2Drawdowns[i]   += periodFees;
+          if (snr2RunningBalance + periodFees > senior2CovenantCap + 1) {
+            bankBalance -= periodFees;
+            recordCapIntCeilingHit('senior2', i + 1, periodFees);
+          } else {
+            snr2RunningBalance += periodFees;
+            snr2Drawdowns[i]   += periodFees;
+          }
         } else {
           bankBalance -= periodFees;
         }
@@ -977,9 +1033,14 @@ function runFundingWaterfall(
       mzInterest[i]      = mzInt;
       totalMezzInterest += mzInt;
       if (mezz.isCapitalised) {
-        mzRunningBalance += mzInt;
-        mzDrawdowns[i]   += mzInt;
-        totalMezzDrawn   += mzInt; // capitalised interest increases effective drawn amount
+        if (mzRunningBalance + mzInt > mezzAutoSizeCap + 1) {
+          bankBalance -= mzInt;
+          recordCapIntCeilingHit('mezz', i + 1, mzInt);
+        } else {
+          mzRunningBalance += mzInt;
+          mzDrawdowns[i]   += mzInt;
+          totalMezzDrawn   += mzInt; // capitalised interest increases effective drawn amount
+        }
       } else {
         bankBalance -= mzInt;
       }
@@ -990,9 +1051,14 @@ function runFundingWaterfall(
         mzFees[i]       += mzLineFee;
         totalMezzFees   += mzLineFee;
         if (mezz.isCapitalised) {
-          mzRunningBalance += mzLineFee;
-          mzDrawdowns[i]   += mzLineFee;
-          totalMezzDrawn   += mzLineFee; // capitalised fees also count toward limit
+          if (mzRunningBalance + mzLineFee > mezzAutoSizeCap + 1) {
+            bankBalance -= mzLineFee;
+            recordCapIntCeilingHit('mezz', i + 1, mzLineFee);
+          } else {
+            mzRunningBalance += mzLineFee;
+            mzDrawdowns[i]   += mzLineFee;
+            totalMezzDrawn   += mzLineFee; // capitalised fees also count toward limit
+          }
         } else {
           bankBalance -= mzLineFee;
         }
@@ -1004,8 +1070,13 @@ function runFundingWaterfall(
         mzFees[i]     += mzEstFee;
         totalMezzFees += mzEstFee;
         if (mezz.isCapitalised) {
-          mzRunningBalance += mzEstFee;
-          mzDrawdowns[i]   += mzEstFee;
+          if (mzRunningBalance + mzEstFee > mezzAutoSizeCap + 1) {
+            bankBalance -= mzEstFee;
+            recordCapIntCeilingHit('mezz', i + 1, mzEstFee);
+          } else {
+            mzRunningBalance += mzEstFee;
+            mzDrawdowns[i]   += mzEstFee;
+          }
         } else {
           bankBalance -= mzEstFee;
         }

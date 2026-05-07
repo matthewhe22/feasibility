@@ -1548,7 +1548,7 @@ export function MainInputTab() {
             <button
               onClick={() => {
                 if (!confirm('Clear all Financing inputs? This resets all equity and debt facilities to zero.')) return;
-                const zeroEquity = { name: '', fixedAmount: 0, percentage: 0, interestRate: 0, interestCompound: 0, repayEquityBeforeDebt: 0, equityContribution: 0, profitShare: 0, drawdownPriority: 1 };
+                const zeroEquity = { name: '', equityCap: 0, percentage: 0, interestRate: 0, interestCompound: 0, repayEquityBeforeDebt: 0, equityContribution: 0, profitShare: 0, drawdownPriority: 1 };
                 const zeroDebt = { name: '', facilityLimit: 0, startMonth: 0, maturityMonth: 0, interestRate: 0, bbsy: 0, margin: 0, establishmentFeePercent: 0, lineFeePercent: 0, interestPaymentFrequency: 1, isCapitalised: false, ltcTarget: 0, lvrTarget: 0, drawdownPriority: 1 };
                 setInputs({
                   equityDeveloper: { ...zeroEquity, name: 'Developer' },

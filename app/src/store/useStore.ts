@@ -194,9 +194,14 @@ function createDebouncedLocalStorage(delayMs: number): StateStorage {
  *        debt absorbs the cost gap before equity once construction starts.
  *        Additive: missing/invalid values default to `'equity-first'` to
  *        preserve historical behaviour for v5 fixtures without explicit mode.
+ *   v7 — renamed `equityDeveloper.fixedAmount` (and the same field on
+ *        equityJV / equityPreferred / equityAdditional) to `equityCap` for
+ *        schema clarity. The field is the cumulative equity cap the funding
+ *        solver respects. Migration copies the old value across and deletes
+ *        the old key.
  *
- * The function is idempotent on each version: running v6 migration on already-
- * migrated v6 data produces no change (the existence checks short-circuit).
+ * The function is idempotent on each version: running v7 migration on already-
+ * migrated v7 data produces no change (the existence checks short-circuit).
  */
 export function migratePersistedState(persisted: unknown, version: number): unknown {
   const p = persisted as Record<string, unknown> | null;
@@ -252,6 +257,28 @@ export function migratePersistedState(persisted: unknown, version: number): unkn
       admin.equityDrawdownMode = 'equity-first';
     }
   }
+  // v7 — rename `equityDeveloper.fixedAmount` (and friends) to `equityCap` for
+  // schema clarity. The field is the cumulative equity cap the funding solver
+  // respects. Migration is non-destructive: copies any old `fixedAmount` value
+  // into the new `equityCap` field (preserving the cap), then deletes the old
+  // key. If both keys are present (theoretical race on a partly-migrated state),
+  // `equityCap` wins. Idempotent on v7 — a state with no `fixedAmount` key is
+  // a no-op.
+  if (version < 7 && p.inputs && typeof p.inputs === 'object') {
+    const inputs = p.inputs as Record<string, unknown>;
+    const equityKeys = ['equityDeveloper', 'equityJV', 'equityPreferred', 'equityAdditional'];
+    for (const key of equityKeys) {
+      const ent = inputs[key];
+      if (ent && typeof ent === 'object') {
+        const e = ent as Record<string, unknown>;
+        if (typeof e.equityCap !== 'number' && typeof e.fixedAmount === 'number') {
+          e.equityCap = e.fixedAmount;
+        }
+        // Drop the old key in either case (idempotent — undefined delete OK).
+        delete e.fixedAmount;
+      }
+    }
+  }
   return p;
 }
 
@@ -297,7 +324,7 @@ export const useStore = create<AppState>()(
       //      when missing/undefined. PR-D (PR #31) added it as a configurable
       //      field but no migration step — v4 users hit the engine with
       //      undefined and the funding solver branches on this value.
-      version: 6,
+      version: 7,
       migrate: migratePersistedState,
       // Debounce localStorage writes to coalesce rapid keystrokes into a single
       // serialization+write. 250 ms is imperceptible to users but eliminates

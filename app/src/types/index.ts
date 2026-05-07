@@ -163,7 +163,12 @@ export interface RentalIncomeItem {
 // ===== FINANCING =====
 export interface EquityConfig {
   name: string;
-  fixedAmount: number;
+  /** Equity cap — maximum cumulative equity drawdown for this entity ($).
+   *  When > 0, this is the hard ceiling the funding solver respects under
+   *  equity-first / senior-first / pro-rata modes. When 0 AND `percentage` > 0,
+   *  the cap is computed as `percentage × totalCostsExcFin`. Renamed from
+   *  `fixedAmount` in v7 — schema migration backfills automatically. */
+  equityCap: number;
   percentage: number;
   interestRate: number;
   interestCompound: number; // 1=compound, 0=simple

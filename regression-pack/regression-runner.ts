@@ -320,13 +320,13 @@ function staticK1_persistVersionFive(): InvariantResult {
     const m = useStore.match(/version:\s*(\d+)/);
     const v = m ? parseInt(m[1], 10) : -1;
     return {
-      id: 'K1', title: 'persistVersion === 6',
-      status: v === 6 ? 'PASS' : 'FAIL',
+      id: 'K1', title: 'persistVersion === 7',
+      status: v === 7 ? 'PASS' : 'FAIL',
       detail: `version=${v}`,
     };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { id: 'K1', title: 'persistVersion === 6', status: 'SKIP', detail: msg };
+    return { id: 'K1', title: 'persistVersion === 7', status: 'SKIP', detail: msg };
   }
 }
 
