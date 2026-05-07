@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { loadProjectList, saveProjectList } from '../db/projectDb';
 import { useStore } from '../store/useStore';
 
+import { validateProjectName } from './projectSetupValidator';
+
 export function ProjectSetupPage() {
   const { setProjectList: setStoreList } = useStore();
 
@@ -42,12 +44,13 @@ export function ProjectSetupPage() {
   }
 
   function handleAdd() {
-    const trimmed = draft.trim();
-    if (!trimmed) return;
-    if (list.some(p => p.toLowerCase() === trimmed.toLowerCase())) {
-      setDraft('');
+    const validationError = validateProjectName(draft, list);
+    if (validationError) {
+      setError(validationError);
       return;
     }
+    setError(null);
+    const trimmed = draft.trim();
     void persist([...list, trimmed]);
     setDraft('');
   }
@@ -109,7 +112,8 @@ export function ProjectSetupPage() {
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAdd(); } }}
-            placeholder="New project name…"
+            placeholder="Save as new project (free-text, max 50 chars)…"
+            aria-describedby="project-name-help"
             disabled={loading || saving}
             className="flex-1 bg-gray-900 text-white rounded-lg px-3 py-2 text-sm
                        border border-gray-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500
