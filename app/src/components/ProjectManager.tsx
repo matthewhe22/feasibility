@@ -15,7 +15,7 @@ import {
   type ProjectRecord,
 } from '../db/projectDb';
 import { exportToExcel } from '../utils/exportToExcel';
-import { useStore } from '../store/useStore';
+import { useStore, migratePersistedState } from '../store/useStore';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -110,6 +110,19 @@ export function ProjectManager({ onClose, onLoad }: Props) {
     try {
       const rec = await loadProject(id);
       if (!rec) { setMsg('Project not found.'); return; }
+      // Review #1 fix — route the loaded record through migratePersistedState
+      // so any pre-v7 fields (e.g. equityDeveloper.fixedAmount instead of
+      // .equityCap) are migrated before the engine sees them. Without this,
+      // existing Supabase / IndexedDB records saved on schema v6 fall through
+      // to the engine with .equityCap === undefined, and the funding solver
+      // silently treats the cap as 0 (or the % fallback). Migrates from any
+      // version up to and including 6 — v7+ records pass through unchanged.
+      const migrated = migratePersistedState(
+        { admin: rec.admin, inputs: rec.inputs },
+        6,
+      ) as { admin: typeof rec.admin; inputs: typeof rec.inputs };
+      rec.admin = migrated.admin;
+      rec.inputs = migrated.inputs;
       // Wholesale replace — never partial-merge over the previous project's inputs.
       // The previous setAdmin/setInputs implementation merged top-level keys into
       // the existing object, so any field present in the prior project but absent

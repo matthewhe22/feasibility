@@ -1154,12 +1154,21 @@ function runFundingWaterfall(
         // Equity only steps in when all debt is at LTC/LVR/facility cap. Pre-
         // construction periods (handled by the else branch below) keep the
         // existing equity-priority behaviour, so equity still covers land + DA.
-        // Mirrors the equity-first loop body but with a debt-first iteration order.
-        const debtTypes = new Set(['senior', 'senior2', 'mezz']);
-        const debtFirstSequence = [
-          ...drawdownSequence.filter(e => debtTypes.has(e.type)),
-          ...drawdownSequence.filter(e => !debtTypes.has(e.type)),
-        ];
+        //
+        // Review #2 fix — debt is iterated in TRANCHE order (senior → senior2 →
+        // mezz), NOT by drawdownPriority. Filtering drawdownSequence preserved
+        // priority order, which on default settings (mezz=3, senior=4) put mezz
+        // first inside the debt batch — exactly opposite of intended behaviour.
+        // Build the senior-first iteration order explicitly from the typed
+        // facilities, ignoring drawdownPriority for debt; equity facilities
+        // retain their relative drawdownPriority order in the second batch.
+        const tranchOrderTypes = ['senior', 'senior2', 'mezz'] as const;
+        const debtEntries = tranchOrderTypes
+          .map(t => drawdownSequence.find(e => e.type === t))
+          .filter((e): e is typeof drawdownSequence[number] => e !== undefined);
+        const equityEntries = drawdownSequence.filter(e =>
+          e.type !== 'senior' && e.type !== 'senior2' && e.type !== 'mezz');
+        const debtFirstSequence = [...debtEntries, ...equityEntries];
         for (const entry of debtFirstSequence) {
           if (bankBalance >= 0) break;
 
