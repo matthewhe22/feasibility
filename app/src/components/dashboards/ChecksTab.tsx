@@ -325,16 +325,20 @@ export function ChecksTab() {
   }
 
   // ── 6.5 EQUITY MEETS MINIMUM REQUIREMENT ────────────────────────────────────
-  // V8 — Term-sheet equity floor cross-check. Mirrors the [FUNDING] warning
-  // emitted by funding.ts. Status:
-  //   • value === 0  → N/A   (check disabled — back-compat default)
-  //   • actual ≥ req → PASS  (cash equity meets/exceeds the term-sheet floor)
-  //   • actual <  req → FAIL (shortfall — restructure capital stack)
-  // basis amount mirrors the engine: 'tdc' = TDC excluding capitalised finance
-  // costs; 'tdc-incl-finance-costs' = post-converged TDC inclusive of senior /
-  // senior2 / mezz / land-loan finance costs.
+  // V8 — Term-sheet equity floor cross-check. Reads the engine's converged
+  // `data.minEquityCheck` telemetry directly so this row's numbers match the
+  // [FUNDING] warning byte-for-byte. The earlier implementation recomputed the
+  // basis from `feasibility.totalCost` (input-side ex-GST rollup) and could
+  // disagree with the engine's cash-basis-incl-GST computation on any
+  // GST-bearing project — funnelling everyone through the engine struct ends
+  // that divergence.
+  // Status:
+  //   • value === 0      → N/A   (check disabled — back-compat default)
+  //   • shortfall === 0  → PASS  (engine confirms actual ≥ required)
+  //   • shortfall > 0    → FAIL  (engine recorded a shortfall)
   {
     const minEq = inputs.minEquityRequirement;
+    const ch = data.minEquityCheck;
     if (!minEq || !Number.isFinite(minEq.value) || minEq.value <= 0) {
       checks.push({
         id: 'min-equity',
@@ -345,34 +349,34 @@ export function ChecksTab() {
         status: 'N/A',
         notes: 'Set Inputs → Financing → Minimum Equity Requirement (value > 0) to enable this term-sheet cross-check.',
       });
+    } else if (!ch) {
+      // Defensive: engine didn't populate (legacy cached dashboard data).
+      checks.push({
+        id: 'min-equity',
+        category: 'Equity',
+        description: 'Equity meets minimum requirement',
+        expected: '—',
+        actual: '—',
+        status: 'N/A',
+        notes: 'Engine telemetry unavailable — re-run calculations to refresh.',
+      });
     } else {
-      const totalInjected = sum(cf.map(c => c.equityInjection));
-      // Reconstruct the basis amount on the same definitions the engine uses
-      // so the displayed expected/actual exactly match the [FUNDING] warning.
-      const tdcExFin = f.totalCost - (f.seniorFinanceCosts ?? 0) - (f.mezzFinanceCosts ?? 0);
-      const tdcInclFin = f.totalCost;
-      const useInclFin = minEq.basis === 'tdc-incl-finance-costs';
-      const basisAmount = useInclFin ? tdcInclFin : tdcExFin;
-      const required = minEq.mode === 'percent'
-        ? minEq.value * basisAmount
-        : minEq.value;
-      const variance = totalInjected - required;
-      const status: CheckStatus = totalInjected + 1 >= required ? 'PASS' : 'FAIL';
-      const basisLabel = useInclFin ? 'TDC + financing costs' : 'TDC';
+      const variance = ch.actual - ch.required;
+      const status: CheckStatus = ch.shortfall === 0 ? 'PASS' : 'FAIL';
       const reqDescriptor = minEq.mode === 'percent'
-        ? `${(minEq.value * 100).toFixed(2)}% of ${basisLabel} (${formatCurrency(basisAmount)})`
+        ? `${(minEq.value * 100).toFixed(2)}% of ${ch.basisName} (${formatCurrency(ch.basisAmount)})`
         : formatCurrency(minEq.value);
       checks.push({
         id: 'min-equity',
         category: 'Equity',
         description: 'Equity meets minimum requirement',
-        expected: `≥ ${formatCurrency(required)}`,
-        actual: formatCurrency(totalInjected),
+        expected: `≥ ${formatCurrency(ch.required)}`,
+        actual: formatCurrency(ch.actual),
         variance: formatCurrency(variance),
         status,
         notes: status === 'PASS'
           ? `Term-sheet floor: ${reqDescriptor}. Actual cash equity meets or exceeds the floor.`
-          : `Term-sheet floor: ${reqDescriptor}. Shortfall of ${formatCurrency(-variance)} — restructure: increase equity or reduce TDC.`,
+          : `Term-sheet floor: ${reqDescriptor}. Shortfall of ${formatCurrency(ch.shortfall)} — restructure: increase equity or reduce TDC.`,
       });
     }
   }

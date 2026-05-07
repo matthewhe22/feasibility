@@ -1111,5 +1111,12 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       ],
       periods,
     ),
+    // V8 — Forward the engine's converged min-equity check so the Checks tab
+    // and any other consumer see the SAME numbers the [FUNDING] warning
+    // emitted from. Without this, the Checks tab recomputes from the input-side
+    // `feasibility.totalCost` (ex-GST rollup) and disagrees with the engine's
+    // cash-basis-incl-GST computation on every project with non-zero GST on
+    // costs or non-exempt lender fees.
+    minEquityCheck: funding.minEquityCheck,
   };
 }

@@ -279,6 +279,14 @@ function flushPendingFundingSummaries(): void {
       `[FUNDING] Equity below minimum requirement — actual ${fmtMoney(info.actual)} vs required ${fmtMoney(info.required)} ` +
       `(shortfall ${fmtMoney(shortfall)}, basis: ${reqLabel}).`;
     _summaryWarnings.set('min-equity-shortfall', msg);
+  } else {
+    // V8 fix — when the FINAL solve passes the floor but a PRELIM solve had
+    // recorded a shortfall (e.g. PM fee dropping between solves moved the
+    // basis below the actual draws), the stale prelim summary would otherwise
+    // persist in `_summaryWarnings`. The only way to drop a stale entry under
+    // the existing keyed-Map pattern is an explicit delete on the no-find
+    // branch — `set()` only overwrites when there is something to set.
+    _summaryWarnings.delete('min-equity-shortfall');
   }
 }
 
@@ -445,6 +453,28 @@ export interface FundingResult {
   convergedIn: number | null;
   /** Final absolute finance-cost delta when solver exited (for diagnostics) */
   convergenceDelta: number;
+  /**
+   * V8 — Minimum-equity cross-check telemetry. Populated on EVERY solve regardless
+   * of whether a shortfall fires, so the Checks tab and any other consumer can
+   * read the engine's exact numbers (matching the [FUNDING] warning text). Two
+   * earlier consumers (Checks tab + warning) recomputed the basis independently
+   * and disagreed under GST-on-costs / lender-fee-GST conditions — funnelling
+   * everyone through this struct ends the divergence.
+   *
+   * - When `minEquityRequirement.value === 0` (disabled): `required: 0`, `actual`
+   *   reflects the true draws, `shortfall: 0`, basis is computed for diagnostics.
+   * - The `basisAmount` matches the post-converged TDC the engine used (cash
+   *   basis incl. recoverable GST + raw funding interest/fees).
+   * - `shortfall = max(0, required - actual)` — same tolerance ($1) as the
+   *   warning emit branch, so the two ALWAYS agree.
+   */
+  minEquityCheck: {
+    required: number;
+    actual: number;
+    basisAmount: number;
+    basisName: 'TDC' | 'TDC + financing costs';
+    shortfall: number;
+  };
 }
 
 function periodInterest(balance: number, rate: number, daysInPeriod: number, daysPerYear: number): number {
@@ -475,6 +505,48 @@ function resolveLineFeeBase(
  * The circular dependency: TDC includes finance costs, facility size depends on TDC via LTC,
  * facility size determines interest, interest is part of finance costs in TDC.
  */
+
+/**
+ * V8 — Single source of truth for the min-equity cross-check. Used by
+ * solveFunding for both the [FUNDING] warning emit and the FundingResult
+ * telemetry (consumed by the Checks tab), so the two ALWAYS agree.
+ *
+ * Basis reconstruction:
+ *   - `tdcExFin` = sum of cash-basis monthly costs ex-finance (INCLUDES
+ *     recoverable GST on costs — this is the periodic-cash array the engine
+ *     spreads against the bank balance, NOT the input-side ex-GST rollup).
+ *   - `tdcInclFin` = `tdcExFin` + raw funding interest/fees from the
+ *     converged result (incl. lender-fee GST uplift when applicable).
+ * Both numbers match the engine's true converged TDC — Checks tab consumers
+ * MUST read these via `FundingResult.minEquityCheck` rather than recomputing
+ * from `FeasibilitySummary.totalCost`, which is the input-side rollup and
+ * misses gstOnCosts.
+ */
+function computeMinEquityCheck(
+  minEq: import('../types').MinEquityRequirement | undefined,
+  result: FundingResult,
+  monthlyCostsExcFinance: number[],
+): FundingResult['minEquityCheck'] {
+  const tdcExFin = sum(monthlyCostsExcFinance);
+  const finCosts =
+    result.totalSeniorInterest + result.totalSeniorFees +
+    result.totalSenior2Interest + result.totalSenior2Fees +
+    result.totalMezzInterest + result.totalMezzFees +
+    result.totalLandLoanInterest + result.totalLandLoanFees;
+  const tdcInclFin = tdcExFin + finCosts;
+  const useInclFin = !minEq || minEq.basis === 'tdc-incl-finance-costs';
+  const basisAmount = useInclFin ? tdcInclFin : tdcExFin;
+  const basisName: 'TDC' | 'TDC + financing costs' =
+    useInclFin ? 'TDC + financing costs' : 'TDC';
+  const actual = result.totalEquityInjected;
+  const required = (minEq && Number.isFinite(minEq.value) && minEq.value > 0)
+    ? (minEq.mode === 'percent' ? minEq.value * basisAmount : minEq.value)
+    : 0;
+  // $1 tolerance to mirror the warning emit branch.
+  const shortfall = (required > 0 && actual + 1 < required) ? required - actual : 0;
+  return { required, actual, basisAmount, basisName, shortfall };
+}
+
 export function solveFunding(
   periods: Period[],
   monthlyCostsExcFinance: number[],
@@ -572,39 +644,25 @@ export function solveFunding(
   }
 
   // V8 — Min-equity-requirement cross-check. Computed ONCE on the converged
-  // final-iteration result so the basis-amount reflects post-cap-int settled
-  // TDC. Idempotent w.r.t. solver iterations: only the final pass records.
-  // value=0 disables the check entirely (back-compat for v7 fixtures).
+  // final-iteration result via the shared `computeMinEquityCheck` helper —
+  // single source of truth for both the [FUNDING] warning and the
+  // `FundingResult.minEquityCheck` telemetry consumed by the Checks tab.
+  // Idempotent w.r.t. solver iterations: only the final pass records.
+  // value=0 disables the warning emit (back-compat for v7 fixtures); the
+  // telemetry is still populated below for consumers that want diagnostics.
   {
     const minEq = inputs.minEquityRequirement;
-    if (minEq && Number.isFinite(minEq.value) && minEq.value > 0) {
-      const tdcExFin = sum(monthlyCostsExcFinance);
-      const finCosts =
-        result.totalSeniorInterest + result.totalSeniorFees +
-        result.totalSenior2Interest + result.totalSenior2Fees +
-        result.totalMezzInterest + result.totalMezzFees +
-        result.totalLandLoanInterest + result.totalLandLoanFees;
-      const tdcInclFin = tdcExFin + finCosts;
-      const useInclFin = minEq.basis === 'tdc-incl-finance-costs';
-      const basisAmount = useInclFin ? tdcInclFin : tdcExFin;
-      const required = minEq.mode === 'percent'
-        ? minEq.value * basisAmount
-        : minEq.value;
-      // Actual cash equity = developer + JV cumulative draws (net of profit
-      // reps/distributions, but those don't affect *contributed* cash —
-      // totalEquityInjected here is gross cumulative contribution).
-      const actual = result.totalEquityInjected;
-      // $1 tolerance to avoid spurious false-positives on rounding.
-      if (actual + 1 < required) {
-        recordMinEquityShortfall(
-          actual,
-          required,
-          basisAmount,
-          useInclFin ? 'TDC + financing costs' : 'TDC',
-          minEq.mode,
-          minEq.value,
-        );
-      }
+    const check = computeMinEquityCheck(minEq, result, monthlyCostsExcFinance);
+    result.minEquityCheck = check;
+    if (minEq && Number.isFinite(minEq.value) && minEq.value > 0 && check.shortfall > 0) {
+      recordMinEquityShortfall(
+        check.actual,
+        check.required,
+        check.basisAmount,
+        check.basisName,
+        minEq.mode,
+        minEq.value,
+      );
     }
   }
 
@@ -1610,6 +1668,10 @@ function runFundingWaterfall(
     convergedIn: null,
     iterations: 0,
     convergenceDelta: 0,
+    minEquityCheck: {
+      required: 0, actual: 0, basisAmount: 0,
+      basisName: 'TDC + financing costs', shortfall: 0,
+    },
   };
 }
 
@@ -1638,5 +1700,10 @@ function createEmptyResult(n: number): FundingResult {
     mezzFacilitySize: 0,
     converged: false,
     convergedIn: null, iterations: 0, convergenceDelta: Infinity,
+    // Empty stub — overwritten by computeMinEquityCheck post-convergence.
+    minEquityCheck: {
+      required: 0, actual: 0, basisAmount: 0,
+      basisName: 'TDC + financing costs', shortfall: 0,
+    },
   };
 }
