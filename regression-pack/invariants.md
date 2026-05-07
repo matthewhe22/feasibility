@@ -212,8 +212,8 @@ A zero cap means "not asserted" (typical for mezz LVR which is often uncovenante
 
 ## K. Schema versioning
 
-### K1 — `persistVersion === 6`
-**Code:** `store/useStore.ts` `version: 6` in the persist config (line varies).
+### K1 — `persistVersion === 7`
+**Code:** `store/useStore.ts` `version: 7` in the persist config (line varies).
 **Test:** static. Read literal value.
 **Fail:** version drifts without a new migration step. Bumping the version requires a corresponding additive migration block in `migratePersistedState`.
 

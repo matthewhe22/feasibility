@@ -574,7 +574,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   const totalProfit = totalSettlementsRevenue + totalRentalIncome + totalOtherIncome - totalGSTOnRevenue - totalCost;
 
   // Preferred equity coupon (accrued over project duration at simple interest)
-  const prefEquityBalance = inputs.equityPreferred?.fixedAmount ?? 0;
+  const prefEquityBalance = inputs.equityPreferred?.equityCap ?? 0;
   const prefEquityRate = inputs.equityPreferred?.interestRate ?? 0;
   const projectDuration = inputs.preliminary.projectSpanMonths;
   const years = projectDuration / 12;
@@ -583,7 +583,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     : 0;
 
   // JV equity coupon (same simple-interest approach as preferred equity)
-  const jvEquityBalance = funding.totalJVEquityInjected > 0 ? (inputs.equityJV?.fixedAmount ?? 0) : 0;
+  const jvEquityBalance = funding.totalJVEquityInjected > 0 ? (inputs.equityJV?.equityCap ?? 0) : 0;
   const jvEquityRate = inputs.equityJV?.interestRate ?? 0;
   const jvCouponInterest = jvEquityBalance > 0 && jvEquityRate > 0
     ? jvEquityBalance * jvEquityRate * years

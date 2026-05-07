@@ -226,7 +226,7 @@ export const defaultOtherIncome: RentalIncomeItem[] = [
 // ===== EQUITY =====
 export const defaultEquityDeveloper: EquityConfig = {
   name: 'Developer',
-  fixedAmount: 130419982,
+  equityCap: 130419982,
   percentage: 0.1,
   interestRate: 0,
   interestCompound: 0,
@@ -238,7 +238,7 @@ export const defaultEquityDeveloper: EquityConfig = {
 
 export const defaultEquityJV: EquityConfig = {
   name: 'JV Partner',
-  fixedAmount: 0,
+  equityCap: 0,
   percentage: 0.1,
   interestRate: 0,
   interestCompound: 1,
@@ -250,7 +250,7 @@ export const defaultEquityJV: EquityConfig = {
 
 export const defaultEquityPreferred: EquityConfig = {
   name: 'Preferred Equity',
-  fixedAmount: 0,
+  equityCap: 0,
   percentage: 0.1,
   interestRate: 0.13,
   interestCompound: 1,
@@ -262,7 +262,7 @@ export const defaultEquityPreferred: EquityConfig = {
 
 export const defaultEquityAdditional: EquityConfig = {
   name: 'Additional Equity #1',
-  fixedAmount: 0,
+  equityCap: 0,
   percentage: 0.1,
   interestRate: 0.13,
   interestCompound: 1,

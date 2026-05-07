@@ -3933,7 +3933,7 @@
     ],
     "equityDeveloper": {
       "name": "Developer",
-      "fixedAmount": 80000000,
+      "equityCap": 80000000,
       "percentage": 0.1,
       "interestRate": 0,
       "interestCompound": 0,
@@ -3944,7 +3944,7 @@
     },
     "equityJV": {
       "name": "JV Partner",
-      "fixedAmount": 0,
+      "equityCap": 0,
       "percentage": 0.1,
       "interestRate": 0,
       "interestCompound": 1,
@@ -3955,7 +3955,7 @@
     },
     "equityPreferred": {
       "name": "Preferred Equity",
-      "fixedAmount": 0,
+      "equityCap": 0,
       "percentage": 0.1,
       "interestRate": 0.13,
       "interestCompound": 1,
@@ -3966,7 +3966,7 @@
     },
     "equityAdditional": {
       "name": "Additional Equity #1",
-      "fixedAmount": 0,
+      "equityCap": 0,
       "percentage": 0.1,
       "interestRate": 0.13,
       "interestCompound": 1,

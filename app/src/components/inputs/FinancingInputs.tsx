@@ -50,7 +50,7 @@ function EquitySection({ title, config, onChange }: {
         <span className="text-xs font-bold text-blue-800">Equity ({title})</span>
       </div>
       <div className="p-3 space-y-1.5">
-        <CurrencyInput label="Fixed Amount" value={config.fixedAmount} onChange={v => update('fixedAmount', v)} />
+        <CurrencyInput label="Equity Cap ($)" value={config.equityCap} onChange={v => update('equityCap', v)} />
         <PercentInput label="Percentage of Costs" value={config.percentage} onChange={v => update('percentage', v)} />
         <PercentInput label="Interest Rate (p.a.)" value={config.interestRate} onChange={v => update('interestRate', v)} />
         <NumberInput label="Compound (1) / Simple (0)" value={config.interestCompound} onChange={v => update('interestCompound', v)} />
