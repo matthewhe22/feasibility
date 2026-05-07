@@ -86,15 +86,32 @@ function v5Persisted(extra: Partial<Record<string, unknown>> = {}) {
 }
 
 // =============================================================================
-// V6.6 — running on already-v6 with valid mode is no-op
+// V6.6 — running on already-current-schema state is no-op (was v6→v6; now
+// v8→v8 since v7 + v8 added subsequent migrations). The v6 step's own
+// idempotence is exercised by V6.5 below — this case verifies the WHOLE
+// migrate function is a no-op on an in-version fixture.
 // =============================================================================
 {
   const p = v5Persisted({ equityDrawdownMode: 'equity-first' });
+  // Pre-shape to the current (v8) schema so the aggregate migrate has nothing
+  // to do: equityCap already in place + minEquityRequirement already at the
+  // disabled default. Without these, v7's fixedAmount→equityCap step or v8's
+  // minEquityRequirement backfill would legitimately mutate the fixture.
+  for (const k of ['equityDeveloper', 'equityJV', 'equityPreferred', 'equityAdditional']) {
+    const e = (p.inputs as Record<string, unknown>)[k] as Record<string, unknown> | undefined;
+    if (e && 'fixedAmount' in e) {
+      e.equityCap = e.fixedAmount;
+      delete e.fixedAmount;
+    }
+  }
+  (p.inputs as Record<string, unknown>).minEquityRequirement = {
+    mode: 'percent', value: 0, basis: 'tdc-incl-finance-costs',
+  };
   const before = JSON.stringify(p);
-  const out = migratePersistedState(p, 6);
+  const out = migratePersistedState(p, 8);
   const after = JSON.stringify(out);
   assert(before === after,
-    `V6.6 — v6 with valid mode is no-op (before vs after differ: ${before} vs ${after})`);
+    `V6.6 — current-schema state is no-op under aggregate migrate (before vs after differ: ${before} vs ${after})`);
 }
 
 console.log(`V6 migration: ${passed} passed, ${failed} failed (${passed+failed} total)`);

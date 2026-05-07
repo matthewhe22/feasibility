@@ -60,16 +60,28 @@ function v6Persisted(equityOverrides: Record<string, unknown> = {}) {
     `V7.1d — JV.fixedAmount deleted`);
 }
 
-// V7.2 — v7 idempotence (no fixedAmount key, equityCap set already)
+// V7.2 — current-schema idempotence under aggregate migrate (was v7→v7;
+// now v8→v8 since v8 added a subsequent migration). The v7 step's own
+// idempotence is verified by V7.5 + V7.6 below.
 {
   const p = v6Persisted();
-  // Pre-migrate to v7 shape
-  delete (p.inputs.equityDeveloper as Record<string, unknown>).fixedAmount;
-  (p.inputs.equityDeveloper as Record<string, unknown>).equityCap = 130_419_982;
+  // Pre-migrate to v7 shape (rename fixedAmount → equityCap on every entity)
+  for (const k of ['equityDeveloper', 'equityJV', 'equityPreferred', 'equityAdditional']) {
+    const e = (p.inputs as Record<string, unknown>)[k] as Record<string, unknown> | undefined;
+    if (e && 'fixedAmount' in e) {
+      e.equityCap = e.fixedAmount;
+      delete e.fixedAmount;
+    }
+  }
+  // Pre-shape v8 (minEquityRequirement at disabled default) so aggregate
+  // migrate has nothing to do.
+  (p.inputs as Record<string, unknown>).minEquityRequirement = {
+    mode: 'percent', value: 0, basis: 'tdc-incl-finance-costs',
+  };
   const before = JSON.stringify(p);
-  const out = migratePersistedState(p, 7);
+  const out = migratePersistedState(p, 8);
   const after = JSON.stringify(out);
-  assert(before === after, `V7.2 — v7→v7 idempotent (state unchanged)`);
+  assert(before === after, `V7.2 — current-schema state is no-op under aggregate migrate`);
 }
 
 // V7.3 — both keys present: equityCap wins

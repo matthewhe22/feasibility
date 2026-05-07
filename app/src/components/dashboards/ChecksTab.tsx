@@ -324,6 +324,59 @@ export function ChecksTab() {
     });
   }
 
+  // ── 6.5 EQUITY MEETS MINIMUM REQUIREMENT ────────────────────────────────────
+  // V8 — Term-sheet equity floor cross-check. Mirrors the [FUNDING] warning
+  // emitted by funding.ts. Status:
+  //   • value === 0  → N/A   (check disabled — back-compat default)
+  //   • actual ≥ req → PASS  (cash equity meets/exceeds the term-sheet floor)
+  //   • actual <  req → FAIL (shortfall — restructure capital stack)
+  // basis amount mirrors the engine: 'tdc' = TDC excluding capitalised finance
+  // costs; 'tdc-incl-finance-costs' = post-converged TDC inclusive of senior /
+  // senior2 / mezz / land-loan finance costs.
+  {
+    const minEq = inputs.minEquityRequirement;
+    if (!minEq || !Number.isFinite(minEq.value) || minEq.value <= 0) {
+      checks.push({
+        id: 'min-equity',
+        category: 'Equity',
+        description: 'Equity meets minimum requirement',
+        expected: 'Not configured',
+        actual: '—',
+        status: 'N/A',
+        notes: 'Set Inputs → Financing → Minimum Equity Requirement (value > 0) to enable this term-sheet cross-check.',
+      });
+    } else {
+      const totalInjected = sum(cf.map(c => c.equityInjection));
+      // Reconstruct the basis amount on the same definitions the engine uses
+      // so the displayed expected/actual exactly match the [FUNDING] warning.
+      const tdcExFin = f.totalCost - (f.seniorFinanceCosts ?? 0) - (f.mezzFinanceCosts ?? 0);
+      const tdcInclFin = f.totalCost;
+      const useInclFin = minEq.basis === 'tdc-incl-finance-costs';
+      const basisAmount = useInclFin ? tdcInclFin : tdcExFin;
+      const required = minEq.mode === 'percent'
+        ? minEq.value * basisAmount
+        : minEq.value;
+      const variance = totalInjected - required;
+      const status: CheckStatus = totalInjected + 1 >= required ? 'PASS' : 'FAIL';
+      const basisLabel = useInclFin ? 'TDC + financing costs' : 'TDC';
+      const reqDescriptor = minEq.mode === 'percent'
+        ? `${(minEq.value * 100).toFixed(2)}% of ${basisLabel} (${formatCurrency(basisAmount)})`
+        : formatCurrency(minEq.value);
+      checks.push({
+        id: 'min-equity',
+        category: 'Equity',
+        description: 'Equity meets minimum requirement',
+        expected: `≥ ${formatCurrency(required)}`,
+        actual: formatCurrency(totalInjected),
+        variance: formatCurrency(variance),
+        status,
+        notes: status === 'PASS'
+          ? `Term-sheet floor: ${reqDescriptor}. Actual cash equity meets or exceeds the floor.`
+          : `Term-sheet floor: ${reqDescriptor}. Shortfall of ${formatCurrency(-variance)} — restructure: increase equity or reduce TDC.`,
+      });
+    }
+  }
+
   // ── 7. SENIOR FACILITY WITHIN LIMIT ─────────────────────────────────────────
   {
     // R10 — use the engine-sized senior limit (= min of input limit, LTC ceiling,

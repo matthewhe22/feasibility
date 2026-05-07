@@ -378,3 +378,14 @@ export const defaultOtherFinancingCosts: CostLineItem[] = [
   },
   ...placeholders(16002, 10, 'Other Financing Costs').map(p => ({ ...p, addGST: false })),
 ];
+
+// ===== MIN EQUITY REQUIREMENT =====
+// Term-sheet cross-check input. Default value=0 disables the check entirely
+// so all v7 fixtures and existing saved projects pass through unchanged after
+// the v8 migration backfills this default. Set value>0 (with mode/basis) to
+// trigger the [FUNDING] warning + Checks-tab FAIL when actual equity is short.
+export const defaultMinEquityRequirement: import('../types').MinEquityRequirement = {
+  mode: 'percent',
+  value: 0,
+  basis: 'tdc-incl-finance-costs',
+};
