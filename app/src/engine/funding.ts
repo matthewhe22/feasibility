@@ -52,6 +52,15 @@ interface CapIntCeilingHit {
   affectedPeriods: Set<number>;
 }
 
+interface MinEquityShortfall {
+  actual: number;
+  required: number;
+  basisAmount: number;
+  basisName: 'TDC' | 'TDC + financing costs';
+  mode: 'percent' | 'amount';
+  modeValue: number;
+}
+
 interface PendingFundingState {
   covenantOvershoot: Map<string, CovenantOvershoot>;
   autoSize: Map<string, AutoSize>;
@@ -59,6 +68,7 @@ interface PendingFundingState {
   equityBackstop: EquityBackstopOvershoot | null;
   projectDefault: ProjectDefault | null;
   capIntCeiling: Map<string, CapIntCeilingHit>;
+  minEquityShortfall: MinEquityShortfall | null;
 }
 
 const _pendingFundingState: PendingFundingState = {
@@ -68,6 +78,7 @@ const _pendingFundingState: PendingFundingState = {
   equityBackstop: null,
   projectDefault: null,
   capIntCeiling: new Map(),
+  minEquityShortfall: null,
 };
 
 const _summaryWarnings = new Map<string, string>();
@@ -79,6 +90,7 @@ function resetPendingFundingState(): void {
   _pendingFundingState.equityBackstop = null;
   _pendingFundingState.projectDefault = null;
   _pendingFundingState.capIntCeiling.clear();
+  _pendingFundingState.minEquityShortfall = null;
 }
 
 function recordCapIntCeilingHit(facility: string, period: number, cashAmount: number): void {
@@ -164,6 +176,30 @@ function recordProjectDefault(period: number, remainingDebt: number): void {
   }
 }
 
+function recordMinEquityShortfall(
+  actual: number,
+  required: number,
+  basisAmount: number,
+  basisName: 'TDC' | 'TDC + financing costs',
+  mode: 'percent' | 'amount',
+  modeValue: number,
+): void {
+  // V8 — Term-sheet equity floor cross-check. Called ONCE per solveFunding
+  // call after convergence, so the recorded values reflect the final
+  // converged TDC (the basis-amount post-cap-int settles). The flush below
+  // emits ONE consolidated [FUNDING] warning keyed `min-equity-shortfall`,
+  // overwritten on the final solve so prelim+final pair surfaces only the
+  // final result.
+  _pendingFundingState.minEquityShortfall = {
+    actual,
+    required,
+    basisAmount,
+    basisName,
+    mode,
+    modeValue,
+  };
+}
+
 function fmtMoney(n: number): string { return `$${Math.round(n).toLocaleString()}`; }
 function fmtPeriodRange(set: Set<number>): string {
   const arr = [...set].sort((a, b) => a - b);
@@ -231,6 +267,18 @@ function flushPendingFundingSummaries(): void {
       `clawback exhausted (residual at period ${info.peakPeriod}). ` +
       `Loss capitalised against equity (not residual debt).`;
     _summaryWarnings.set('project-default', msg);
+  }
+
+  if (_pendingFundingState.minEquityShortfall) {
+    const info = _pendingFundingState.minEquityShortfall;
+    const shortfall = info.required - info.actual;
+    const reqLabel = info.mode === 'percent'
+      ? `${(info.modeValue * 100).toFixed(2)}% of ${info.basisName} ${fmtMoney(info.basisAmount)}`
+      : `${fmtMoney(info.modeValue)}`;
+    const msg =
+      `[FUNDING] Equity below minimum requirement — actual ${fmtMoney(info.actual)} vs required ${fmtMoney(info.required)} ` +
+      `(shortfall ${fmtMoney(shortfall)}, basis: ${reqLabel}).`;
+    _summaryWarnings.set('min-equity-shortfall', msg);
   }
 }
 
@@ -521,6 +569,43 @@ export function solveFunding(
     prevPeakSnrBalance  = result.seniorFacilitySize;
     prevPeakSnr2Balance = result.senior2FacilitySize;
     prevPeakMezzBalance = result.mezzFacilitySize;
+  }
+
+  // V8 — Min-equity-requirement cross-check. Computed ONCE on the converged
+  // final-iteration result so the basis-amount reflects post-cap-int settled
+  // TDC. Idempotent w.r.t. solver iterations: only the final pass records.
+  // value=0 disables the check entirely (back-compat for v7 fixtures).
+  {
+    const minEq = inputs.minEquityRequirement;
+    if (minEq && Number.isFinite(minEq.value) && minEq.value > 0) {
+      const tdcExFin = sum(monthlyCostsExcFinance);
+      const finCosts =
+        result.totalSeniorInterest + result.totalSeniorFees +
+        result.totalSenior2Interest + result.totalSenior2Fees +
+        result.totalMezzInterest + result.totalMezzFees +
+        result.totalLandLoanInterest + result.totalLandLoanFees;
+      const tdcInclFin = tdcExFin + finCosts;
+      const useInclFin = minEq.basis === 'tdc-incl-finance-costs';
+      const basisAmount = useInclFin ? tdcInclFin : tdcExFin;
+      const required = minEq.mode === 'percent'
+        ? minEq.value * basisAmount
+        : minEq.value;
+      // Actual cash equity = developer + JV cumulative draws (net of profit
+      // reps/distributions, but those don't affect *contributed* cash —
+      // totalEquityInjected here is gross cumulative contribution).
+      const actual = result.totalEquityInjected;
+      // $1 tolerance to avoid spurious false-positives on rounding.
+      if (actual + 1 < required) {
+        recordMinEquityShortfall(
+          actual,
+          required,
+          basisAmount,
+          useInclFin ? 'TDC + financing costs' : 'TDC',
+          minEq.mode,
+          minEq.value,
+        );
+      }
+    }
   }
 
   // Q1 — flush the consolidated per-(kind,facility) summaries from the FINAL

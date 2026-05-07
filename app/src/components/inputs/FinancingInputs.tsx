@@ -1,7 +1,7 @@
 import { useStore } from '../../store/useStore';
 import { CurrencyInput, PercentInput, NumberInput, SectionHeader } from '../common/FormFields';
 import { computeDrawdownSequence } from '../../engine/funding';
-import type { EquityConfig, DebtFacility, MainInputs } from '../../types';
+import type { EquityConfig, DebtFacility, MainInputs, MinEquityRequirement } from '../../types';
 
 // ===== DRAWDOWN SEQUENCE BANNER =====
 
@@ -207,6 +207,80 @@ function RepaymentSequenceBanner() {
   );
 }
 
+// ===== MIN EQUITY REQUIREMENT (term-sheet cross-check) =====
+
+function MinEquityRequirementCard({ value, onChange }: {
+  value: MinEquityRequirement;
+  onChange: (v: MinEquityRequirement) => void;
+}) {
+  const isActive = (value?.value ?? 0) > 0;
+  return (
+    <div className="mb-4 border border-purple-200 rounded bg-purple-50 p-3">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div className="min-w-0">
+          <p className="text-xs font-bold text-purple-800">Minimum Equity Requirement</p>
+          <p
+            className="text-[10px] text-purple-600 mt-0.5"
+            title="Cross-check against term-sheet equity floor — emits warning if actual cash equity falls below"
+          >
+            Cross-check against term-sheet equity floor — emits warning if actual cash equity falls below.
+          </p>
+        </div>
+        <span className={`text-[10px] px-2 py-0.5 rounded font-semibold ${
+          isActive ? 'bg-purple-600 text-white' : 'bg-gray-200 text-gray-600'
+        }`}>
+          {isActive ? 'Active' : 'Disabled (value = 0)'}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-purple-900 w-16 shrink-0">Mode</span>
+          <select
+            value={value?.mode ?? 'percent'}
+            onChange={e => onChange({ ...value, mode: e.target.value as 'percent' | 'amount' })}
+            className="text-xs bg-white border border-purple-300 rounded px-2 py-0.5 flex-1"
+          >
+            <option value="percent">Percent of basis</option>
+            <option value="amount">Fixed $ amount</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-purple-900 w-16 shrink-0">Value</span>
+          {value?.mode === 'amount' ? (
+            <CurrencyInput
+              label=""
+              value={value?.value ?? 0}
+              onChange={v => onChange({ ...value, value: v })}
+            />
+          ) : (
+            <PercentInput
+              label=""
+              value={value?.value ?? 0}
+              onChange={v => onChange({ ...value, value: v })}
+            />
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-purple-900 w-16 shrink-0">Basis</span>
+          <select
+            value={value?.basis ?? 'tdc-incl-finance-costs'}
+            onChange={e => onChange({ ...value, basis: e.target.value as 'tdc' | 'tdc-incl-finance-costs' })}
+            className="text-xs bg-white border border-purple-300 rounded px-2 py-0.5 flex-1"
+          >
+            <option value="tdc-incl-finance-costs">TDC + financing costs</option>
+            <option value="tdc">TDC (excl. financing costs)</option>
+          </select>
+        </div>
+      </div>
+      <p className="text-[10px] text-purple-500 mt-2">
+        Default = 0 (disabled). Set value &gt; 0 to enable a [FUNDING] warning + Checks-tab FAIL when
+        converged cash equity (developer + JV draws) falls below the required amount.
+        Most term sheets reference TDC including capitalised finance costs.
+      </p>
+    </div>
+  );
+}
+
 // ===== MAIN COMPONENT =====
 
 export function FinancingInputs() {
@@ -219,6 +293,10 @@ export function FinancingInputs() {
 
         <DrawdownSequenceBanner inputs={inputs} />
         <RepaymentSequenceBanner />
+        <MinEquityRequirementCard
+          value={inputs.minEquityRequirement ?? { mode: 'percent', value: 0, basis: 'tdc-incl-finance-costs' }}
+          onChange={v => setInputs({ minEquityRequirement: v })}
+        />
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {/* Left column: Equity */}

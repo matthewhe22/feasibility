@@ -327,6 +327,33 @@ export interface LandPurchaseInputs {
   acquisitionCosts: AcquisitionCostItem[];
 }
 
+/**
+ * Minimum equity requirement — term-sheet cross-check input.
+ *
+ * Many senior construction term sheets (e.g. Goldman Sachs indicative terms)
+ * require a minimum sponsor equity contribution as a percentage of TDC. This
+ * is a CROSS-CHECK against the model's converged equity draws, not a sizing
+ * constraint — the funding solver still uses `equityCap` (max equity) to
+ * bound drawdowns. When `actualEquityCash < requiredEquity` the engine
+ * emits a `[FUNDING]` warning and the Checks tab flips that row to FAIL.
+ *
+ *  - mode      'percent' | 'amount' — value is a fraction of basis or a $ value.
+ *  - value     0 disables the check (warning + Checks-row both go quiet/N/A).
+ *  - basis     'tdc'                       — TDC excluding capitalised finance costs.
+ *              'tdc-incl-finance-costs'    — TDC including the converged senior /
+ *                                            senior2 / mezz / land-loan finance costs.
+ *              Most term sheets reference "TDC" inclusive of finance costs.
+ *
+ * Backwards-compatible: introduced in v8 schema migration with default
+ * `{ mode: 'percent', value: 0, basis: 'tdc-incl-finance-costs' }` so all
+ * existing fixtures and saved projects are no-ops on this check.
+ */
+export interface MinEquityRequirement {
+  mode: 'percent' | 'amount';
+  value: number;
+  basis: 'tdc' | 'tdc-incl-finance-costs';
+}
+
 export interface MainInputs {
   preliminary: ProjectPreliminary;
   landPurchase: LandPurchaseInputs;
@@ -353,6 +380,14 @@ export interface MainInputs {
   seniorFacility2: DebtFacility;
   residualStockFacility: DebtFacility;
   otherFinancingCosts: CostLineItem[];
+  /** Term-sheet equity floor — emits a [FUNDING] warning + Checks-tab FAIL when
+   *  the converged actual cash equity (developer + JV draws) falls below the
+   *  required amount. v8 default `{ mode: 'percent', value: 0, basis: 'tdc-incl-finance-costs' }`
+   *  disables the check (back-compat for v7 fixtures). Optional in the type so
+   *  hand-rolled test fixtures (which bypass the migration) compile without
+   *  noise; engine + UI + Checks-tab all treat `undefined` as the disabled
+   *  default. See MinEquityRequirement. */
+  minEquityRequirement?: MinEquityRequirement;
 }
 
 // ===== CALCULATION RESULTS =====

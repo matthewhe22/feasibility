@@ -9,6 +9,7 @@ const sections = [
   { id: 'gst', label: 'GST & ITC Recovery' },
   { id: 'funding', label: 'Funding Structure' },
   { id: 'interest', label: 'Interest & Fees' },
+  { id: 'financing-logic', label: 'Financing Logic (term sheet)' },
   { id: 'solver', label: 'Circular Reference Solver' },
   { id: 'kpis', label: 'KPI Calculations' },
 ];
@@ -395,8 +396,206 @@ export function ProjectDocs() {
           </SubSection>
         </Section>
 
+        {/* ── Financing Logic (term-sheet reference) ── */}
+        <Section id="financing-logic" title="9. Financing Logic — Term-Sheet Reference">
+          <p>
+            This section is the canonical reference for how the engine prices, sizes, sequences and
+            constrains each financing facility. Sections&nbsp;7 and&nbsp;8 above describe the higher-level
+            structure and the default formulas — this section adds the term-sheet-level detail
+            (line-fee basis options, covenant cap interactions, drawdown-mode behaviour, capitalisation
+            rules, and the term-sheet equity-floor cross-check introduced in v8).
+          </p>
+
+          <SubSection title="Interest margin (BBSY + margin)">
+            <p>
+              Senior, senior-2 and mezz interest is charged on the <strong>drawn balance only</strong>, on a
+              days-in-period basis annualised by <code>daysPerYear</code> (admin default 365). The all-in
+              rate is <code>BBSY + margin</code>; if both are zero the engine falls back to the legacy
+              flat <code>interestRate</code> field for projects saved before margin/BBSY were broken out.
+              Land-loan interest follows the same daily-rate formula. Capitalised interest accretes to the
+              drawn balance and compounds the next period; cash-pay interest exits the project bank balance
+              that period.
+            </p>
+            <Formula
+              label="Periodic interest"
+              formula="interest[t] = drawnBalance[t] × (BBSY + margin) × daysInPeriod[t] / daysPerYear"
+            />
+          </SubSection>
+
+          <SubSection title="Line fee (basis selectable)">
+            <p>
+              Line fees are configurable per facility via the <code>lineFeeBasis</code> selector on the
+              Financing inputs page. Three options:
+            </p>
+            <Table
+              headers={['Basis', 'Charged on', 'Use case', 'How it converges']}
+              rows={[
+                ['peak-drawn (default)', 'Peak drawn balance from the prior solver iteration', 'Default modelling — fee is a function of actual peak debt', 'Stabilises through the iterative solver'],
+                ['committed-limit', 'Full committed facility limit, every active period', 'Term-sheet convention (e.g. Goldman Sachs indicative terms — fee on facility from financial close)', 'No iteration needed — fee is constant'],
+                ['undrawn-commitment', 'Undrawn portion = max(0, limit − currentDrawn)', 'Commitment-fee style facilities where fee is on the unused portion', 'Re-evaluated each period — does not iterate'],
+              ]}
+            />
+            <Formula
+              label="Periodic line fee"
+              formula="lineFee[t] = lineFeeBase × lineFeePercent × daysInPeriod[t] / daysPerYear"
+            />
+            <p>
+              The Financing inputs page surfaces a soft term-sheet warning when a senior facility uses
+              <code>peak-drawn</code> with a non-zero rate, because most senior construction facilities
+              charge on the committed limit from financial close — switching to <em>Committed Limit</em>
+              produces a more lender-faithful number for term-sheet validation.
+            </p>
+          </SubSection>
+
+          <SubSection title="Establishment fee">
+            <p>
+              One-off charge at <code>senior.startMonth</code> (and per other facility&apos;s startMonth):
+              <code> rate × seniorLimit</code>. Capitalisable when the facility&apos;s <code>isCapitalised</code>
+              flag is on — the fee accretes to the opening balance of the start month rather than exiting
+              cash. When the lender is GST-exempt (GSTA s.40-60, default) the fee is GST-free; flip
+              <code>lenderIsGSTExempt</code> off for non-bank lenders.
+            </p>
+            <Formula
+              label="Establishment fee"
+              formula="establishmentFee = facilityLimit × establishmentFeePercent  (charged at startMonth, capitalised if isCapitalised)"
+            />
+          </SubSection>
+
+          <SubSection title="LTC cap">
+            <p>
+              The senior peak balance is bounded by <code>ltcTarget × TDC</code>, where TDC is the converged
+              total development cost <strong>including capitalised finance costs (cap-int + fees)</strong> from
+              the post-converged solve. The check is a covenant — when capitalised interest would push the
+              balance above this cap in a period, the cap-int hard-ceiling logic kicks in (see below).
+            </p>
+            <Formula label="LTC cap" formula="senior peak ≤ ltcTarget × TDC   (TDC includes capitalised finance costs)" />
+          </SubSection>
+
+          <SubSection title="LVR cap (NRV definition)">
+            <p>
+              The senior peak balance is also bounded by <code>lvrTarget × NRV</code>, where NRV is computed as:
+            </p>
+            <Formula
+              label="Net Realisable Value"
+              formula="NRV = totalRevenue − GST on revenue − agent commissions"
+            />
+            <WarningBox>
+              <strong>Term-sheet caveat:</strong> in this model, marketing &amp; legal disposal costs flow through monthly costs
+              (and therefore through TDC), <em>not</em> as an NRV deduction. Different term sheets define NRV slightly
+              differently — some include marketing/legal as deductions, some don&apos;t. <strong>Validate the NRV definition
+              against your specific term sheet</strong> before relying on the LVR check for term-sheet covenant compliance.
+            </WarningBox>
+          </SubSection>
+
+          <SubSection title="Drawdown modes">
+            <p>The <em>Drawdown Mode</em> selector on the Financing inputs page controls how each period&apos;s
+              cash gap is filled when the gap-fill loop runs. Three modes:</p>
+            <Table
+              headers={['Mode', 'Behaviour', 'Recommended for']}
+              rows={[
+                ['equity-first (default)', 'Equity (priority 1) drains fully before senior (priority 4) starts gap-filling. Backwards-compatible — preserves pre-M4 behaviour.', 'Quick feasos, conservative equity-first sponsorship'],
+                ['senior-first', 'Once construction starts (i ≥ senior.startMonth), debt facilities fill the gap BEFORE equity in order: senior → senior2 → mezz. Equity steps in only when all debt is at LTC/LVR/facility cap. Pre-construction periods are unchanged — equity covers land + DA per the existing priority order.', 'Standard Australian dev finance — senior absorbs construction draw, equity is residual'],
+                ['pro-rata', 'Splits each period gap proportionally between developer equity and senior, weighted by remaining covenant headroom.', 'Specialty term sheets that require pari-passu draws'],
+              ]}
+            />
+          </SubSection>
+
+          <SubSection title="Repayment sequence">
+            <p>
+              When revenue exceeds costs (typically at settlement), surplus cash sweeps into the
+              <em>repayment waterfall</em>. The sweep order between senior and mezz is configurable via the
+              <code>admin.repaymentSequence</code> setting:
+            </p>
+            <Table
+              headers={['Sequence', 'Order', 'Use case']}
+              rows={[
+                ['Legal priority (default)', 'senior → mezz → equity', 'Default — matches legal priority on default. Senior is repaid first.'],
+                ['High-rate-first cash sweep', 'mezz → senior → equity', 'Sometimes used on retail-fund mandates so the highest-rate debt clears first. Equity is always last.'],
+              ]}
+            />
+            <InfoBox>
+              The cash-sweep order only affects <strong>repayment</strong> ordering during the project — the
+              <em>legal priority on default</em> remains senior-first regardless of this setting.
+            </InfoBox>
+          </SubSection>
+
+          <SubSection title="Auto-sizing (M4)">
+            <p>
+              When total committed funding (sum of facility limits + equity caps) is below total cost, the
+              engine auto-sizes facilities upward in priority order to close the funding gap, respecting
+              covenant caps:
+            </p>
+            <ol className="list-decimal pl-5 space-y-1">
+              <li>Senior grows beyond its <code>facilityLimit</code> up to the LTC and LVR ceilings.</li>
+              <li>If still short, mezz grows beyond its limit to the mezz LTC ceiling.</li>
+              <li>If still short after debt is fully sized, the engine flags an equity-backstop /
+                project-default warning.</li>
+            </ol>
+            <p>An <code>[INFO] Auto-sized</code> message surfaces in the consolidated funding warnings
+              when this kicks in, so the user sees that the engine has sized the facility above the
+              user-entered limit.</p>
+          </SubSection>
+
+          <SubSection title="Cap-int hard ceiling (FU2)">
+            <p>
+              When capitalising the period&apos;s interest would push the senior balance above its M4 covenant
+              cap (LTC or LVR), the engine switches that period&apos;s interest to <strong>cash-pay</strong>
+              instead of capitalising it. The cash payment is absorbed by the project bank balance; the
+              total interest charged on the facility is unchanged — only the timing of when the cash
+              hits the bank shifts earlier. This event is logged as a single consolidated
+              <code>[INFO]</code> warning at the end of the solve.
+            </p>
+          </SubSection>
+
+          <SubSection title="Land loan">
+            <p>
+              The land loan funds the land purchase as a fixed lump sum at its <code>startMonth</code>.
+              The <code>isCapitalised</code> toggle decides whether interest accrues to the balance
+              (capitalised) or exits as cash each period (cash-pay). At construction start, the senior
+              facility takes out the land loan in a single combined transaction — captured in the
+              <code>landLoanTakeoutBySenior</code> memo row of the cashflow so the UI can render one
+              line per takeout. The land loan&apos;s LVR cap is computed against the land value rather
+              than NRV.
+            </p>
+          </SubSection>
+
+          <SubSection title="Stakeholder-trust deposits (presales)">
+            <p>
+              Presale deposits are held in stakeholder trust and do <strong>not</strong> enter the development
+              cashflow. The full GRV (deposit + balance) flows into revenue at the settlement period.
+              Per <em>GSTR 2006/2</em>, GST on the deposit is not recognised when the deposit is paid —
+              recognition is deferred to settlement, when the deposit and balance are remitted together.
+              The model defers all deposit-period GST recognition to settlement to mirror this ATO ruling.
+            </p>
+          </SubSection>
+
+          <SubSection title="Equity drawdown — caps and floors">
+            <p>
+              Each equity entity has an <code>equityCap</code> field that bounds cumulative drawdown
+              (the &quot;maximum&quot; — the funding solver respects this hard ceiling). When set to&nbsp;0
+              and <code>percentage</code> is non-zero, the cap is computed as <code>percentage × totalCostsExcFin</code>.
+              The <code>equityCap</code> field was renamed from <code>fixedAmount</code> in v7 — schema
+              migration backfills automatically.
+            </p>
+            <p className="mt-2">
+              <strong>New in v8:</strong> a separate term-sheet equity-floor cross-check is also evaluated
+              against the converged actual cash equity. The
+              <code> minEquityRequirement</code> input on the Financing inputs page lets you enter a
+              required floor as either a percent of TDC (with selectable basis: <code>tdc</code> or
+              <code>tdc-incl-finance-costs</code>) or a fixed dollar amount. When&nbsp;0 the check is
+              disabled (default — no behavioural change for existing fixtures). When set and the actual
+              draws fall short, the engine emits a single
+              <code> [FUNDING] Equity below minimum requirement</code> warning with the shortfall + basis,
+              and the Checks tab shows <strong>FAIL</strong> on the &quot;Equity meets minimum requirement&quot; row.
+              This is a CROSS-CHECK only — the funding solver still uses <code>equityCap</code> (the
+              maximum) to bound drawdowns; the floor is informational so you can reconcile against your
+              term sheet&apos;s sponsor-equity covenant.
+            </p>
+          </SubSection>
+        </Section>
+
         {/* ── Circular Reference Solver ── */}
-        <Section id="solver" title="9. Circular Reference Solver">
+        <Section id="solver" title="10. Circular Reference Solver">
           <p>
             The model contains a circular dependency: finance costs (interest + fees) depend on the
             facility size, the facility size depends on Total Development Cost (TDC) via LTC constraints,
@@ -423,7 +622,7 @@ export function ProjectDocs() {
         </Section>
 
         {/* ── KPIs ── */}
-        <Section id="kpis" title="10. KPI Calculations">
+        <Section id="kpis" title="11. KPI Calculations">
           <SubSection title="Cash-on-Cash (CoC)">
             <Formula label="Total CoC" formula="CoC = totalProfitDistributions / totalEquityInjected" />
             <Formula label="Annual CoC" formula="annualCoC = (CoC ^ (12 / projectSpanMonths)) − 1" />

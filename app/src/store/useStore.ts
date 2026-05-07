@@ -27,6 +27,7 @@ import {
   defaultSeniorFacility2,
   defaultResidualStock,
   defaultOtherFinancingCosts,
+  defaultMinEquityRequirement,
 } from './defaults';
 import { cloneStandardBuildSCurves } from '../engine/sCurves';
 
@@ -142,6 +143,7 @@ const defaultInputs: MainInputs = {
   seniorFacility2: defaultSeniorFacility2,
   residualStockFacility: defaultResidualStock,
   otherFinancingCosts: defaultOtherFinancingCosts,
+  minEquityRequirement: defaultMinEquityRequirement,
 };
 
 /**
@@ -199,9 +201,14 @@ function createDebouncedLocalStorage(delayMs: number): StateStorage {
  *        schema clarity. The field is the cumulative equity cap the funding
  *        solver respects. Migration copies the old value across and deletes
  *        the old key.
+ *   v8 — added `inputs.minEquityRequirement` term-sheet equity-floor
+ *        cross-check. Additive: missing field is backfilled with
+ *        `{ mode: 'percent', value: 0, basis: 'tdc-incl-finance-costs' }`
+ *        which DISABLES the check (value=0). All v7 fixtures and saved
+ *        projects therefore pass through with no behavioural change.
  *
- * The function is idempotent on each version: running v7 migration on already-
- * migrated v7 data produces no change (the existence checks short-circuit).
+ * The function is idempotent on each version: running v8 migration on already-
+ * migrated v8 data produces no change (the existence checks short-circuit).
  */
 export function migratePersistedState(persisted: unknown, version: number): unknown {
   const p = persisted as Record<string, unknown> | null;
@@ -279,6 +286,29 @@ export function migratePersistedState(persisted: unknown, version: number): unkn
       }
     }
   }
+  // v8 — backfill `inputs.minEquityRequirement` with the disabled default
+  // (`value: 0` => no check). Additive only: a well-formed object is preserved
+  // as-is; a partially-shaped object has missing/invalid keys filled in.
+  // Idempotent on v8 — a fully-shaped object short-circuits with no writes.
+  if (version < 8 && p.inputs && typeof p.inputs === 'object') {
+    const inputs = p.inputs as Record<string, unknown>;
+    const cur = inputs.minEquityRequirement;
+    const isObj = (x: unknown): x is Record<string, unknown> =>
+      typeof x === 'object' && x !== null && !Array.isArray(x);
+    if (!isObj(cur)) {
+      inputs.minEquityRequirement = {
+        mode: 'percent',
+        value: 0,
+        basis: 'tdc-incl-finance-costs',
+      };
+    } else {
+      const allowedMode = new Set(['percent', 'amount']);
+      const allowedBasis = new Set(['tdc', 'tdc-incl-finance-costs']);
+      if (typeof cur.mode !== 'string' || !allowedMode.has(cur.mode as string)) cur.mode = 'percent';
+      if (typeof cur.value !== 'number' || !Number.isFinite(cur.value)) cur.value = 0;
+      if (typeof cur.basis !== 'string' || !allowedBasis.has(cur.basis as string)) cur.basis = 'tdc-incl-finance-costs';
+    }
+  }
   return p;
 }
 
@@ -324,7 +354,7 @@ export const useStore = create<AppState>()(
       //      when missing/undefined. PR-D (PR #31) added it as a configurable
       //      field but no migration step — v4 users hit the engine with
       //      undefined and the funding solver branches on this value.
-      version: 7,
+      version: 8,
       migrate: migratePersistedState,
       // Debounce localStorage writes to coalesce rapid keystrokes into a single
       // serialization+write. 250 ms is imperceptible to users but eliminates
