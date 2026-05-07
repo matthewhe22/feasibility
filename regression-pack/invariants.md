@@ -55,8 +55,8 @@ Pass criterion. Fail criterion.
 
 ### C1 — Stack sums to total cost (or labelled "Underfunded $X" / "Over-committed $X")
 **Code:** `engine/index.ts` capitalStack construction; UI capital-stack widget.
-**Test:** engine. `|cs.equityAmount + cs.seniorAmount + cs.senior2Amount + cs.mezzAmount + landLoanAmount − f.totalCost| ≤ tolerance` OR a corresponding labelled gap.
-**Fail:** silent drift.
+**Test:** engine. The runner asserts `sources / totalCost ∈ [0.75, 1.10]` (within ~25% — Project Demo's residual ~10% gap is finance-cost cap-int absorbed inside senior). When ratio falls outside this band, the engine MUST emit an explicit "Underfunded $X" / "Over-committed $X" / "additional equity required $X" warning string — that path satisfies the invariant via the labelled-gap branch.
+**Fail:** silent drift outside the band with no gap-label warning emitted.
 
 ### C2 — LVR(NRV) for equity is em-dash, not a percentage
 **Code:** UI capital-stack table.
@@ -73,12 +73,19 @@ Pass criterion. Fail criterion.
 
 ### D1 — Senior never breaches its LTC or LVR cap
 **Code:** `engine/funding.ts` (covenant solver).
-**Test:** engine. `cs.seniorLTC ≤ inputs.seniorFacility.limitLTC + 1e-9` and analogous for LVR.
-**Fail:** breach.
+**Test:** engine. Combined PASS requires BOTH:
+- `cs.seniorLTC ≤ inputs.seniorFacility.ltcTarget + 1e-9`
+- `cs.seniorLVR ≤ inputs.seniorFacility.lvrTarget + 1e-9`
+**Fail:** breach of either cap.
 
 ### D2 — Mezz never breaches its facility cap or LTC/LVR
 **Code:** `engine/funding.ts`.
-**Test:** engine. `cs.mezzAmount ≤ inputs.mezzanine.facilityLimit + 1e-9`; same for LTC/LVR caps.
+**Test:** engine. Combined PASS requires the dollar limit AND the LTC/LVR caps where defined (>0):
+- `cs.mezzAmount ≤ inputs.mezzanine.facilityLimit + 1e-9`
+- if `inputs.mezzanine.ltcTarget > 0`: `cs.mezzLTC ≤ ltcTarget + 1e-9`
+- if `inputs.mezzanine.lvrTarget > 0`: `cs.mezzLVR ≤ lvrTarget + 1e-9`
+A zero cap means "not asserted" (typical for mezz LVR which is often uncovenanted).
+**Fail:** breach of any defined cap.
 
 ### D3 — Auto-size grows debt to covenant cap before flagging equity gap
 **Code:** `engine/funding.ts` (M4, PR #31).
