@@ -1003,22 +1003,29 @@ function runFundingWaterfall(
           `Land Loan starts month ${landLoan.startMonth} but Senior starts month ${senior.startMonth} — land loan is repaid same period it is drawn, so no land-loan interest accrues. Confirm the bridge period (typical pattern: land-loan precedes senior by 3-6 months).`
         );
       }
-      // R19 — Land-loan interest payment-frequency convention. Interest accrues
-      // on the previous period's closing balance (llOpenBalance), so the
-      // drawdown period itself never shows an interest charge — the open
-      // balance is $0 at the start of the drawdown period. With monthly
-      // payment frequency (=1), the first interest charge appears one period
-      // after drawdown. With quarterly (=3), the first interest appears in
-      // period drawdown+3 (the 3rd full period of accrual). This is the
-      // accepted convention but visually confusing on the cashflow row, so
-      // we surface an INFO note when the frequency > 1.
-      if ((landLoan.interestPaymentFrequency ?? 1) > 1) {
+      // R19 — Land-loan interest payment-frequency. Interest accrues on the
+      // previous period's closing balance (llOpenBalance), so the drawdown
+      // period itself never shows an interest charge — the open balance is $0
+      // at the start of the drawdown period. With monthly frequency (=1), the
+      // first interest charge appears one period after drawdown. With
+      // quarterly (=3), the first interest appears in period drawdown+3 (the
+      // 3rd full period of accrual).
+      //
+      // Kew UAT v3 K (feature): under cash-pay mode, frequency drives when
+      // accrued interest hits the bank account (every freq periods). Under
+      // capitalised mode the frequency setting is IRRELEVANT — interest
+      // compounds into the balance every period regardless. The INFO note
+      // below is therefore only emitted on cash-pay land loans.
+      const llFreqRaw = (landLoan.interestPaymentFrequency ?? 1) > 0
+        ? (landLoan.interestPaymentFrequency ?? 1) : 1;
+      if (llFreqRaw > 1 && !landLoan.isCapitalised) {
         // B08 — Prefix with [INFO] so ChecksTab's prefix-aware routing renders
-        // this as INFO not WARN. The text after the prefix is unchanged.
-        // ChecksTab also recognises the existing [INFO] auto-size messages
-        // emitted from the funding consolidator.
+        // this as INFO not WARN.
+        const cadenceLabel = llFreqRaw === 3
+          ? 'Quarterly land-loan interest schedule active'
+          : `Land-loan interest schedule = every ${llFreqRaw} periods`;
         _fundingWarnings.push(
-          `[INFO] Land Loan interest payment frequency = ${landLoan.interestPaymentFrequency} months. Interest accrues monthly on the prior closing balance but is recognised in the cashflow only every ${landLoan.interestPaymentFrequency} periods (next charge: period ${landLoan.startMonth + landLoan.interestPaymentFrequency}). The drawdown period itself shows zero interest because the opening balance is zero.`
+          `[INFO] ${cadenceLabel} (cash-pay mode). Interest accrues monthly on the prior closing balance and is paid in cash at the end of each ${llFreqRaw}-period window — first cash charge: period ${landLoan.startMonth + llFreqRaw}.`
         );
       }
       llDrawdowns[i]     = landLoan.facilityLimit;
@@ -1055,8 +1062,14 @@ function runFundingWaterfall(
       llAccruedInterest += accrued;
 
       const monthsSinceLLStart = i - llStartIdx;
-      const freq = landLoan.interestPaymentFrequency > 0 ? landLoan.interestPaymentFrequency : 1;
-      if ((monthsSinceLLStart + 1) % freq === 0) {
+      // Kew UAT v3 K — frequency only applies in cash-pay mode. Capitalised
+      // land loans compound monthly regardless of the configured frequency
+      // (the freq setting is exposed only for cash-pay schedules; the UI
+      // disables the field when isCapitalised=true).
+      const llFreq = landLoan.isCapitalised
+        ? 1
+        : (landLoan.interestPaymentFrequency > 0 ? landLoan.interestPaymentFrequency : 1);
+      if ((monthsSinceLLStart + 1) % llFreq === 0) {
         llInterest[i]      = llAccruedInterest;
         totalLandInterest += llAccruedInterest;
         if (landLoan.isCapitalised) {
@@ -1067,7 +1080,10 @@ function runFundingWaterfall(
           // creates new debt rather than draining cash.
           llDrawdowns[i] += llAccruedInterest;
         } else {
-          // Cash-pay (default): direct outflow.
+          // Cash-pay: direct outflow at end of every llFreq-period window.
+          // For freq=1 this fires every period; for freq=3 the cashflow shows
+          // zero interest in periods 1,2,4,5,7,8,... and 3× monthly accrual
+          // in periods 3,6,9,...
           bankBalance -= llAccruedInterest;
         }
         llAccruedInterest = 0;

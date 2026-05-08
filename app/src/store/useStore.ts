@@ -210,9 +210,14 @@ function createDebouncedLocalStorage(delayMs: number): StateStorage {
  *        mode='percent' by dividing by 100 (legacy users typed `10`
  *        intending 10%; engine read it as 10× = 1000%). Idempotent on
  *        already-fractional values.
+ *  v10 — Kew UAT v3 K (Land Loan interest payment frequency feature):
+ *        backfill `interestPaymentFrequency: 1` (monthly) on every facility
+ *        that lacks a finite positive value. Additive + idempotent — a
+ *        facility already carrying a valid frequency is untouched.
  *
- * The function is idempotent on each version: running v9 migration on already-
- * migrated v9 data produces no change (the existence checks short-circuit).
+ * The function is idempotent on each version: running v10 migration on
+ * already-migrated v10 data produces no change (the existence checks
+ * short-circuit).
  */
 export function migratePersistedState(persisted: unknown, version: number): unknown {
   const p = persisted as Record<string, unknown> | null;
@@ -331,6 +336,26 @@ export function migratePersistedState(persisted: unknown, version: number): unkn
       cur.value = cur.value / 100;
     }
   }
+  // v10 — Land Loan interest payment frequency. Existing land-loan (and other
+  // facility) configs are backfilled with `interestPaymentFrequency: 1`
+  // (monthly cash-pay, or monthly compound under capitalised mode) so all v9
+  // fixtures and saved projects preserve their current behaviour. Additive +
+  // idempotent — a facility that already has a finite, positive frequency is
+  // left alone.
+  if (version < 10 && p.inputs && typeof p.inputs === 'object') {
+    const inputs = p.inputs as Record<string, unknown>;
+    const facKeys = ['landLoan', 'seniorFacility', 'seniorFacility2', 'mezzanine', 'residualStockFacility'];
+    for (const key of facKeys) {
+      const fac = inputs[key];
+      if (fac && typeof fac === 'object') {
+        const f = fac as Record<string, unknown>;
+        const cur = f.interestPaymentFrequency;
+        if (typeof cur !== 'number' || !Number.isFinite(cur) || cur <= 0) {
+          f.interestPaymentFrequency = 1;
+        }
+      }
+    }
+  }
   return p;
 }
 
@@ -376,7 +401,7 @@ export const useStore = create<AppState>()(
       //      when missing/undefined. PR-D (PR #31) added it as a configurable
       //      field but no migration step — v4 users hit the engine with
       //      undefined and the funding solver branches on this value.
-      version: 9,
+      version: 10,
       migrate: migratePersistedState,
       // Debounce localStorage writes to coalesce rapid keystrokes into a single
       // serialization+write. 250 ms is imperceptible to users but eliminates

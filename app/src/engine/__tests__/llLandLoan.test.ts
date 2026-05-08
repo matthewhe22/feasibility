@@ -142,6 +142,90 @@ function fixture(landLoanCapitalised: boolean): MainInputs {
     `LL2 — no covenant breach warning on healthy fixture; warnings: ${warns.slice(0, 200)}`);
 }
 
+// ── Kew UAT v3 K — Land loan interest payment frequency ──────────────────
+// Helper: build a non-capitalised cash-pay land-loan fixture with a
+// configurable interestPaymentFrequency. Span the loan over 7 periods so
+// quarterly schedules fire on periods 4 and 7 (start=1 → +3, +6).
+function freqFixture(freq: number, capitalised = false): MainInputs {
+  const f = fixture(capitalised);
+  // Extend the loan window to 7 periods so two full quarterly cycles fit
+  // before senior takeover. Senior starts at month 8 here.
+  f.landLoan = { ...f.landLoan, maturityMonth: 7, interestPaymentFrequency: freq };
+  f.constructionCosts = f.constructionCosts.map(c => ({ ...c, monthStart: 8, monthSpan: 14 }));
+  f.preliminary = { ...f.preliminary, projectSpanMonths: 22, projectEndMonth: 22, equityDistStartMonth: 20, equityDistSpanMonths: 3 };
+  f.grvItems = [{ ...f.grvItems[0], settlementMonth: 20, settlementSpan: 3 } as unknown as MainInputs['grvItems'][number]];
+  f.seniorFacility = { ...f.seniorFacility, startMonth: 8, maturityMonth: 22 };
+  return f;
+}
+
+// K-1: cash-pay + freq=1: every period after drawdown shows non-zero land
+//      loan interest (until senior takeover at period 8).
+{
+  const r = runCalculations(baseAdmin, freqFixture(1, false));
+  const cf = r.cashflows;
+  let nonZero = 0;
+  for (let i = 1; i < 7; i++) if ((cf[i]?.landLoanInterest ?? 0) > 0) nonZero++;
+  assert(nonZero === 6,
+    `K-1 freq=1 cash-pay: every period 2..7 has non-zero interest (got ${nonZero}/6)`);
+}
+
+// K-2: cash-pay + freq=3: only periods 3 and 6 (1-indexed) carry interest;
+//      periods 2, 4, 5, 7 are zero (accrual windows / no full window).
+//      Each non-zero cycle ≈ 3× the equivalent monthly accrual.
+//
+// Engine: fires when (monthsSinceLLStart + 1) % freq === 0, where
+// monthsSinceLLStart = i − llStartIdx. With startMonth=1 (llStartIdx=0):
+//   i=0 (period 1, drawdown): openBalance=0, no accrual
+//   i=1 (period 2): accrue, no fire (idx+1=2 % 3 ≠ 0)
+//   i=2 (period 3): accrue, fire (idx+1=3 % 3 = 0)  ← quarterly cash charge
+//   i=3 (period 4): accrue, no fire
+//   i=4 (period 5): accrue, no fire
+//   i=5 (period 6): accrue, fire (idx+1=6 % 3 = 0)  ← quarterly cash charge
+//   i=6 (period 7): accrue, no fire (stub picked up by senior takeout)
+{
+  const rQuart = runCalculations(baseAdmin, freqFixture(3, false));
+  const rMonth = runCalculations(baseAdmin, freqFixture(1, false));
+  const cfQ = rQuart.cashflows;
+  const cfM = rMonth.cashflows;
+  // Accrual-window periods: 2, 4, 5, 7 → indices 1, 3, 4, 6
+  for (const idx of [1, 3, 4]) {
+    assert((cfQ[idx]?.landLoanInterest ?? 0) === 0,
+      `K-2 freq=3 cash-pay: period ${idx + 1} interest is 0 (accrual window), got ${cfQ[idx]?.landLoanInterest}`);
+  }
+  // Quarterly fire periods: 3, 6 → indices 2, 5
+  for (const idx of [2, 5]) {
+    assert((cfQ[idx]?.landLoanInterest ?? 0) > 0,
+      `K-2 freq=3 cash-pay: period ${idx + 1} interest fires (end of quarter), got ${cfQ[idx]?.landLoanInterest}`);
+  }
+  // Σ identical to monthly run (timing-only difference).
+  const totQ = cfQ.reduce((s, c) => s + (c.landLoanInterest ?? 0), 0);
+  const totM = cfM.reduce((s, c) => s + (c.landLoanInterest ?? 0), 0);
+  assert(Math.abs(totQ - totM) < 1,
+    `K-2 freq=3 cash-pay: Σ interest equals Σ monthly (got Q=${totQ.toFixed(2)} M=${totM.toFixed(2)})`);
+  // First quarterly cycle (period 3) bundles only 2 accruals because the
+  // drawdown period (period 1) has openBalance=0 → no accrual on day one.
+  // The SECOND cycle (period 6) bundles 3 full accruals, so the cleanest
+  // 3×-monthly check is at i=5 vs sum of monthly indices 3,4,5.
+  const qCharge2 = cfQ[5]?.landLoanInterest ?? 0;
+  const mSum2    = (cfM[3]?.landLoanInterest ?? 0)
+                 + (cfM[4]?.landLoanInterest ?? 0)
+                 + (cfM[5]?.landLoanInterest ?? 0);
+  assert(Math.abs(qCharge2 - mSum2) < 1,
+    `K-2 freq=3 cash-pay: 2nd quarterly cycle = 3-month accrual sum (got q=${qCharge2.toFixed(2)} mSum=${mSum2.toFixed(2)})`);
+}
+
+// K-3: capitalised + freq=3: frequency is irrelevant — capitalised mode
+//      compounds every period regardless. Total cap-int matches capitalised
+//      + freq=1 within $1.
+{
+  const rCapM = runCalculations(baseAdmin, freqFixture(1, true));
+  const rCapQ = runCalculations(baseAdmin, freqFixture(3, true));
+  const totM = rCapM.cashflows.reduce((s, c) => s + (c.landLoanInterest ?? 0), 0);
+  const totQ = rCapQ.cashflows.reduce((s, c) => s + (c.landLoanInterest ?? 0), 0);
+  assert(Math.abs(totM - totQ) < 1,
+    `K-3 capitalised: freq is irrelevant (got monthly=${totM.toFixed(2)} quarterly=${totQ.toFixed(2)})`);
+}
+
 console.log(`\n${'═'.repeat(72)}`);
 console.log(`LL LAND LOAN TESTS: ${passed} passed, ${failed} failed (${passed + failed} total)`);
 console.log(`${'═'.repeat(72)}`);
