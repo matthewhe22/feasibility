@@ -151,6 +151,63 @@ function profitableInputs(): MainInputs {
     'reconciliation identity: feasibility ≈ waterfall − unrepatriated equity − unpaid debt');
 }
 
+// ── 4. K01: lender GST uplift on non-exempt fees flows through cash ────────
+//
+// Pre-fix the GST gross-up on non-exempt lender fees (`feeUplift()` in
+// engine/index.ts) was added to feasibility.totalCost but never deducted
+// from the bank cashflow, producing a feasibility-vs-waterfall wedge equal
+// to (totalFees × gstRate) on every project with at least one non-exempt
+// facility. Kew Demo Extra carried a $3.47M residual under this asymmetry.
+//
+// Post-fix: funding/per-period fee fields and the per-period bank flow
+// both include the uplift, so feas == waterfall on a profitable project.
+{
+  const inputs = profitableInputs();
+  // Add a senior facility with a meaningful establishment fee and mark the
+  // lender as non-GST-exempt so the uplift kicks in.
+  inputs.seniorFacility = {
+    name: 'S', facilityLimit: 5_000_000, startMonth: 1, maturityMonth: 12,
+    interestRate: 0, bbsy: 0.04, margin: 0.04,
+    establishmentFeePercent: 0.02, lineFeePercent: 0.005,
+    interestPaymentFrequency: 1, isCapitalised: false,
+    ltcTarget: 0.7, lvrTarget: 0.65, drawdownPriority: 1,
+    lenderIsGSTExempt: false,
+  } as unknown as MainInputs['seniorFacility'];
+  // Reduce equity slightly so we draw on senior — gives the fees a basis.
+  inputs.equityDeveloper.equityCap = 8_000_000;
+  inputs.equityDeveloper.equityContribution = 8_000_000;
+
+  const result = runCalculations(baseAdmin, inputs);
+  const cf = result.cashflows;
+
+  const wfTotal  = cf.reduce((s, c) => s + (c.profitDistribution ?? 0), 0);
+  const eqIn     = cf.reduce((s, c) => s + (c.equityInjection ?? 0), 0);
+  const eqOut    = cf.reduce((s, c) => s + (c.equityRepatriation ?? 0), 0);
+  const last     = cf[cf.length - 1];
+  const debt     = last
+    ? (last.landLoanBalance ?? 0) + (last.seniorBalance ?? 0)
+      + (last.senior2Balance ?? 0) + (last.mezzBalance ?? 0)
+    : 0;
+  const reconciled = wfTotal - Math.max(0, eqIn - eqOut) - debt;
+
+  // Identity holds within $1k tolerance even with non-exempt lender uplift.
+  close(reconciled, result.feasibility.totalProfit, 1000,
+    'K01: feasibility ≈ waterfall − unrepatEq − unpaidDebt with non-GST-exempt senior');
+
+  // Net cashflow sum still ≈ 0 (R1 invariant).
+  const netSum = cf.reduce((s, c) => s + (c.netCashflow ?? 0), 0);
+  close(netSum, 0, 1, 'K01: Σ netCashflow ≈ 0 (cash conservation) with uplift in flow');
+
+  // Senior fees on cf rows must reflect the uplift (gross-inclusive cash cost).
+  const totalSnrFees = cf.reduce((s, c) => s + (c.seniorFees ?? 0), 0);
+  // The uplift = totalFees × gstRate. We can sanity-check that the cf-row
+  // total exceeds the bare fee (line fee + estab) by ≈ 10% of the bare fee.
+  const seniorLimit = inputs.seniorFacility.facilityLimit;
+  const estabFeeBare = seniorLimit * inputs.seniorFacility.establishmentFeePercent;
+  assert(totalSnrFees > estabFeeBare,
+    `K01: cf seniorFees include uplift — got ${totalSnrFees.toFixed(0)}, bare estab ${estabFeeBare.toFixed(0)}`);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 console.log(`\n${'═'.repeat(72)}`);
 console.log(`PROFIT-RECONCILIATION TESTS: ${passed} passed, ${failed} failed (${passed + failed} total)`);

@@ -538,33 +538,49 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // gstOnRevenue field, so the feasibility total must match (Box Hill UAT bug 6).
   const totalGSTOnRevenue = sum(gstOnRevenue) + sum(gstOnDeposits);
 
-  // Lender GST exemption: debt facility fees are modelled as GST-free assuming
-  // the lender is an exempt financial institution (GSTA s.40-60). Non-bank lenders
-  // may charge GST-inclusive fees; when lenderIsGSTExempt === false, gross up
-  // the total fees by gstRate to reflect the additional cash cost (ITC not
-  // recoverable on financial supply acquisitions under s.11-15(2)(a)).
-  function feeUplift(facility: { lenderIsGSTExempt?: boolean } | undefined, fees: number): number {
-    if (!facility) return 0;
-    return facility.lenderIsGSTExempt === false ? fees * gstRate : 0;
-  }
-  const seniorFeeGSTUplift   = feeUplift(inputs.seniorFacility,  funding.totalSeniorFees);
-  const senior2FeeGSTUplift  = feeUplift(inputs.seniorFacility2, funding.totalSenior2Fees);
-  const mezzFeeGSTUplift     = feeUplift(inputs.mezzanine,       funding.totalMezzFees);
-  const landFeeGSTUplift     = feeUplift(inputs.landLoan,        funding.totalLandLoanFees);
-
-  const totalSeniorFinCosts   = funding.totalSeniorInterest  + funding.totalSeniorFees  + seniorFeeGSTUplift
-                              + funding.totalSenior2Interest + funding.totalSenior2Fees + senior2FeeGSTUplift;
-  const totalLandLoanFinCosts = funding.totalLandLoanInterest + funding.totalLandLoanFees + landFeeGSTUplift;
-  const totalMezzFinCosts     = funding.totalMezzInterest + funding.totalMezzFees + mezzFeeGSTUplift;
+  // K01 — Lender GST exemption: debt facility fees are modelled as GST-free
+  // assuming the lender is an exempt financial institution (GSTA s.40-60).
+  // Non-bank lenders may charge GST-inclusive fees; when lenderIsGSTExempt
+  // === false, the engine grosses up each fee by gstRate at the per-period
+  // fee site inside engine/funding.ts. funding.totalXxxFees and the per-
+  // period cashflow row both include the uplift, so we no longer add a
+  // post-facto `feeUplift()` here.
+  //
+  // Pre-fix the uplift was added to feasibility totalCost but never deducted
+  // from bank cashflow, producing a feasibility-vs-waterfall wedge equal to
+  // (fees × gstRate) on every project with a non-exempt facility. Kew Demo
+  // Extra carried a $3.47M residual under the old asymmetry. ITC remains
+  // non-recoverable on financial supply acquisitions (GSTA s.11-15(2)(a)) —
+  // the uplift hits cash directly and is now captured at source.
+  const totalSeniorFinCosts   = funding.totalSeniorInterest  + funding.totalSeniorFees
+                              + funding.totalSenior2Interest + funding.totalSenior2Fees;
+  const totalLandLoanFinCosts = funding.totalLandLoanInterest + funding.totalLandLoanFees;
+  const totalMezzFinCosts     = funding.totalMezzInterest + funding.totalMezzFees;
 
   // Standard costs = dev costs + other std
   const standardCosts = totalDevCosts + totalOtherStd;
 
-  // totalCost excludes GST on costs (recovered as ITC) and excludes GST on revenue
-  // (deducted separately in totalProfit below, matching Excel's approach).
+  // K01 (residual) — Unrecovered ITC. gstOnCosts paid within `itcLag` periods of
+  // project end never reach a recovery period inside the cashflow horizon, so
+  // their GST stays as a real cash cost on the bank but escapes feasibility
+  // totalCost (which assumes full ITC offset). On a 36-month project with
+  // itcLag=1 this is typically $50-100K; on Kew it was a small residual on top
+  // of the K01 wedge. Adding it here closes the feas-vs-waterfall identity to
+  // ≈$0 on all profitable fixtures.
+  const itcUnrecovered = (() => {
+    if (itcLag <= 0) return 0;
+    let unrec = 0;
+    for (let k = Math.max(0, n - itcLag); k < n; k++) unrec += gstOnCosts[k] ?? 0;
+    return unrec;
+  })();
+
+  // totalCost excludes GST on costs (recovered as ITC) except the tail-period
+  // residual that the lag truncates, and excludes GST on revenue (deducted
+  // separately in totalProfit below, matching Excel's approach).
   const totalCost = totalLand + totalStampDuty + totalBuildCosts + totalContingency +
     totalSeniorFinCosts + totalLandLoanFinCosts + totalMezzFinCosts + totalOtherFin +
-    standardCosts + totalMarketing + commissions.total + totalPMFees;
+    standardCosts + totalMarketing + commissions.total + totalPMFees +
+    itcUnrecovered;
 
   const totalRentalIncome = sum(rentalInc);
   const totalOtherIncome = sum(otherInc);

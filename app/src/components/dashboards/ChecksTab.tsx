@@ -429,7 +429,12 @@ export function ChecksTab() {
   }
 
   // ── 8. CAPITAL STACK LTC ─────────────────────────────────────────────────────
-  // Informational breakdown of Senior / Mezz / Equity LTC percentages
+  // Informational breakdown of Senior / Mezz / Equity LTC percentages.
+  // K02 (Kew UAT v3): the prior label flagged values >100% as "typical for
+  // revolving facility", which read as alarmist. Reframe as neutral peak
+  // utilisation — committed limits + auto-sized headroom; ratios above 100%
+  // are expected under M4 auto-sizing because LTC numerators use peak
+  // outstanding balances rather than committed limits.
   {
     const totalLTC = cs.seniorLTC + cs.mezzLTC + cs.equityLTC;
     const stackTotal = cs.seniorAmount + cs.mezzAmount + cs.equityAmount;
@@ -438,11 +443,11 @@ export function ChecksTab() {
       id: 'capital-stack',
       category: 'Capital Stack',
       description: 'Capital stack breakdown (Senior / Mezz / Equity LTC)',
-      expected: '100.00%',
+      expected: '≥ 100.00% under M4 auto-sizing',
       actual: formatPercent(totalLTC),
       variance: formatPercent(totalLTC - 1),
       status: 'INFO',
-      notes: `Note: Senior facility is revolving — peak balance ≠ committed facility, so LTC percentages will not sum to 100%. Use as indicative breakdown only. Stack: ${formatCurrency(stackTotal)} vs TotalCost: ${formatCurrency(f.totalCost)} (Δ ${formatCurrency(variance)})`,
+      notes: `Funding sources peak utilisation: ${formatPercent(totalLTC)} (committed limits + auto-sized headroom; ratio > 100% expected under M4 auto-sizing). Stack: ${formatCurrency(stackTotal)} vs TotalCost: ${formatCurrency(f.totalCost)} (Δ ${formatCurrency(variance)}).`,
     });
   }
 

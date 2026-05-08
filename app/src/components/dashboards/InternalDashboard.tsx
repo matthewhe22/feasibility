@@ -152,7 +152,11 @@ function Table1FeasibilitySummary({
             <CompareRow label="Total Cost" current={current.totalCost} previous={p('totalCost')} bold highlight />
             <div className="h-1 bg-gray-300" />
             <CompareRow label="Total Profit" current={current.totalProfit} previous={p('totalProfit')} bold highlight />
-            <CompareRow label="Total Profit (after Loan Coupon Interest)" current={current.totalProfitAfterCoupon} previous={p('totalProfitAfterCoupon')} bold />
+            {/* K03: hide the "after Loan Coupon Interest" row when it equals
+                Total Profit (i.e. coupon = 0) to avoid visual duplication. */}
+            {Math.abs(current.totalProfit - current.totalProfitAfterCoupon) > 1 && (
+              <CompareRow label="Total Profit (after Loan Coupon Interest)" current={current.totalProfitAfterCoupon} previous={p('totalProfitAfterCoupon')} bold />
+            )}
           </>
         ) : (
           <>
@@ -174,7 +178,11 @@ function Table1FeasibilitySummary({
             <DashValue label="Total Cost" value={current.totalCost} bold highlight />
             <div className="h-1 bg-gray-300" />
             <DashValue label="Total Profit" value={current.totalProfit} bold highlight />
-            <DashValue label="Total Profit (after Loan Coupon Interest)" value={current.totalProfitAfterCoupon} bold />
+            {/* K03: hide the "after Loan Coupon Interest" row when it equals
+                Total Profit (i.e. coupon = 0) to avoid visual duplication. */}
+            {Math.abs(current.totalProfit - current.totalProfitAfterCoupon) > 1 && (
+              <DashValue label="Total Profit (after Loan Coupon Interest)" value={current.totalProfitAfterCoupon} bold />
+            )}
           </>
         )}
       </div>

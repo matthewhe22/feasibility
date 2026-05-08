@@ -144,6 +144,35 @@ function DebtSection({ title, facility, isLandLoan = false, onChange }: {
           <PercentInput label="Target LTC" value={facility.ltcTarget} onChange={v => update('ltcTarget', v)} />
           <PercentInput label="Target LVR" value={facility.lvrTarget} onChange={v => update('lvrTarget', v)} />
         </div>
+        {isLandLoan && (
+          <div className="border-t border-gray-100 pt-1.5 mt-1.5">
+            <p className="text-[10px] font-semibold text-gray-500 mb-1">Interest Payment Schedule</p>
+            <div className="flex items-center gap-2 mt-1">
+              <span
+                className="text-xs text-gray-600 w-56 shrink-0"
+                title="Monthly: pay interest every period. Quarterly: accrue 3 periods, pay at end of quarter. Cash-pay mode only — disabled when interest is capitalised (compounds every period regardless)."
+              >
+                Interest Payment Frequency
+              </span>
+              <select
+                value={(facility.interestPaymentFrequency ?? 1) === 3 ? '3' : '1'}
+                disabled={!!facility.isCapitalised}
+                onChange={e => update('interestPaymentFrequency', e.target.value === '3' ? 3 : 1)}
+                className={`text-xs border border-gray-300 rounded px-2 py-0.5 ${
+                  facility.isCapitalised ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-yellow-50'
+                }`}
+              >
+                <option value="1">Monthly</option>
+                <option value="3">Quarterly</option>
+              </select>
+            </div>
+            {facility.isCapitalised && (
+              <p className="text-[10px] text-gray-500 italic mt-1">
+                Frequency is disabled in capitalised mode — interest compounds into the balance every period regardless.
+              </p>
+            )}
+          </div>
+        )}
         <div className="border-t border-gray-100 pt-1.5 mt-1.5">
           <p className="text-[10px] font-semibold text-indigo-600 mb-1">Drawdown Sequence</p>
           {isLandLoan ? (

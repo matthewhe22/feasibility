@@ -949,6 +949,25 @@ function runFundingWaterfall(
   const snr2AllInRate = senior2.margin + senior2.bbsy;
   const mezzAllInRate = mezz.margin    + mezz.bbsy;
 
+  // K01 — Lender GST uplift on fees flows through cash. When the lender is
+  // not GST-exempt (`lenderIsGSTExempt === false`), the fee they charge is
+  // GST-inclusive and the developer cannot recover the GST as ITC (financial
+  // supply acquisitions, GSTA s.11-15(2)(a)). Pre-fix the uplift was added
+  // to `feasibility.totalCost` (via the `feeUplift()` calls in index.ts) but
+  // never deducted from `bankBalance` — so feasibility profit was lower than
+  // the waterfall sum by exactly the uplift on every project with at least
+  // one non-exempt facility (Kew Demo Extra: $3.47M wedge). Apply the uplift
+  // as cash on the same period the fee is charged, regardless of whether the
+  // fee itself is capitalised — the GST portion is always a cash outflow.
+  const _gstRate = inputs.landPurchase?.gstRate ?? 0;
+  const feeUpliftCash = (
+    facility: { lenderIsGSTExempt?: boolean } | undefined,
+    fee: number,
+  ): number => {
+    if (!facility || facility.lenderIsGSTExempt !== false || fee <= 0) return 0;
+    return fee * _gstRate;
+  };
+
   // ===== SINGLE PASS =====
   for (let i = 0; i < n; i++) {
     const days         = periods[i]?.daysInPeriod ?? 0;
@@ -984,22 +1003,29 @@ function runFundingWaterfall(
           `Land Loan starts month ${landLoan.startMonth} but Senior starts month ${senior.startMonth} — land loan is repaid same period it is drawn, so no land-loan interest accrues. Confirm the bridge period (typical pattern: land-loan precedes senior by 3-6 months).`
         );
       }
-      // R19 — Land-loan interest payment-frequency convention. Interest accrues
-      // on the previous period's closing balance (llOpenBalance), so the
-      // drawdown period itself never shows an interest charge — the open
-      // balance is $0 at the start of the drawdown period. With monthly
-      // payment frequency (=1), the first interest charge appears one period
-      // after drawdown. With quarterly (=3), the first interest appears in
-      // period drawdown+3 (the 3rd full period of accrual). This is the
-      // accepted convention but visually confusing on the cashflow row, so
-      // we surface an INFO note when the frequency > 1.
-      if ((landLoan.interestPaymentFrequency ?? 1) > 1) {
+      // R19 — Land-loan interest payment-frequency. Interest accrues on the
+      // previous period's closing balance (llOpenBalance), so the drawdown
+      // period itself never shows an interest charge — the open balance is $0
+      // at the start of the drawdown period. With monthly frequency (=1), the
+      // first interest charge appears one period after drawdown. With
+      // quarterly (=3), the first interest appears in period drawdown+3 (the
+      // 3rd full period of accrual).
+      //
+      // Kew UAT v3 K (feature): under cash-pay mode, frequency drives when
+      // accrued interest hits the bank account (every freq periods). Under
+      // capitalised mode the frequency setting is IRRELEVANT — interest
+      // compounds into the balance every period regardless. The INFO note
+      // below is therefore only emitted on cash-pay land loans.
+      const llFreqRaw = (landLoan.interestPaymentFrequency ?? 1) > 0
+        ? (landLoan.interestPaymentFrequency ?? 1) : 1;
+      if (llFreqRaw > 1 && !landLoan.isCapitalised) {
         // B08 — Prefix with [INFO] so ChecksTab's prefix-aware routing renders
-        // this as INFO not WARN. The text after the prefix is unchanged.
-        // ChecksTab also recognises the existing [INFO] auto-size messages
-        // emitted from the funding consolidator.
+        // this as INFO not WARN.
+        const cadenceLabel = llFreqRaw === 3
+          ? 'Quarterly land-loan interest schedule active'
+          : `Land-loan interest schedule = every ${llFreqRaw} periods`;
         _fundingWarnings.push(
-          `[INFO] Land Loan interest payment frequency = ${landLoan.interestPaymentFrequency} months. Interest accrues monthly on the prior closing balance but is recognised in the cashflow only every ${landLoan.interestPaymentFrequency} periods (next charge: period ${landLoan.startMonth + landLoan.interestPaymentFrequency}). The drawdown period itself shows zero interest because the opening balance is zero.`
+          `[INFO] ${cadenceLabel} (cash-pay mode). Interest accrues monthly on the prior closing balance and is paid in cash at the end of each ${llFreqRaw}-period window — first cash charge: period ${landLoan.startMonth + llFreqRaw}.`
         );
       }
       llDrawdowns[i]     = landLoan.facilityLimit;
@@ -1010,6 +1036,15 @@ function runFundingWaterfall(
         llFees[i]      = estFee;
         totalLandFees += estFee;
         bankBalance   -= estFee;
+        // K01 — GST uplift on non-exempt lender fees (always cash). Also
+        // inflate the per-period fee field and total so feasibility totalCost
+        // and cashflow netCashflow share a single source of truth.
+        const upliftAmt = feeUpliftCash(landLoan, estFee);
+        if (upliftAmt > 0) {
+          bankBalance   -= upliftAmt;
+          llFees[i]     += upliftAmt;
+          totalLandFees += upliftAmt;
+        }
       }
     }
 
@@ -1027,8 +1062,14 @@ function runFundingWaterfall(
       llAccruedInterest += accrued;
 
       const monthsSinceLLStart = i - llStartIdx;
-      const freq = landLoan.interestPaymentFrequency > 0 ? landLoan.interestPaymentFrequency : 1;
-      if ((monthsSinceLLStart + 1) % freq === 0) {
+      // Kew UAT v3 K — frequency only applies in cash-pay mode. Capitalised
+      // land loans compound monthly regardless of the configured frequency
+      // (the freq setting is exposed only for cash-pay schedules; the UI
+      // disables the field when isCapitalised=true).
+      const llFreq = landLoan.isCapitalised
+        ? 1
+        : (landLoan.interestPaymentFrequency > 0 ? landLoan.interestPaymentFrequency : 1);
+      if ((monthsSinceLLStart + 1) % llFreq === 0) {
         llInterest[i]      = llAccruedInterest;
         totalLandInterest += llAccruedInterest;
         if (landLoan.isCapitalised) {
@@ -1039,7 +1080,10 @@ function runFundingWaterfall(
           // creates new debt rather than draining cash.
           llDrawdowns[i] += llAccruedInterest;
         } else {
-          // Cash-pay (default): direct outflow.
+          // Cash-pay: direct outflow at end of every llFreq-period window.
+          // For freq=1 this fires every period; for freq=3 the cashflow shows
+          // zero interest in periods 1,2,4,5,7,8,... and 3× monthly accrual
+          // in periods 3,6,9,...
           bankBalance -= llAccruedInterest;
         }
         llAccruedInterest = 0;
@@ -1154,6 +1198,13 @@ function runFundingWaterfall(
         } else {
           bankBalance -= periodFees;
         }
+        // K01 — GST uplift on non-exempt senior fees (always cash, never capitalised).
+        const upliftAmt = feeUpliftCash(senior, periodFees);
+        if (upliftAmt > 0) {
+          bankBalance     -= upliftAmt;
+          snrFees[i]      += upliftAmt;
+          totalSeniorFees += upliftAmt;
+        }
       }
     }
 
@@ -1195,6 +1246,13 @@ function runFundingWaterfall(
         } else {
           bankBalance -= periodFees;
         }
+        // K01 — GST uplift on non-exempt Senior #2 fees (always cash).
+        const upliftAmt = feeUpliftCash(senior2, periodFees);
+        if (upliftAmt > 0) {
+          bankBalance      -= upliftAmt;
+          snr2Fees[i]      += upliftAmt;
+          totalSenior2Fees += upliftAmt;
+        }
       }
     }
 
@@ -1233,6 +1291,13 @@ function runFundingWaterfall(
         } else {
           bankBalance -= mzLineFee;
         }
+        // K01 — GST uplift on non-exempt mezz line fee (always cash).
+        const upliftAmt = feeUpliftCash(mezz, mzLineFee);
+        if (upliftAmt > 0) {
+          bankBalance   -= upliftAmt;
+          mzFees[i]     += upliftAmt;
+          totalMezzFees += upliftAmt;
+        }
       }
     }
     if (hasMezz && i === mezzStartIdx) {
@@ -1250,6 +1315,13 @@ function runFundingWaterfall(
           }
         } else {
           bankBalance -= mzEstFee;
+        }
+        // K01 — GST uplift on non-exempt mezz establishment fee (always cash).
+        const upliftAmt = feeUpliftCash(mezz, mzEstFee);
+        if (upliftAmt > 0) {
+          bankBalance   -= upliftAmt;
+          mzFees[i]     += upliftAmt;
+          totalMezzFees += upliftAmt;
         }
       }
     }
