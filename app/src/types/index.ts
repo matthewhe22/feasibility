@@ -718,6 +718,22 @@ export interface DashboardData {
   solver?: SolverDiagnostics;
   /** Per-line-item cost variance: budget vs actuals, cost-to-date, cost-to-complete. */
   costVariance: CostLineVariance[];
+  /**
+   * V8 — Minimum-equity cross-check telemetry from the converged final solve.
+   * Single source of truth for the [FUNDING] warning + Checks-tab "Equity meets
+   * minimum requirement" row. The two consumers MUST read these numbers
+   * verbatim — recomputing the basis from `feasibility.totalCost` (input-side
+   * ex-GST rollup) disagrees with the engine's cash-basis-incl-GST computation
+   * on any GST-bearing project. When `inputs.minEquityRequirement.value === 0`,
+   * `required: 0` and `shortfall: 0` (check disabled).
+   */
+  minEquityCheck: {
+    required: number;
+    actual: number;
+    basisAmount: number;
+    basisName: 'TDC' | 'TDC + financing costs';
+    shortfall: number;
+  };
 }
 
 /** Budget control metrics for a single cost line item. */
