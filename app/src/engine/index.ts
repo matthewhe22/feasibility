@@ -268,7 +268,11 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     // double-counting: GST on the deposit is recognised at exchange (gstOnDeposits),
     // so settlement-period GST should only cover the remaining (1 − depositPct) portion.
     const hasPresale = item.preSaleExchangeMonth > 0 && item.preSaleSpan > 0;
-    const configuredPct = inputs.sellingCosts[inputs.grvItems.indexOf(item)]?.depositPercent;
+    // Bug 6 (Kew UAT): broadcast single sellingCost row across all grvItems
+    // — same fix as revenue.ts/pickSellingCost.
+    const itemIdx = inputs.grvItems.indexOf(item);
+    const sc = inputs.sellingCosts.length === 1 ? inputs.sellingCosts[0] : inputs.sellingCosts[itemIdx];
+    const configuredPct = sc?.depositPercent;
     const depositPct = hasPresale && (typeof configuredPct === 'number' && configuredPct > 0)
       ? configuredPct
       : (hasPresale ? 0.1 : 0);

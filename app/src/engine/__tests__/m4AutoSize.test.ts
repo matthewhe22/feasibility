@@ -1,16 +1,16 @@
 /**
- * Regression test — M4: Auto-size senior/mezz toward LTC/LVR caps when
- * the user-configured facilityLimit is below covenants.
+ * Regression test — M4 / Bug 2 (Kew UAT): senior/mezz peak respects
+ * min(LTC×TDC, LVR×NRV, facilityLimit).
  *
- * Invariants:
- *   • Senior peak balance ≤ min(LTC×totalCost, LVR×nrv) — covenant caps
- *     are NEVER breached.
- *   • When facilityLimit < covenant cap AND project is underfunded, the
- *     engine grows senior past facilityLimit (within covenant) and
- *     surfaces an [INFO] Auto-sized message.
+ * Post-Bug-2 invariants (semantics changed in `fix/kew-uat-bugs`):
+ *   • Senior peak balance ≤ min(LTC×totalCost, LVR×nrv, facilityLimit) —
+ *     ALL three caps are NEVER breached. The user-configured facilityLimit
+ *     is now a HARD cap (pre-fix it was advisory: auto-size could grow
+ *     senior past facilityLimit up to the covenant ceiling).
+ *   • When facilityLimit = 0 (not set), only covenants bind, so the
+ *     auto-size mechanic still grows senior up toward LTC/LVR.
+ *   • When facilityLimit > 0, senior peak respects facilityLimit.
  *   • Same for mezz.
- *   • When facilityLimit ≥ covenant cap, senior peak ≤ covenant cap (no
- *     auto-size message).
  */
 import { runCalculations } from '../index';
 import type { AdminConfig, MainInputs } from '../../types';
@@ -66,22 +66,36 @@ function fixture(seniorFacility: number, ltcTarget: number, equity: number = 1_0
   };
 }
 
-// Case 1: facility $5M, LTC 0.7 (covenant cap ~$9.1M). Costs ~$13M. With small
-// equity ($1M), project needs $12M+ debt — should auto-size senior from $5M
-// up toward $9.1M and surface the [INFO] message.
+// Case 1: facilityLimit very high ($100M, well above covenants) + LTC 0.7
+// (covenant cap ~$9.1M). Covenants bind, not facilityLimit. Auto-size grows
+// senior up to the covenant ceiling.
+//
+// NOTE: facilityLimit=0 cannot be used here — `hasSenior` gates senior
+// drawing on facilityLimit > 0. To exercise covenant-binding, the user must
+// configure a facilityLimit; we set it well above covenants so covenants
+// bind first.
 {
-  const r = runCalculations(baseAdmin, fixture(5_000_000, 0.7));
+  const r = runCalculations(baseAdmin, fixture(100_000_000, 0.7));
   const cf = r.cashflows;
   const peakSnr = Math.max(...cf.map(c => c.seniorBalance ?? 0));
-  assert(peakSnr > 5_000_000 + 1,
-    `M4 — senior auto-sized past requested facilityLimit ($5M); peak=$${Math.round(peakSnr).toLocaleString()}`);
   // covenant cap = LTC × tdc; tdc ≈ totalCost. Use 0.7 × ~$13M ≈ $9.1M as ceiling.
   // Cap-int can push balance ~5% above the cap (pre-existing engine behaviour).
   assert(peakSnr <= r.feasibility.totalCost * 0.7 * 1.05 + 100,
     `M4 — senior peak respects LTC covenant cap (within 5% cap-int slack); got $${Math.round(peakSnr).toLocaleString()}`);
-  const warns = (r.warnings ?? []).join(' | ');
-  assert(/Auto-sized Senior/i.test(warns),
-    `M4 — '[INFO] Auto-sized Senior' warning emitted; warnings="${warns.slice(0, 240)}"`);
+  assert(peakSnr > 5_000_000,
+    `M4 — senior grew above $5M up toward covenant cap; peak=$${Math.round(peakSnr).toLocaleString()}`);
+}
+
+// Case 1b (Bug 2): facilityLimit=$5M (hard cap) + LTC 0.7 (covenant ~$9.1M).
+// Post-Bug-2 senior peak MUST stay within the user-configured facilityLimit.
+// Pre-fix the engine grew senior to ~$9.1M (auto-size past facilityLimit);
+// now the equity backstop fires when senior is at facilityLimit.
+{
+  const r = runCalculations(baseAdmin, fixture(5_000_000, 0.7));
+  const cf = r.cashflows;
+  const peakSnr = Math.max(...cf.map(c => c.seniorBalance ?? 0));
+  assert(peakSnr <= 5_000_000 * 1.05 + 100,
+    `Bug 2 — facilityLimit hard caps senior peak; got $${Math.round(peakSnr).toLocaleString()} (cap $5M, 5% cap-int slack)`);
 }
 
 // Case 2: facility $20M, LTC 0.7 (covenant cap ~$9.1M, facility well above).
@@ -97,17 +111,16 @@ function fixture(seniorFacility: number, ltcTarget: number, equity: number = 1_0
     `M4 — no auto-size message when facility > covenant cap`);
 }
 
-// Case 3: a lender-binding facility (LTC large, but facility small) → auto-size hits the gap.
-// Same as Case 1 but explicit assertion.
+// Case 3: facilityLimit very high ($100M) + LTC 0.85 → LVR ≈ $11.7M binds.
 {
-  const r = runCalculations(baseAdmin, fixture(5_000_000, 0.85));
+  const r = runCalculations(baseAdmin, fixture(100_000_000, 0.85));
   const cf = r.cashflows;
   const peakSnr = Math.max(...cf.map(c => c.seniorBalance ?? 0));
-  // covenant LTC×$13M ≈ $11M; LVR×$16M ≈ $10.4M. Cap ≈ $10.4M.
+  // covenant LTC×$13M ≈ $11M; LVR×$18M ≈ $11.7M. The min binds.
   assert(peakSnr <= r.feasibility.totalCost * 0.85 * 1.05 + 100,
-    `M4 — senior peak respects LTC covenant cap (LTC 0.85, LVR 0.65, ±5% cap-int slack); got $${Math.round(peakSnr).toLocaleString()}`);
+    `M4 — senior peak respects LTC covenant cap (LTC 0.85, ±5% cap-int slack); got $${Math.round(peakSnr).toLocaleString()}`);
   assert(peakSnr > 5_000_000 + 1,
-    `M4 — senior auto-sized when facility ($5M) < covenant cap`);
+    `M4 — senior auto-sized up to covenants when facilityLimit far above covenant cap`);
 }
 
 console.log(`\n${'═'.repeat(72)}`);

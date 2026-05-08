@@ -191,16 +191,30 @@ export function ChecksTab() {
       status: near(cfNetGST, f.gstNet, 1) ? 'PASS' : 'FAIL',
       notes: 'Net GST = GST on Revenue − GST on Costs (input tax credits).',
     });
-    // Warn if GST rate is zero or GST on revenue is unexpectedly zero
+    // Bug 4 (Kew UAT): GST rate = 0 is silently wrong on Australian projects.
+    // Bump to FAIL when the project has GST-bearing items so the user can't
+    // miss it. WARN-level when no GST-bearing items exist (legitimate non-AU
+    // / zero-rated treatment). Either way, prepend the standout 🚨 marker so
+    // the row sticks out at the top of the GST category.
     if (inputs.landPurchase.gstRate === 0) {
+      const hasGstBearingItems =
+        inputs.grvItems.some(g => g.gstIncluded) ||
+        inputs.constructionCosts.some(c => c.addGST) ||
+        inputs.developmentCosts.some(c => c.addGST) ||
+        inputs.marketingCosts.some(c => c.addGST) ||
+        inputs.otherStandardCosts.some(c => c.addGST);
       checks.push({
         id: 'gst-rate-zero',
         category: 'GST',
-        description: 'GST rate is 0% — check if this is intentional',
-        expected: '>0%',
+        description: hasGstBearingItems
+          ? '🚨 GST rate is 0% — but project has GST-bearing items (Australian GST default is 10%)'
+          : 'GST rate is 0% — confirm this is intentional (non-AU / zero-rated treatment)',
+        expected: '0.10 (Australian GST)',
         actual: '0%',
-        status: 'WARN',
-        notes: 'Set gstRate in Land Purchase inputs. Standard Australian GST rate is 10%.',
+        status: hasGstBearingItems ? 'FAIL' : 'WARN',
+        notes: hasGstBearingItems
+          ? 'Set gstRate to 0.10 in the Land Purchase inputs (Section 1.1). Standard Australian GST is 10%. The engine cannot recover ITCs or recognise GST output at 0% — your cashflow and net-GST checks will be wrong.'
+          : 'Set gstRate in Land Purchase inputs. Standard Australian GST rate is 10%. Leave at 0% only if the project is genuinely outside Australian GST (export, financial supply, etc).',
       });
     }
     // B09 — Suppress the consequential "GST on revenue / costs is $0" warnings

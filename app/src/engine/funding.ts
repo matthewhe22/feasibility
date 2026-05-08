@@ -539,8 +539,23 @@ function computeMinEquityCheck(
   const basisName: 'TDC' | 'TDC + financing costs' =
     useInclFin ? 'TDC + financing costs' : 'TDC';
   const actual = result.totalEquityInjected;
+  // Bug 3 (Kew UAT): when mode='percent', `value` is a FRACTION in [0, 1]
+  // (e.g. 0.10 for 10%). Pre-fix the engine multiplied the raw value × basisAmount,
+  // so a user entering `10` (meaning 10%) was treated as 1000% (10× TDC).
+  // The v9 migration heals legacy stored values > 1; this is a belt-and-braces
+  // defensive console warning if anything still slips through.
+  if (minEq && minEq.mode === 'percent' && Number.isFinite(minEq.value) && minEq.value > 1) {
+    console.warn(
+      `[minEquityRequirement] value=${minEq.value} > 1 with mode='percent'. ` +
+      `Expected a fraction in [0, 1] (e.g. 0.10 for 10%). Treating as percent literal — ` +
+      `dividing by 100. Update your input or run the v9 migration.`,
+    );
+  }
+  const normalisedValue = (minEq && minEq.mode === 'percent' && Number.isFinite(minEq.value) && minEq.value > 1)
+    ? minEq.value / 100
+    : (minEq?.value ?? 0);
   const required = (minEq && Number.isFinite(minEq.value) && minEq.value > 0)
-    ? (minEq.mode === 'percent' ? minEq.value * basisAmount : minEq.value)
+    ? (minEq.mode === 'percent' ? normalisedValue * basisAmount : minEq.value)
     : 0;
   // $1 tolerance to mirror the warning emit branch.
   const shortfall = (required > 0 && actual + 1 < required) ? required - actual : 0;
@@ -777,13 +792,18 @@ function runFundingWaterfall(
   const gstOnResidential = inputs.grvItems
     .filter(g => g.gstIncluded)
     .reduce((s, g) => s + g.currentSalePrice * inputs.landPurchase.gstRate / (1 + inputs.landPurchase.gstRate), 0);
+  // Bug 6 (Kew UAT): broadcast 1 sellingCost row across all grvItems for the
+  // NRV calc, matching the engine-wide pickSellingCost behaviour. Pre-fix the
+  // NRV understated commission deductions when sellingCosts.length === 1.
+  const pickSC = (idx: number) =>
+    inputs.sellingCosts.length === 1 ? inputs.sellingCosts[0] : inputs.sellingCosts[idx];
   const backEndSelling = inputs.grvItems.reduce((s, g, idx) => {
-    const sc = inputs.sellingCosts[idx];
+    const sc = pickSC(idx);
     if (!sc) return s;
     return s + g.currentSalePrice * sc.salesCommission * (1 - sc.preCommissionPercent);
   }, 0);
   const frontEndSelling = inputs.grvItems.reduce((s, g, idx) => {
-    const sc = inputs.sellingCosts[idx];
+    const sc = pickSC(idx);
     if (!sc) return s;
     return s + g.currentSalePrice * sc.salesCommission * sc.preCommissionPercent;
   }, 0);
@@ -799,24 +819,32 @@ function runFundingWaterfall(
   // facilityLimit. LTC/LVR caps are NEVER breached.
   const seniorLtcLimit  = senior.ltcTarget  > 0 ? tdc * senior.ltcTarget  : Infinity;
   const seniorLvrLimit  = senior.lvrTarget  > 0 ? nrv * senior.lvrTarget  : Infinity;
+  const seniorFacilityHardLimit = senior.facilityLimit > 0 ? senior.facilityLimit : Infinity;
   const seniorCovenantCap = Math.min(seniorLtcLimit, seniorLvrLimit);
   const seniorRequestedLimit = senior.facilityLimit > 0 ? senior.facilityLimit : seniorCovenantCap;
   const seniorLimit     = Math.min(seniorRequestedLimit, seniorCovenantCap);
-  // Auto-size cap (covenant-bound) — the engine may grow senior up to this
-  // ceiling if the requested facilityLimit is hit and there's still cost gap.
-  const seniorAutoSizeCap = seniorCovenantCap;
+  // Auto-size cap — Bug 2 (Kew UAT): facilityLimit MUST act as a hard ceiling
+  // alongside LTC and LVR, so that senior peak ≤ min(LTC×TDC, LVR×NRV, facilityLimit).
+  // Pre-fix, seniorAutoSizeCap = covenantCap, which let auto-size grow senior past
+  // user-configured facilityLimit when covenants had headroom — surfaced as a
+  // facilityLimitOvershoot warning but did not bind. Now the user-configured
+  // facilityLimit binds and the equity backstop fires when all three caps are hit.
+  const seniorAutoSizeCap = Math.min(seniorCovenantCap, seniorFacilityHardLimit);
 
   const senior2LtcLimit = senior2.ltcTarget > 0 ? tdc * senior2.ltcTarget : Infinity;
   const senior2LvrLimit = senior2.lvrTarget > 0 ? nrv * senior2.lvrTarget : Infinity;
+  // senior2 hard cap not currently exposed (senior2Limit serves the role).
   const senior2CovenantCap = Math.min(senior2LtcLimit, senior2LvrLimit);
   const senior2Limit    = Math.min(senior2.facilityLimit > 0 ? senior2.facilityLimit : senior2CovenantCap, senior2CovenantCap);
+  // (senior2 doesn't currently use a separate auto-size cap; senior2Limit serves that role.)
 
   const mezzLtcLimit    = mezz.ltcTarget    > 0 ? tdc * mezz.ltcTarget    : Infinity;
   const mezzLvrLimit    = mezz.lvrTarget    > 0 ? nrv * mezz.lvrTarget    : Infinity;
+  const mezzFacilityHardLimit = mezz.facilityLimit > 0 ? mezz.facilityLimit : Infinity;
   const mezzCovenantCap = Math.min(mezzLtcLimit, mezzLvrLimit);
   const mezzRequestedLimit = mezz.facilityLimit > 0 ? mezz.facilityLimit : mezzCovenantCap;
   const mezzLimit       = Math.min(mezzRequestedLimit, mezzCovenantCap);
-  const mezzAutoSizeCap = mezzCovenantCap;
+  const mezzAutoSizeCap = Math.min(mezzCovenantCap, mezzFacilityHardLimit);
 
   // ===== Equity caps (per entity) =====
   const totalCostsExcFin  = sum(monthlyCostsExcFinance);

@@ -277,6 +277,10 @@ function MinEquityRequirementCard({ value, onChange }: {
         converged cash equity (developer + JV draws) falls below the required amount.
         Most term sheets reference TDC including capitalised finance costs.
       </p>
+      <p className="text-[10px] text-purple-700 mt-1 font-semibold" title="Bug 3 fix: percent mode is a fraction in [0, 1] — enter 0.10 for 10%. The v9 migration heals legacy values > 1.">
+        ⓘ Percent mode = fraction in [0,&nbsp;1]. Enter <code>0.10</code> for <strong>10%</strong>, not <code>10</code>.
+        Values &gt; 1 are healed by the v9 migration (<code>10</code> → <code>0.10</code>).
+      </p>
     </div>
   );
 }

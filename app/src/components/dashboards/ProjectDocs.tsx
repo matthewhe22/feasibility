@@ -591,6 +591,17 @@ export function ProjectDocs() {
               maximum) to bound drawdowns; the floor is informational so you can reconcile against your
               term sheet&apos;s sponsor-equity covenant.
             </p>
+            <p className="mt-2">
+              <strong>v9 (Kew UAT Bug 3) — value convention.</strong> When <code>mode === 'percent'</code>,
+              <code> value</code> is a <strong>fraction in [0, 1]</strong> — enter <code>0.10</code> for
+              <strong> 10%</strong>, not <code>10</code>. Pre-v9 the engine multiplied the raw value by
+              the basis amount, so a user entering <code>10</code> (intending 10%) saw the engine demand
+              1000% × TDC (e.g. $1.74B required equity on a $174M project). The v9 schema migration heals
+              legacy stored values &gt; 1 in percent mode by dividing by 100 (<code>10</code> →
+              <code> 0.10</code>); amount-mode values are never touched, and values already in [0, 1] are
+              passed through unchanged (the migration is idempotent). The engine also logs a defensive
+              <code> console.warn</code> if any unhealed <code>value &gt; 1</code> reaches the solver.
+            </p>
           </SubSection>
         </Section>
 

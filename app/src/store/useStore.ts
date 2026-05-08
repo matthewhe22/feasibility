@@ -206,9 +206,13 @@ function createDebouncedLocalStorage(delayMs: number): StateStorage {
  *        `{ mode: 'percent', value: 0, basis: 'tdc-incl-finance-costs' }`
  *        which DISABLES the check (value=0). All v7 fixtures and saved
  *        projects therefore pass through with no behavioural change.
+ *   v9 — Kew-UAT Bug 3: heal `minEquityRequirement.value > 1` when
+ *        mode='percent' by dividing by 100 (legacy users typed `10`
+ *        intending 10%; engine read it as 10× = 1000%). Idempotent on
+ *        already-fractional values.
  *
- * The function is idempotent on each version: running v8 migration on already-
- * migrated v8 data produces no change (the existence checks short-circuit).
+ * The function is idempotent on each version: running v9 migration on already-
+ * migrated v9 data produces no change (the existence checks short-circuit).
  */
 export function migratePersistedState(persisted: unknown, version: number): unknown {
   const p = persisted as Record<string, unknown> | null;
@@ -309,6 +313,24 @@ export function migratePersistedState(persisted: unknown, version: number): unkn
       if (typeof cur.basis !== 'string' || !allowedBasis.has(cur.basis as string)) cur.basis = 'tdc-incl-finance-costs';
     }
   }
+  // v9 — Bug 3 (Kew UAT): standardise `minEquityRequirement.value` semantic to
+  // a fraction in [0, 1] when mode='percent'. Pre-v9 the engine multiplied the
+  // raw value by basisAmount, so a user entering `10` (intending 10%) was
+  // treated as 1000% × TDC ≈ $1.74B required equity. v9 heals legacy stored
+  // values > 1 by dividing by 100 (10 → 0.10).
+  //
+  // CONSERVATIVE: only divides when (a) mode === 'percent' AND (b) value > 1.
+  // Values in [0, 1] are left alone (already fraction-shaped). Amounts (mode
+  // === 'amount') are dollar amounts, never touched. Idempotent on v9 — a
+  // value already in [0, 1] in percent mode short-circuits.
+  if (version < 9 && p.inputs && typeof p.inputs === 'object') {
+    const inputs = p.inputs as Record<string, unknown>;
+    const cur = inputs.minEquityRequirement as Record<string, unknown> | undefined;
+    if (cur && typeof cur === 'object' && cur.mode === 'percent' &&
+        typeof cur.value === 'number' && Number.isFinite(cur.value) && cur.value > 1) {
+      cur.value = cur.value / 100;
+    }
+  }
   return p;
 }
 
@@ -354,7 +376,7 @@ export const useStore = create<AppState>()(
       //      when missing/undefined. PR-D (PR #31) added it as a configurable
       //      field but no migration step — v4 users hit the engine with
       //      undefined and the funding solver branches on this value.
-      version: 8,
+      version: 9,
       migrate: migratePersistedState,
       // Debounce localStorage writes to coalesce rapid keystrokes into a single
       // serialization+write. 250 ms is imperceptible to users but eliminates
