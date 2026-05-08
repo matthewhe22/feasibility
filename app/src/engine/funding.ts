@@ -949,6 +949,25 @@ function runFundingWaterfall(
   const snr2AllInRate = senior2.margin + senior2.bbsy;
   const mezzAllInRate = mezz.margin    + mezz.bbsy;
 
+  // K01 — Lender GST uplift on fees flows through cash. When the lender is
+  // not GST-exempt (`lenderIsGSTExempt === false`), the fee they charge is
+  // GST-inclusive and the developer cannot recover the GST as ITC (financial
+  // supply acquisitions, GSTA s.11-15(2)(a)). Pre-fix the uplift was added
+  // to `feasibility.totalCost` (via the `feeUplift()` calls in index.ts) but
+  // never deducted from `bankBalance` — so feasibility profit was lower than
+  // the waterfall sum by exactly the uplift on every project with at least
+  // one non-exempt facility (Kew Demo Extra: $3.47M wedge). Apply the uplift
+  // as cash on the same period the fee is charged, regardless of whether the
+  // fee itself is capitalised — the GST portion is always a cash outflow.
+  const _gstRate = inputs.landPurchase?.gstRate ?? 0;
+  const feeUpliftCash = (
+    facility: { lenderIsGSTExempt?: boolean } | undefined,
+    fee: number,
+  ): number => {
+    if (!facility || facility.lenderIsGSTExempt !== false || fee <= 0) return 0;
+    return fee * _gstRate;
+  };
+
   // ===== SINGLE PASS =====
   for (let i = 0; i < n; i++) {
     const days         = periods[i]?.daysInPeriod ?? 0;
@@ -1010,6 +1029,15 @@ function runFundingWaterfall(
         llFees[i]      = estFee;
         totalLandFees += estFee;
         bankBalance   -= estFee;
+        // K01 — GST uplift on non-exempt lender fees (always cash). Also
+        // inflate the per-period fee field and total so feasibility totalCost
+        // and cashflow netCashflow share a single source of truth.
+        const upliftAmt = feeUpliftCash(landLoan, estFee);
+        if (upliftAmt > 0) {
+          bankBalance   -= upliftAmt;
+          llFees[i]     += upliftAmt;
+          totalLandFees += upliftAmt;
+        }
       }
     }
 
@@ -1154,6 +1182,13 @@ function runFundingWaterfall(
         } else {
           bankBalance -= periodFees;
         }
+        // K01 — GST uplift on non-exempt senior fees (always cash, never capitalised).
+        const upliftAmt = feeUpliftCash(senior, periodFees);
+        if (upliftAmt > 0) {
+          bankBalance     -= upliftAmt;
+          snrFees[i]      += upliftAmt;
+          totalSeniorFees += upliftAmt;
+        }
       }
     }
 
@@ -1195,6 +1230,13 @@ function runFundingWaterfall(
         } else {
           bankBalance -= periodFees;
         }
+        // K01 — GST uplift on non-exempt Senior #2 fees (always cash).
+        const upliftAmt = feeUpliftCash(senior2, periodFees);
+        if (upliftAmt > 0) {
+          bankBalance      -= upliftAmt;
+          snr2Fees[i]      += upliftAmt;
+          totalSenior2Fees += upliftAmt;
+        }
       }
     }
 
@@ -1233,6 +1275,13 @@ function runFundingWaterfall(
         } else {
           bankBalance -= mzLineFee;
         }
+        // K01 — GST uplift on non-exempt mezz line fee (always cash).
+        const upliftAmt = feeUpliftCash(mezz, mzLineFee);
+        if (upliftAmt > 0) {
+          bankBalance   -= upliftAmt;
+          mzFees[i]     += upliftAmt;
+          totalMezzFees += upliftAmt;
+        }
       }
     }
     if (hasMezz && i === mezzStartIdx) {
@@ -1250,6 +1299,13 @@ function runFundingWaterfall(
           }
         } else {
           bankBalance -= mzEstFee;
+        }
+        // K01 — GST uplift on non-exempt mezz establishment fee (always cash).
+        const upliftAmt = feeUpliftCash(mezz, mzEstFee);
+        if (upliftAmt > 0) {
+          bankBalance   -= upliftAmt;
+          mzFees[i]     += upliftAmt;
+          totalMezzFees += upliftAmt;
         }
       }
     }
