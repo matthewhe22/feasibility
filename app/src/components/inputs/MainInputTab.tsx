@@ -430,7 +430,7 @@ function CostLineTable({ items, onChange, defaultCostType }: {
                 </td>
                 <td className="px-1 py-0.5">
                   <input
-                    type="text" value={item.baseRate.toLocaleString('en-AU')}
+                    type="text" value={(item.baseRate ?? 0).toLocaleString("en-AU")}
                     onChange={e => updateItem(idx, 'baseRate', parseFloat(e.target.value.replace(/[^0-9.-]/g, '')) || 0)}
                     className="w-full text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
                   />
@@ -558,7 +558,7 @@ function GRVTable({ items, onChange }: {
               <td className="px-2 py-0.5 text-[10px] text-gray-500">{item.revenueType}</td>
               <td className="px-1 py-0.5">
                 <input
-                  type="text" value={item.currentSalePrice.toLocaleString('en-AU')}
+                  type="text" value={(item.currentSalePrice ?? 0).toLocaleString("en-AU")}
                   onChange={e => updateItem(idx, 'currentSalePrice', parseFloat(e.target.value.replace(/[^0-9.-]/g, '')) || 0)}
                   className="w-full text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
                 />
@@ -1154,7 +1154,8 @@ export function MainInputTab() {
                 if (!confirm('Clear all General inputs?')) return;
                 setInputs({
                   preliminary: { ...inputs.preliminary, projectLots: 0, projectGFA: 0, siteArea: 0, projectStartMonth: 0, projectSpanMonths: 0 },
-                  landPurchase: { ...inputs.landPurchase, gstRate: 0 },
+                  // Bug 4 (Kew UAT): Clear All now resets gstRate to the Australian default (10%) rather than 0% so new projects don't silently miss GST output/ITC recognition.
+                  landPurchase: { ...inputs.landPurchase, gstRate: 0.10 },
                 });
               }}
               className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded"

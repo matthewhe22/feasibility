@@ -12,8 +12,10 @@ import {
   listProjects,
   deleteProject,
   duplicateProject,
+  saveProjectList,
   type ProjectRecord,
 } from '../db/projectDb';
+import { validateProjectName } from '../admin/projectSetupValidator';
 import { exportToExcel } from '../utils/exportToExcel';
 import { useStore, migratePersistedState } from '../store/useStore';
 
@@ -45,7 +47,7 @@ function composeName(projectName: string, versionName: string): string {
 }
 
 export function ProjectManager({ onClose, onLoad }: Props) {
-  const { admin, inputs, dashboardData, setAdmin, replaceAdmin, replaceInputs, setDashboardData, currentProjectId, setCurrentProjectId, projectList } = useStore();
+  const { admin, inputs, dashboardData, setAdmin, replaceAdmin, replaceInputs, setDashboardData, currentProjectId, setCurrentProjectId, projectList, setProjectList } = useStore();
 
   // R21 — distinguish "loading" (null) from "empty list" (empty array). Without
   // this, the count flickers to "(0)" while the IndexedDB read is in flight.
@@ -56,6 +58,12 @@ export function ProjectManager({ onClose, onLoad }: Props) {
   const setCurrentId = setCurrentProjectId;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  // Bug 5 (Kew UAT): main-app free-text save. When the user wants to save under
+  // a project name that's not yet in the master list, they can toggle this on
+  // and type a new name. We attempt to publish the new name to the master list
+  // via saveProjectList (best-effort — gracefully handled if RLS denies);
+  // either way the local save succeeds with the new name.
+  const [useNewName, setUseNewName] = useState(false);
 
   const refresh = useCallback(async () => {
     setProjects(await listProjects());
@@ -68,9 +76,26 @@ export function ProjectManager({ onClose, onLoad }: Props) {
   async function handleSave() {
     const projectName = saveProjectName.trim();
     const versionName = saveVersionName.trim();
-    if (!projectName) { setMsg('Please select a project name.'); return; }
-    if (projectList.length > 0 && !projectList.includes(projectName)) {
-      setMsg('Selected project is not in the master list. Add it via the Inputs tab first.');
+    if (!projectName) { setMsg('Please select or enter a project name.'); return; }
+    // Bug 5 (Kew UAT): if user toggled "New name", validate + try to publish to
+    // master list. Validation mirrors the admin Project Setup page (50-char
+    // limit, no duplicates, non-empty). Publishing is best-effort — RLS may
+    // deny non-admin writes, in which case the local save still proceeds and
+    // the user is told the name was saved locally only.
+    if (useNewName && projectList.length > 0 && !projectList.includes(projectName)) {
+      const err = validateProjectName(projectName, projectList);
+      if (err) { setMsg(err); return; }
+      try {
+        const next = Array.from(new Set([...projectList, projectName])).sort((a, b) => a.localeCompare(b));
+        await saveProjectList(next);
+        setProjectList(next);
+      } catch (e) {
+        // Don't abort — local save still works; the project just won't appear
+        // in everyone else's dropdown until an admin adds it.
+        console.warn('Bug 5 (Kew UAT): could not publish new name to master list (likely RLS) — saving locally only:', e);
+      }
+    } else if (projectList.length > 0 && !projectList.includes(projectName)) {
+      setMsg('Selected project is not in the master list. Toggle "New name" to add it, or pick from the dropdown.');
       return;
     }
     if (!versionName) { setMsg('Please enter a version name.'); return; }
@@ -221,8 +246,27 @@ export function ProjectManager({ onClose, onLoad }: Props) {
             </h3>
             <div className="grid grid-cols-2 gap-2 mb-2">
               <div>
-                <label className="block text-[11px] text-gray-500 mb-0.5">Project name <span className="text-red-500">*</span></label>
-                {projectList.length > 0 ? (
+                <div className="flex items-center justify-between mb-0.5">
+                  <label className="block text-[11px] text-gray-500">Project name <span className="text-red-500">*</span></label>
+                  {projectList.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUseNewName(v => {
+                          const next = !v;
+                          if (next) setSaveProjectName('');
+                          return next;
+                        });
+                        setMsg('');
+                      }}
+                      className="text-[10px] text-blue-600 hover:text-blue-800 underline"
+                      title="Bug 5 (Kew UAT): save under a new project name. The new name is published to the master list (best-effort — admin RLS may apply)."
+                    >
+                      {useNewName ? '↩ Pick from list' : '+ New name'}
+                    </button>
+                  )}
+                </div>
+                {projectList.length > 0 && !useNewName ? (
                   <select
                     className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     value={projectList.includes(saveProjectName) ? saveProjectName : ''}
@@ -233,13 +277,21 @@ export function ProjectManager({ onClose, onLoad }: Props) {
                       <option key={name} value={name}>{name}</option>
                     ))}
                   </select>
+                ) : projectList.length > 0 && useNewName ? (
+                  <input
+                    className="w-full border border-blue-300 rounded px-3 py-1.5 text-sm bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Type a new project name (max 50 chars)"
+                    value={saveProjectName}
+                    maxLength={50}
+                    onChange={e => setSaveProjectName(e.target.value)}
+                  />
                 ) : (
                   <input
-                    className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm bg-gray-100 text-gray-500"
-                    placeholder="Add a project in Inputs → General first"
+                    className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Type a project name (max 50 chars)"
                     value={saveProjectName}
-                    disabled
-                    readOnly
+                    maxLength={50}
+                    onChange={e => setSaveProjectName(e.target.value)}
                   />
                 )}
               </div>
@@ -254,8 +306,8 @@ export function ProjectManager({ onClose, onLoad }: Props) {
               </div>
             </div>
             {projectList.length === 0 && (
-              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-2">
-                The master project list is empty. Open <strong>Inputs → 1. General</strong> and add at least one project name to enable saving new versions.
+              <p className="text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1 mb-2">
+                The master project list is empty. Type a name above and Save — the new name will be published to the master list automatically (Bug 5 fix).
               </p>
             )}
             <div className="flex gap-2">

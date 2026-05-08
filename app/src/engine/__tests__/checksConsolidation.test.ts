@@ -121,11 +121,16 @@ function fixture(opts: {
 }
 
 // ============================================================================
-// I2 — Auto-sized mezz: exactly ONE [INFO] per converged solve
+// I2 — Post-Bug-2: facility hard caps mezz; auto-size [INFO] no longer fires.
+// Equity backstop takes over when mezz is at facilityLimit and project still
+// underfunded. The "exactly one per converged solve" invariant for backstop
+// summaries still holds.
 // ============================================================================
 {
-  // Mezz active: senior at LTC cap, plus mezz with low committed limit and
-  // high covenant cap → engine grows mezz to cover gap → emits auto-size INFO.
+  // Mezz active with low facilityLimit. Pre-Bug-2 mezz auto-grew past $1M; now
+  // mezz is hard-capped at $1M and the equity backstop (or covenant overshoot)
+  // covers the gap. Either way the consolidation rule still emits at most one
+  // summary per (kind, facility).
   const r = runCalculations(baseAdmin, fixture({
     seniorFacility: 5_000_000, ltcTarget: 0.5, lvrTarget: 0.65,
     equity: 1_000_000,
@@ -134,16 +139,23 @@ function fixture(opts: {
   }));
   const allWarns = r.warnings ?? [];
   const autoMezz = allWarns.filter(w => /Auto-sized Mezz/i.test(w));
-  // Note: solveFunding is called twice from runCalculations (prelim + final).
-  // The accumulator key is stable, so the final-solve summary OVERWRITES the
-  // prelim-solve summary — exactly one final entry.
-  assert(autoMezz.length === 1,
-    `I2 — exactly one [INFO] Auto-sized Mezz entry per converged solve pair; got ${autoMezz.length}: ${autoMezz.join(' || ')}`);
-  if (autoMezz.length === 1) {
-    const s = autoMezz[0]!;
-    assert(/\[INFO\] Auto-sized Mezz \$[\d,]+ → \$[\d,]+/.test(s),
-      `I2b — auto-size message has expected shape "[INFO] Auto-sized Mezz $X → $Y"; got "${s.slice(0, 200)}"`);
+  // Post Bug 2: facilityLimit is a HARD cap, so the engine never auto-sizes
+  // past it. Auto-size INFO is therefore expected to NOT fire.
+  assert(autoMezz.length === 0,
+    `I2 — Bug 2 (Kew UAT): facilityLimit hard caps mezz; no [INFO] Auto-sized Mezz expected; got ${autoMezz.length}: ${autoMezz.join(' || ')}`);
+  // The consolidation invariant: any backstop / overshoot warnings still
+  // collapse to at most one summary per facility.
+  const summaryKeys = new Set<string>();
+  for (const w of allWarns) {
+    const m = w.match(/^(\[FUNDING\][^—:]+)/);
+    if (m) summaryKeys.add(m[1]!);
   }
+  // No assertion on exact count here — depends on whether equity is exhausted —
+  // just that summaries are unique (no per-period drift).
+  const dupCheck = allWarns.filter(w => /Equity backstop|covenant cap/i.test(w));
+  const uniqueSummaries = new Set(dupCheck);
+  assert(dupCheck.length === uniqueSummaries.size,
+    `I2b — consolidated summaries are unique (no duplicates): ${dupCheck.length} entries, ${uniqueSummaries.size} unique`);
 }
 
 // ============================================================================

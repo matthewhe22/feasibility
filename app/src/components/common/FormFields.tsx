@@ -3,7 +3,8 @@ import { useId, type ReactNode } from 'react';
 
 interface CurrencyInputProps {
   label: string;
-  value: number;
+  /** Defensive: accept undefined to survive partial/migration-in-progress state. Coerced to 0 at render. */
+  value: number | undefined;
   onChange: (v: number) => void;
   disabled?: boolean;
   className?: string;
@@ -23,7 +24,7 @@ export function CurrencyInput({ label, value, onChange, disabled, className = ''
           id={inputId}
           type="text"
           inputMode="decimal"
-          value={value.toLocaleString('en-AU')}
+          value={(value ?? 0).toLocaleString('en-AU')}
           onChange={(e) => {
             const num = parseFloat(e.target.value.replace(/[^0-9.-]/g, ''));
             if (!isNaN(num)) onChange(num);
@@ -39,7 +40,7 @@ export function CurrencyInput({ label, value, onChange, disabled, className = ''
 
 interface PercentInputProps {
   label: string;
-  value: number;
+  value: number | undefined;
   onChange: (v: number) => void;
   disabled?: boolean;
   className?: string;
@@ -57,7 +58,7 @@ export function PercentInput({ label, value, onChange, disabled, className = '',
           id={inputId}
           type="text"
           inputMode="decimal"
-          value={(value * 100).toFixed(4)}
+          value={((value ?? 0) * 100).toFixed(4)}
           onChange={(e) => {
             const num = parseFloat(e.target.value);
             if (!isNaN(num)) onChange(num / 100);
@@ -74,7 +75,7 @@ export function PercentInput({ label, value, onChange, disabled, className = '',
 
 interface NumberInputProps {
   label: string;
-  value: number;
+  value: number | undefined;
   onChange: (v: number) => void;
   disabled?: boolean;
   className?: string;
@@ -92,7 +93,7 @@ export function NumberInput({ label, value, onChange, disabled, className = '', 
         <input
           id={inputId}
           type="number"
-          value={value}
+          value={value ?? 0}
           onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
           disabled={disabled}
           aria-label={label}

@@ -86,7 +86,15 @@ const d = runCalculations(baseAdmin, inputs);
 const peakSnr = Math.max(...d.cashflows.map(cf => cf.seniorBalance ?? 0));
 const peakMz = Math.max(...d.cashflows.map(cf => cf.mezzBalance ?? 0));
 const totalCost = d.feasibility.totalCost;
-const seniorCovCap = totalCost * 0.60;
+// Post-Bug-2 (Kew UAT): effective senior cap = min(LTC × TDC, LVR × NRV, facilityLimit).
+// Pre-fix this test used totalCost * 0.60 (LTC) directly; post-fix the user's
+// facilityLimit ($18M) is below the LTC × TDC (≈ $19.6M), so the hard cap is
+// $18M. Compute the effective cap explicitly so the assertion stays correct.
+const seniorLtcCap = totalCost * 0.60;
+const seniorFacilityLimit = inputs.seniorFacility.facilityLimit;
+const seniorCovCap = seniorFacilityLimit > 0 && seniorFacilityLimit < seniorLtcCap
+  ? seniorFacilityLimit
+  : seniorLtcCap;
 
 console.log(`peakSnr=$${peakSnr.toFixed(0)} peakMz=$${peakMz.toFixed(0)} seniorCovCap=$${seniorCovCap.toFixed(0)} totalCost=$${totalCost.toFixed(0)}`);
 

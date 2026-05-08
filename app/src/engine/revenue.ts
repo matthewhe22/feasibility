@@ -123,6 +123,22 @@ export function spreadDeposits(
   return result;
 }
 
+// Bug 6 (Kew UAT): a single sellingCost row should apply to ALL grvItems —
+// most term sheets quote one commission rate (e.g. 2.5%) for the whole project,
+// and configuring N rows just to pair them with N grvItems is unrealistic.
+// Pre-fix the iteration `i < grvItems.length && i < sellingCosts.length`
+// dropped grvItems[1..] when only one sellingCost row existed (so on Kew with
+// 1 sellingCost row + 6 grvItems, commission was 2.5% × $43.6M = $1.0M
+// instead of 2.5% × $312.95M = $7.82M). This helper broadcasts when there's
+// exactly one sellingCost row; otherwise it pairs index-to-index as before.
+function pickSellingCost(
+  sellingCosts: SellingCostConfig[],
+  idx: number,
+): SellingCostConfig | undefined {
+  if (sellingCosts.length === 1) return sellingCosts[0];
+  return sellingCosts[idx];
+}
+
 // Calculate selling commissions per revenue item
 export function calculateSellingCommissions(
   grvItems: RevenueLineItem[],
@@ -131,9 +147,9 @@ export function calculateSellingCommissions(
   let frontEnd = 0;
   let backEnd = 0;
 
-  for (let i = 0; i < grvItems.length && i < sellingCosts.length; i++) {
+  for (let i = 0; i < grvItems.length; i++) {
     const grv = grvItems[i];
-    const sc = sellingCosts[i];
+    const sc = pickSellingCost(sellingCosts, i);
     if (!grv || !sc || grv.currentSalePrice === 0) continue;
 
     const totalCommission = grv.currentSalePrice * sc.salesCommission;
@@ -164,9 +180,9 @@ export function spreadBackEndCommissions(
 ): number[] {
   const n = periods.length;
   const result = new Array(n).fill(0);
-  for (let i = 0; i < grvItems.length && i < sellingCosts.length; i++) {
+  for (let i = 0; i < grvItems.length; i++) {
     const grv = grvItems[i];
-    const sc = sellingCosts[i];
+    const sc = pickSellingCost(sellingCosts, i);
     if (!grv || !sc) continue;
     if (!Number.isFinite(grv.currentSalePrice) || grv.currentSalePrice <= 0) continue;
     if (!Number.isFinite(grv.settlementMonth) || grv.settlementMonth <= 0) continue;
