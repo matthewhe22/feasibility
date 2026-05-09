@@ -72,6 +72,52 @@ function EquitySection({ title, config, onChange }: {
 
 // ===== DEBT SECTION =====
 
+/**
+ * Facility-limit helper text + back-solved principal-cap hint.
+ *
+ * When `isCapitalised`, the user-set facility limit is a covenant cap on the
+ * PEAK OUTSTANDING BALANCE (interest compounds into balance), so the engine
+ * back-solves the principal it can safely draw:
+ *
+ *     principal_cap = facilityLimit / (1 + r)^N
+ *     r = margin + bbsy, N = maturity - start + 1 periods
+ *
+ * When NOT capitalised, the facility limit is the maximum principal drawn
+ * (interest is cash-paid each period and never adds to the balance).
+ */
+function FacilityLimitHint({ facility }: { facility: DebtFacility }) {
+  const isCap = !!facility.isCapitalised;
+  const helperText = isCap
+    ? 'Maximum outstanding balance (includes accrued interest)'
+    : 'Maximum principal drawn';
+  // Compute the back-solved principal cap shown as a hint when capitalised.
+  // Uses 30-day periods and the per-period rate convention `(margin + bbsy) * days/365`.
+  const annualRate = (facility.margin ?? 0) + (facility.bbsy ?? 0);
+  const term = Math.max(0, (facility.maturityMonth ?? 0) - (facility.startMonth ?? 1) + 1);
+  const factor = isCap && annualRate > 0 && term > 0
+    ? (1 + (annualRate * 30) / 365) ** term
+    : 1;
+  const principalCap = isCap && factor > 1 && (facility.facilityLimit ?? 0) > 0
+    ? facility.facilityLimit / factor
+    : null;
+  const fmtMoney = (n: number) => {
+    if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+    if (Math.abs(n) >= 1_000)     return `$${(n / 1_000).toFixed(1)}K`;
+    return `$${n.toFixed(0)}`;
+  };
+  return (
+    <div className="-mt-1 mb-1 ml-[14.5rem] text-[10px]">
+      <span className="text-gray-500">{helperText}</span>
+      {principalCap != null && (
+        <span className="ml-2 text-indigo-700">
+          ≈ {fmtMoney(principalCap)} principal cap (back-solved at {(annualRate * 100).toFixed(2)}% over {term} periods)
+        </span>
+      )}
+    </div>
+  );
+}
+
+
 function DebtSection({ title, facility, isLandLoan = false, onChange }: {
   title: string;
   facility: DebtFacility;
@@ -93,6 +139,7 @@ function DebtSection({ title, facility, isLandLoan = false, onChange }: {
       </div>
       <div className="p-3 space-y-1.5">
         <CurrencyInput label="Facility Limit" value={facility.facilityLimit} onChange={v => update('facilityLimit', v)} />
+        <FacilityLimitHint facility={facility} />
         <NumberInput label="Start Month" value={facility.startMonth} onChange={v => update('startMonth', v)} />
         <NumberInput label="Maturity (months from start)" value={facility.maturityMonth} onChange={v => update('maturityMonth', v)} />
         <div className="border-t border-gray-100 pt-1.5 mt-1.5">
