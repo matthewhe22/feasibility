@@ -587,7 +587,10 @@ export function InternalDashboard() {
           </TableBox>
 
           {/* Table 12 — Development-loan covenants (LVR / LTC / facility limit)
-              and peak debt / equity exposure. */}
+              and peak debt / equity exposure. Dandenong B1 — LTC is now
+              per-facility (Senior LTC vs Senior target; Mezz LTC vs Mezz
+              target) instead of a single combined-stack ratio compared
+              against the senior target. */}
           {data.developmentCovenants && (
             <TableBox>
               <TableHeader>Table 12 - Development Loan Covenants &amp; Peak Exposure</TableHeader>
@@ -596,11 +599,20 @@ export function InternalDashboard() {
               <div className={`flex justify-between items-center py-0.5 px-2 text-xs pl-4 ${data.developmentCovenants.meetsLVR ? 'text-green-700' : 'text-red-700'}`}>
                 <span>LVR Met?</span><span>{data.developmentCovenants.meetsLVR ? 'Yes' : 'No'}</span>
               </div>
-              <DashValue label="LTC (Peak Debt / Total Cost)" value={data.developmentCovenants.ltc} unit="%" />
-              <DashValue label="LTC Target" value={data.developmentCovenants.ltcTarget} unit="%" indent />
+              <DashValue label="Senior LTC (Peak Senior / Total Cost)" value={data.developmentCovenants.ltc} unit="%" />
+              <DashValue label="Senior LTC Target" value={data.developmentCovenants.ltcTarget} unit="%" indent />
               <div className={`flex justify-between items-center py-0.5 px-2 text-xs pl-4 ${data.developmentCovenants.meetsLTC ? 'text-green-700' : 'text-red-700'}`}>
-                <span>LTC Met?</span><span>{data.developmentCovenants.meetsLTC ? 'Yes' : 'No'}</span>
+                <span>Senior LTC Met?</span><span>{data.developmentCovenants.meetsLTC ? 'Yes' : 'No'}</span>
               </div>
+              {data.developmentCovenants.mezzPresent && data.developmentCovenants.mezzLTC !== undefined && (
+                <>
+                  <DashValue label="Mezz LTC (Peak Mezz / Total Cost)" value={data.developmentCovenants.mezzLTC} unit="%" />
+                  <DashValue label="Mezz LTC Target" value={data.developmentCovenants.mezzLTCTarget ?? 0} unit="%" indent />
+                  <div className={`flex justify-between items-center py-0.5 px-2 text-xs pl-4 ${data.developmentCovenants.meetsMezzLTC ? 'text-green-700' : 'text-red-700'}`}>
+                    <span>Mezz LTC Met?</span><span>{data.developmentCovenants.meetsMezzLTC ? 'Yes' : 'No'}</span>
+                  </div>
+                </>
+              )}
               <DashValue label="Peak Senior Balance" value={data.developmentCovenants.peakSenior} bold />
               <DashValue label="Senior Limit" value={data.developmentCovenants.seniorLimit} indent />
               <DashValue label="Peak Senior / Limit" value={data.developmentCovenants.peakSeniorPctLimit} unit="%" indent />

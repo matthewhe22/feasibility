@@ -253,7 +253,7 @@ function ActualCostsEditor({ label, items, onChange }: {
   let actualPeriods = 0;
   for (let i = 0; i < 120; i++) {
     const start = addMonths(firstDate, i);
-    start.setDate(1);
+    start.setUTCDate(1);
     const end = endOfMonth(start);
     if (end > lastActualsDate) break;
     actualPeriods++;
