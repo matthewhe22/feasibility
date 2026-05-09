@@ -75,6 +75,44 @@ interface MinEquityShortfall {
   modeValue: number;
 }
 
+// Bug B — Equity-cap overshoot.
+//
+// The user enters a `equityDeveloper.equityCap` (and optionally
+// `equityJV.equityCap`) on the Financing tab — that's the term-sheet equity
+// commitment the developer is holding to. The engine has TWO mechanisms that
+// can push `cumulativeEquityDeveloperDrawn` ABOVE that cap silently:
+//
+//   1. `minEquityRequirement` floor enforcement — pre-funds equity to meet the
+//      term-sheet floor, ignoring the equity cap.
+//   2. `equity-of-last-resort` backstop — when senior+mezz can't fund a
+//      negative bank balance, equity fills the gap regardless of cap.
+//
+// Both are correct cash-mechanics behaviour (something has to fill a real
+// funding gap), but a financier reading the Internal Dashboard sees
+// `Equity drawn = $24.12M` while the user-set cap is `$16.5M` — no flag, no
+// warning, no signal that the stated commitment was exceeded. The capital
+// stack on the term sheet is misleading.
+//
+// Fix: at end of converged solve compare cumulativeEquityDeveloperDrawn to
+// equityCap (when cap > 0) and route through the [FUNDING] consolidator with
+// three severity tiers:
+//   • overshoot ≤ 5% of cap         → INFO   (small auto-backstop, expected)
+//   • 5% < overshoot ≤ 20%          → WARN   (real cap breach)
+//   • overshoot > 20% OR > cap×1.5  → FAIL   (stack fundamentally inconsistent)
+//
+// Same logic for equityJV.equityCap when non-zero.
+//
+// `fundingGap` is the implied auto-backstopped amount = max(0, drawn − cap).
+interface EquityCapOvershoot {
+  entity: 'developer' | 'jv';
+  drawn: number;
+  cap: number;
+  overshoot: number;          // = max(0, drawn − cap)
+  overshootPct: number;       // = overshoot / cap (1.0 = 100%)
+  severity: 'info' | 'warn' | 'fail';
+  fundingGap: number;         // auto-backstopped to fill funding gap
+}
+
 interface PendingFundingState {
   covenantOvershoot: Map<string, CovenantOvershoot>;
   autoSize: Map<string, AutoSize>;
@@ -83,6 +121,10 @@ interface PendingFundingState {
   projectDefault: ProjectDefault | null;
   capIntCeiling: Map<string, CapIntCeilingHit>;
   minEquityShortfall: MinEquityShortfall | null;
+  // Bug B — populated post-solve in solveFunding via recordEquityCapOvershoot.
+  // Map keyed by entity ('developer' | 'jv') so a project with both Developer
+  // and JV equity can flag both independently. Cleared per solve (final wins).
+  equityCapOvershoot: Map<'developer' | 'jv', EquityCapOvershoot>;
 }
 
 const _pendingFundingState: PendingFundingState = {
@@ -93,6 +135,7 @@ const _pendingFundingState: PendingFundingState = {
   projectDefault: null,
   capIntCeiling: new Map(),
   minEquityShortfall: null,
+  equityCapOvershoot: new Map(),
 };
 
 const _summaryWarnings = new Map<string, string>();
@@ -105,6 +148,7 @@ function resetPendingFundingState(): void {
   _pendingFundingState.projectDefault = null;
   _pendingFundingState.capIntCeiling.clear();
   _pendingFundingState.minEquityShortfall = null;
+  _pendingFundingState.equityCapOvershoot.clear();
 }
 
 function recordCapIntCeilingHit(facility: string, period: number, cashAmount: number): void {
@@ -243,6 +287,55 @@ function recordMinEquityShortfall(
   };
 }
 
+// Bug B — Equity-cap-overshoot classifier + recorder.
+//
+// Severity ladder (called once per solve per entity, post-convergence):
+//   • drawn ≤ cap (within $1 tolerance) → no record (PASS, nothing to flag)
+//   • overshoot ≤ 5% of cap            → INFO  (small auto-backstop, expected
+//                                                slop from minEquityRequirement
+//                                                rounding or single-period
+//                                                gap-fill)
+//   • 5% < overshoot ≤ 20%             → WARN  (real cap breach — financier
+//                                                should see the term-sheet
+//                                                commitment was exceeded)
+//   • overshoot > 20% OR drawn > cap×1.5 → FAIL (capital stack is fundamentally
+//                                                  inconsistent with stated
+//                                                  equity commitment — user
+//                                                  must restructure)
+function classifyEquityCapOvershoot(
+  drawn: number,
+  cap: number,
+): 'info' | 'warn' | 'fail' | null {
+  // $1 tolerance to mirror the min-equity warning emit branch.
+  if (drawn <= cap + 1) return null;
+  const overshoot = drawn - cap;
+  const pct = cap > 0 ? overshoot / cap : Infinity;
+  if (drawn > cap * 1.5 || pct > 0.20) return 'fail';
+  if (pct > 0.05) return 'warn';
+  return 'info';
+}
+
+function recordEquityCapOvershoot(
+  entity: 'developer' | 'jv',
+  drawn: number,
+  cap: number,
+  fundingGap: number,
+): void {
+  const severity = classifyEquityCapOvershoot(drawn, cap);
+  if (severity === null) {
+    // No overshoot — clear any prior solve's record so a prelim-fail/final-pass
+    // pair doesn't leave a stale FAIL in summaries.
+    _pendingFundingState.equityCapOvershoot.delete(entity);
+    return;
+  }
+  const overshoot = drawn - cap;
+  const overshootPct = cap > 0 ? overshoot / cap : Infinity;
+  _pendingFundingState.equityCapOvershoot.set(entity, {
+    entity, drawn, cap, overshoot, overshootPct, severity,
+    fundingGap: Math.max(0, fundingGap),
+  });
+}
+
 function fmtMoney(n: number): string { return `$${Math.round(n).toLocaleString()}`; }
 function fmtPeriodRange(set: Set<number>): string {
   const arr = [...set].sort((a, b) => a - b);
@@ -379,6 +472,36 @@ function flushPendingFundingSummaries(): void {
     // the existing keyed-Map pattern is an explicit delete on the no-find
     // branch — `set()` only overwrites when there is something to set.
     _summaryWarnings.delete('min-equity-shortfall');
+  }
+
+  // Bug B — Equity-cap overshoot. ONE consolidated message per entity per
+  // solve; INFO-tier overshoots are still emitted (so dashboards / Checks tab
+  // can surface a low-severity hint) but routed through `[INFO]` so the
+  // overall page badge doesn't escalate to WARN. WARN/FAIL tiers route as
+  // `[FUNDING]` so they cluster with the other funding-cluster warnings.
+  for (const entity of ['developer', 'jv'] as const) {
+    const info = _pendingFundingState.equityCapOvershoot.get(entity);
+    const key = `equity-cap-overshoot:${entity}`;
+    if (!info) {
+      _summaryWarnings.delete(key);
+      continue;
+    }
+    const label = entity === 'developer' ? 'Developer equity' : 'JV equity';
+    const overPct = (info.overshootPct * 100).toFixed(0);
+    const tag =
+      info.severity === 'fail' ? '[FUNDING] FAIL' :
+      info.severity === 'warn' ? '[FUNDING]'      :
+      '[INFO]';
+    const remedy = info.severity === 'fail'
+      ? `Capital stack is fundamentally inconsistent with stated equity commitment — increase equity cap to ${fmtMoney(info.drawn)}+, raise senior/mezz facility, or reduce project scope.`
+      : info.severity === 'warn'
+      ? `Increase equity cap to ${fmtMoney(info.drawn)}+, raise senior/mezz facility, or reduce project scope.`
+      : `Small auto-backstop within tolerance — review if intentional.`;
+    const msg =
+      `${tag} ${label} drawn ${fmtMoney(info.drawn)} exceeds user-set equity cap ${fmtMoney(info.cap)} ` +
+      `by ${fmtMoney(info.overshoot)} (${overPct}% over) — engine auto-backstopped to fill a funding gap of ${fmtMoney(info.fundingGap)}. ` +
+      remedy;
+    _summaryWarnings.set(key, msg);
   }
 }
 
@@ -566,6 +689,40 @@ export interface FundingResult {
     basisAmount: number;
     basisName: 'TDC' | 'TDC + financing costs';
     shortfall: number;
+  };
+  /**
+   * Bug B — Equity-cap overshoot telemetry from the converged final solve.
+   * Single source of truth for the [FUNDING] / [INFO] warning + Checks-tab
+   * "Equity within user cap" row. Populated for BOTH entities (developer,
+   * jv) regardless of whether either fired — `severity: 'pass'` means the
+   * draw came in at or under the user-set cap.
+   *
+   * - When `equityDeveloper.equityCap === 0` (uncapped / disabled): developer
+   *   record returns `severity: 'pass'`, `cap: 0`, with `drawn` reflecting
+   *   the true draws — no warning emitted regardless of drawn amount.
+   * - When `equityJV` is inactive: jv record returns `severity: 'pass'` with
+   *   zeros — no warning emitted.
+   * - `fundingGap` is the implied auto-backstopped amount (= overshoot when
+   *   overshoot > 0). Lets the Checks tab tell the financier "the engine
+   *   auto-injected $X to fill a real funding gap" without recomputing.
+   */
+  equityCapCheck: {
+    developer: {
+      drawn: number;
+      cap: number;
+      overshoot: number;
+      overshootPct: number;
+      severity: 'pass' | 'info' | 'warn' | 'fail';
+      fundingGap: number;
+    };
+    jv: {
+      drawn: number;
+      cap: number;
+      overshoot: number;
+      overshootPct: number;
+      severity: 'pass' | 'info' | 'warn' | 'fail';
+      fundingGap: number;
+    };
   };
 }
 
@@ -1065,6 +1222,73 @@ export function solveFunding(
         minEq.mode,
         minEq.value,
       );
+    }
+  }
+
+  // Bug B — Equity-cap overshoot cross-check. Computed ONCE on the converged
+  // final-iteration result. The `cumulativeEquityDeveloperDrawn` includes
+  // injections from BOTH the minEquityRequirement floor and the
+  // equity-of-last-resort backstop — both can push the draw past the
+  // user-set equityCap. We surface this as a [FUNDING] / [INFO] consolidator
+  // entry plus telemetry on `result.equityCapCheck` so the Checks tab can
+  // render a "Equity within user cap" row that matches the warning text
+  // byte-for-byte.
+  //
+  // Decomposition of cumulativeEquityDeveloperDrawn = jv + developer:
+  //   • developer = totalEquityInjected − totalJVEquityInjected
+  //   • jv        = totalJVEquityInjected
+  //
+  // `equityCap === 0` is treated as UNCAPPED (back-compat for v7 fixtures and
+  // the common "equity is gap-fill, no fixed cap" scenario). Severity 'pass'
+  // is recorded on the telemetry but no warning is emitted.
+  {
+    const dev = inputs.equityDeveloper;
+    const jv  = inputs.equityJV;
+    const totalEq = result.totalEquityInjected;
+    const jvEq    = result.totalJVEquityInjected;
+    const developerEq = Math.max(0, totalEq - jvEq);
+    const developerCapInput = (dev && Number.isFinite(dev.equityCap)) ? dev.equityCap : 0;
+    const jvCapInput        = (jv  && Number.isFinite(jv.equityCap))  ? jv.equityCap  : 0;
+
+    // Developer entry — cap=0 means uncapped (no warning, severity=pass).
+    const devSeverity = developerCapInput > 0
+      ? (classifyEquityCapOvershoot(developerEq, developerCapInput) ?? 'pass')
+      : 'pass';
+    const devOvershoot = developerCapInput > 0 ? Math.max(0, developerEq - developerCapInput) : 0;
+    const devPct = developerCapInput > 0 ? devOvershoot / developerCapInput : 0;
+    result.equityCapCheck.developer = {
+      drawn: developerEq,
+      cap: developerCapInput,
+      overshoot: devOvershoot,
+      overshootPct: devPct,
+      severity: devSeverity,
+      fundingGap: devOvershoot,
+    };
+    if (developerCapInput > 0) {
+      recordEquityCapOvershoot('developer', developerEq, developerCapInput, devOvershoot);
+    } else {
+      _pendingFundingState.equityCapOvershoot.delete('developer');
+    }
+
+    // JV entry — only enforce when JV is active AND has a positive cap.
+    const jvActive = !!(jv && (jv.equityCap > 0 || jv.equityContribution > 0));
+    const jvSeverity = (jvActive && jvCapInput > 0)
+      ? (classifyEquityCapOvershoot(jvEq, jvCapInput) ?? 'pass')
+      : 'pass';
+    const jvOvershoot = (jvActive && jvCapInput > 0) ? Math.max(0, jvEq - jvCapInput) : 0;
+    const jvPct = (jvActive && jvCapInput > 0) ? jvOvershoot / jvCapInput : 0;
+    result.equityCapCheck.jv = {
+      drawn: jvEq,
+      cap: jvCapInput,
+      overshoot: jvOvershoot,
+      overshootPct: jvPct,
+      severity: jvSeverity,
+      fundingGap: jvOvershoot,
+    };
+    if (jvActive && jvCapInput > 0) {
+      recordEquityCapOvershoot('jv', jvEq, jvCapInput, jvOvershoot);
+    } else {
+      _pendingFundingState.equityCapOvershoot.delete('jv');
     }
   }
 
@@ -2315,6 +2539,10 @@ function runFundingWaterfall(
       required: 0, actual: 0, basisAmount: 0,
       basisName: 'TDC + financing costs', shortfall: 0,
     },
+    equityCapCheck: {
+      developer: { drawn: 0, cap: 0, overshoot: 0, overshootPct: 0, severity: 'pass', fundingGap: 0 },
+      jv:        { drawn: 0, cap: 0, overshoot: 0, overshootPct: 0, severity: 'pass', fundingGap: 0 },
+    },
   };
 }
 
@@ -2347,6 +2575,10 @@ function createEmptyResult(n: number): FundingResult {
     minEquityCheck: {
       required: 0, actual: 0, basisAmount: 0,
       basisName: 'TDC + financing costs', shortfall: 0,
+    },
+    equityCapCheck: {
+      developer: { drawn: 0, cap: 0, overshoot: 0, overshootPct: 0, severity: 'pass', fundingGap: 0 },
+      jv:        { drawn: 0, cap: 0, overshoot: 0, overshootPct: 0, severity: 'pass', fundingGap: 0 },
     },
   };
 }
