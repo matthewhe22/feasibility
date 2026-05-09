@@ -1,0 +1,1542 @@
+{
+  "stamp": "40b09fd-2026-05-09T21-50-29-075Z",
+  "headRev": "40b09fd",
+  "generatedAt": "2026-05-09T21:50:29.076Z",
+  "grandTotals": {
+    "pass": 184,
+    "fail": 0,
+    "skip": 13,
+    "fixtures": 15
+  },
+  "fixtures": [
+    {
+      "slug": "box-hill-250-v1",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 1
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$0.00, tolerance=$1000.32"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$897454614, total=$897454614, totalCost=$1000316513, ratio=0.897"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 76.68% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "SKIP",
+          "detail": "mode=equity-first (D3 only checked under senior-first)"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "3 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=1.3832, annual=0.1512"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=3.2923106029629707"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1000316512.8912994,
+        "totalProfit": 180396632.73916805,
+        "R1_drift": 1.6391277313232422e-7,
+        "seniorLTC": 0.7667919324684294,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    },
+    {
+      "slug": "brisbane-cbd-midrise-uat-v1",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 1
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$0.00, tolerance=$1000.32"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$897454614, total=$897454614, totalCost=$1000316513, ratio=0.897"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 76.68% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "SKIP",
+          "detail": "mode=equity-first (D3 only checked under senior-first)"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "3 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=1.3832, annual=0.1512"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=3.2923106029629707"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1000316512.8912994,
+        "totalProfit": 180396632.73916805,
+        "R1_drift": 1.6391277313232422e-7,
+        "seniorLTC": 0.7667919324684294,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    },
+    {
+      "slug": "melbourne-mixeduse-v1",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 1
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$0.00, tolerance=$1000.32"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$897454614, total=$897454614, totalCost=$1000316513, ratio=0.897"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 76.68% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "SKIP",
+          "detail": "mode=equity-first (D3 only checked under senior-first)"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "3 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=1.3832, annual=0.1512"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=3.2923106029629707"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1000316512.8912994,
+        "totalProfit": 180396632.73916805,
+        "R1_drift": 1.6391277313232422e-7,
+        "seniorLTC": 0.7667919324684294,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    },
+    {
+      "slug": "project-demo-2",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 1
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$0.00, tolerance=$1000.32"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$897454614, total=$897454614, totalCost=$1000316513, ratio=0.897"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 76.68% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "SKIP",
+          "detail": "mode=equity-first (D3 only checked under senior-first)"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "3 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=1.3832, annual=0.1512"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=3.2923106029629707"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1000316512.8912994,
+        "totalProfit": 180396632.73916805,
+        "R1_drift": 1.6391277313232422e-7,
+        "seniorLTC": 0.7667919324684294,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    },
+    {
+      "slug": "project-demo",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 1
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$0.00, tolerance=$1000.32"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$897454614, total=$897454614, totalCost=$1000316513, ratio=0.897"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 76.68% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "SKIP",
+          "detail": "mode=equity-first (D3 only checked under senior-first)"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "3 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=1.3832, annual=0.1512"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=3.2923106029629707"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1000316512.8912994,
+        "totalProfit": 180396632.73916805,
+        "R1_drift": 1.6391277313232422e-7,
+        "seniorLTC": 0.7667919324684294,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    },
+    {
+      "slug": "project-test",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 1
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$0.00, tolerance=$1000.32"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$897454614, total=$897454614, totalCost=$1000316513, ratio=0.897"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 76.68% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "SKIP",
+          "detail": "mode=equity-first (D3 only checked under senior-first)"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "3 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=1.3832, annual=0.1512"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=3.2923106029629707"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1000316512.8912994,
+        "totalProfit": 180396632.73916805,
+        "R1_drift": 1.6391277313232422e-7,
+        "seniorLTC": 0.7667919324684294,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    },
+    {
+      "slug": "senior-first-land-loan-quarterly",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 13,
+        "fail": 0,
+        "skip": 0
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$-0.00, tolerance=$1010.39"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$835486097, total=$835486097, totalCost=$1010386884, ratio=0.827"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 75.91% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "PASS",
+          "detail": "preCost=$163248136, ceiling=$179572950, cumEquity=$68451465"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "3 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=2.4883, annual=0.2246"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=3.756720632314682"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1010386884.0781099,
+        "totalProfit": 170326261.55235755,
+        "R1_drift": -1.4901161193847656e-8,
+        "seniorLTC": 0.7591494348225357,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    },
+    {
+      "slug": "south-yarra-120-s1-default",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 1
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$0.00, tolerance=$1007.46"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$897454614, total=$897454614, totalCost=$1007464256, ratio=0.891"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 76.14% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "SKIP",
+          "detail": "mode=equity-first (D3 only checked under senior-first)"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "3 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=1.3284, annual=0.1469"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=3.579883500933647"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1007464256.4642307,
+        "totalProfit": 173248889.16623676,
+        "R1_drift": 2.9802322387695312e-8,
+        "seniorLTC": 0.7613517075950308,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    },
+    {
+      "slug": "south-yarra-120-s2-frontloaded",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 1
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$-0.00, tolerance=$1047.71"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$976340818, total=$976340818, totalCost=$1047706547, ratio=0.932"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 73.21% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "SKIP",
+          "detail": "mode=equity-first (D3 only checked under senior-first)"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "4 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=0.6355, annual=0.0830"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=0"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1047706546.632462,
+        "totalProfit": 133006598.99800539,
+        "R1_drift": -5.960464477539063e-8,
+        "seniorLTC": 0.7321082744642595,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    },
+    {
+      "slug": "south-yarra-120-s3-backloaded",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 1
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$-0.00, tolerance=$1032.42"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$946000635, total=$946000635, totalCost=$1032420439, ratio=0.916"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 74.29% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "SKIP",
+          "detail": "mode=equity-first (D3 only checked under senior-first)"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "5 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=0.8286, annual=0.1028"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=0"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1032420438.9571731,
+        "totalProfit": 148292706.6732943,
+        "R1_drift": -3.2782554626464844e-7,
+        "seniorLTC": 0.7429479338618733,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    },
+    {
+      "slug": "south-yarra-120-s4-milestonestepped",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 1
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$-0.00, tolerance=$1040.76"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$954275079, total=$954275079, totalCost=$1040755155, ratio=0.917"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 73.70% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "SKIP",
+          "detail": "mode=equity-first (D3 only checked under senior-first)"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "5 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=0.7475, annual=0.0947"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=0"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$-0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1040755155.0072107,
+        "totalProfit": 139957990.62325668,
+        "R1_drift": -3.8743019104003906e-7,
+        "seniorLTC": 0.7369981578373116,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    },
+    {
+      "slug": "st-kilda-150-uat-v1",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 1
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$0.00, tolerance=$1000.32"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$897454614, total=$897454614, totalCost=$1000316513, ratio=0.897"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 76.68% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "SKIP",
+          "detail": "mode=equity-first (D3 only checked under senior-first)"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "3 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=1.3832, annual=0.1512"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=3.2923106029629707"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1000316512.8912994,
+        "totalProfit": 180396632.73916805,
+        "R1_drift": 1.6391277313232422e-7,
+        "seniorLTC": 0.7667919324684294,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    },
+    {
+      "slug": "sydney-cbd-senior-first",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 13,
+        "fail": 0,
+        "skip": 0
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$-0.00, tolerance=$1010.39"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$835486097, total=$835486097, totalCost=$1010386884, ratio=0.827"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 75.91% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "PASS",
+          "detail": "preCost=$163248136, ceiling=$179572950, cumEquity=$68451465"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "3 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=2.4883, annual=0.2246"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=3.756720632314682"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1010386884.0781099,
+        "totalProfit": 170326261.55235755,
+        "R1_drift": -1.4901161193847656e-8,
+        "seniorLTC": 0.7591494348225357,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    },
+    {
+      "slug": "sydney-tower-uat-brisbanemidrise",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 1
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$0.00, tolerance=$1000.32"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$897454614, total=$897454614, totalCost=$1000316513, ratio=0.897"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 76.68% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "SKIP",
+          "detail": "mode=equity-first (D3 only checked under senior-first)"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "3 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=1.3832, annual=0.1512"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=3.2923106029629707"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1000316512.8912994,
+        "totalProfit": 180396632.73916805,
+        "R1_drift": 1.6391277313232422e-7,
+        "seniorLTC": 0.7667919324684294,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    },
+    {
+      "slug": "sydney-tower-v1",
+      "synthetic": true,
+      "loadedOk": true,
+      "totals": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 1
+      },
+      "invariants": [
+        {
+          "id": "A1",
+          "title": "Σ monthly net cashflow ≈ 0",
+          "status": "PASS",
+          "detail": "drift=$0.00, tolerance=$1000.32"
+        },
+        {
+          "id": "A4",
+          "title": "Cashflow horizon == projectSpanMonths",
+          "status": "PASS",
+          "detail": "cashflow rows=74, projectSpanMonths=74"
+        },
+        {
+          "id": "B3-fixture",
+          "title": "Revenue not silently dropped",
+          "status": "PASS",
+          "detail": "GRV inputs=$1261865184, settled=$1261865184"
+        },
+        {
+          "id": "C1",
+          "title": "Capital stack widget reconciles",
+          "status": "PASS",
+          "detail": "sources=$897454614, total=$897454614, totalCost=$1000316513, ratio=0.897"
+        },
+        {
+          "id": "D1",
+          "title": "Senior LTC ≤ cap AND LVR ≤ cap",
+          "status": "PASS",
+          "detail": "LTC 76.68% ≤ 89.00%; LVR 66.83% ≤ 72.00%"
+        },
+        {
+          "id": "D2",
+          "title": "Mezz ≤ dollar limit AND LTC/LVR caps (where defined)",
+          "status": "PASS",
+          "detail": "$0 ≤ $0; LTC 0.00% ≤ 10.00%"
+        },
+        {
+          "id": "D3",
+          "title": "Senior-first: cumulative equity ≤ pre-construction cost × 1.10",
+          "status": "SKIP",
+          "detail": "mode=equity-first (D3 only checked under senior-first)"
+        },
+        {
+          "id": "E1",
+          "title": "repaymentSequence ends in equity",
+          "status": "PASS",
+          "detail": "seq=[\"senior\",\"mezz\",\"equity\"]"
+        },
+        {
+          "id": "H1",
+          "title": "Per-(category, message-prefix) consolidation",
+          "status": "PASS",
+          "detail": "3 warnings, all distinct after numeric normalisation"
+        },
+        {
+          "id": "I2",
+          "title": "Total CCR sign matches Annual CCR sign",
+          "status": "PASS",
+          "detail": "total=1.3832, annual=0.1512"
+        },
+        {
+          "id": "L1",
+          "title": "Solver converged within maxIterations",
+          "status": "PASS",
+          "detail": "convergedIn=1, maxIterations=50"
+        },
+        {
+          "id": "L2",
+          "title": "Solver exposes convergedIn / tolerance / finalDelta",
+          "status": "PASS",
+          "detail": "convergedIn=1, finalDelta=3.2923106029629707"
+        },
+        {
+          "id": "M3",
+          "title": "Construction cost spread sums to declared total",
+          "status": "PASS",
+          "detail": "declared=$585805180, spread=$585805180, drift=$0"
+        }
+      ],
+      "observed": {
+        "totalGRV": 1261865184,
+        "totalCost": 1000316512.8912994,
+        "totalProfit": 180396632.73916805,
+        "R1_drift": 1.6391277313232422e-7,
+        "seniorLTC": 0.7667919324684294,
+        "mezzAmount": 0,
+        "convergedIn": 1,
+        "settlementsRevenue": 1261865184,
+        "cashflowSettlements": 1261865184
+      }
+    }
+  ],
+  "static": [
+    {
+      "id": "J1",
+      "title": "No DSCR field declarations / reads in production code",
+      "status": "PASS",
+      "detail": "5 matches, all in comments / migration deletes"
+    },
+    {
+      "id": "K1",
+      "title": "persistVersion === 11",
+      "status": "PASS",
+      "detail": "version=11"
+    }
+  ]
+}

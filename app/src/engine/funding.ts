@@ -28,6 +28,20 @@ interface CovenantOvershoot {
   cap: number;
   peakPeriod: number;
   affectedPeriods: Set<number>;
+  // Bug A — Two-tier severity routing. We need to know at flush time whether
+  // the binding cap was a real lender covenant (LTC×TDC, LVR×NRV) vs the
+  // engine's internal back-solved principal cap derived from facilityLimit.
+  // - 'covenant' (LTC/LVR was the binding cap): a peak above this is a real
+  //   lender covenant breach → WARN severity.
+  // - 'facility' (back-solved principal cap derived from facilityLimit was
+  //   binding): a peak above this is only a real lender breach if
+  //   `peak > facilityLimit`. If `peak ≤ facilityLimit`, the engine's
+  //   timing-aware principal cap converged below the user's true facility
+  //   limit and the slip is internal — emit as INFO, not WARN.
+  // `facilityLimit` is the user-set headline limit (un-back-solved); needed
+  // at flush so we can decide WARN vs INFO without refetching inputs.
+  bindingKind: 'covenant' | 'facility';
+  facilityLimit: number;
 }
 interface AutoSize {
   requested: number;
@@ -116,28 +130,57 @@ function facilityLabel(key: string): string {
   }
 }
 
-function recordCovenantOvershoot(facility: string, period: number, balance: number, cap: number): void {
+function recordCovenantOvershoot(
+  facility: string,
+  period: number,
+  balance: number,
+  cap: number,
+  bindingKind: 'covenant' | 'facility',
+  facilityLimit: number,
+): void {
   const m = _pendingFundingState.covenantOvershoot;
   const cur = m.get(facility);
   if (!cur) {
-    m.set(facility, { peakBalance: balance, cap, peakPeriod: period, affectedPeriods: new Set([period]) });
+    m.set(facility, {
+      peakBalance: balance, cap, peakPeriod: period,
+      affectedPeriods: new Set([period]),
+      bindingKind, facilityLimit,
+    });
   } else {
     cur.affectedPeriods.add(period);
     if (balance > cur.peakBalance) { cur.peakBalance = balance; cur.peakPeriod = period; }
     if (cap > cur.cap) cur.cap = cap;
+    // Bug A — bindingKind escalates to 'covenant' if any period was bound by
+    // the real LTC/LVR covenant. If ANY period saw a covenant-bound peak, the
+    // overall summary should reflect a real covenant breach (WARN). A pure
+    // facility-bound run only flips to INFO when no covenant breach occurred.
+    if (bindingKind === 'covenant') cur.bindingKind = 'covenant';
+    if (facilityLimit > cur.facilityLimit) cur.facilityLimit = facilityLimit;
   }
 }
 
 function recordFacilityLimitOvershoot(facility: string, period: number, balance: number, limit: number): void {
+  // Bug A — kept as a sibling helper for the (currently empty) flush path
+  // through `_pendingFundingState.facilityLimitOvershoot`. All per-period
+  // emit sites now route through `recordCovenantOvershoot` with the proper
+  // bindingKind so the two-tier WARN/INFO routing applies uniformly. Future
+  // callers wanting a "definitely a real facility-limit breach" code path
+  // can use this without going through the bindingKind decision tree.
   const m = _pendingFundingState.facilityLimitOvershoot;
   const cur = m.get(facility);
   if (!cur) {
-    m.set(facility, { peakBalance: balance, cap: limit, peakPeriod: period, affectedPeriods: new Set([period]) });
+    m.set(facility, {
+      peakBalance: balance, cap: limit, peakPeriod: period,
+      affectedPeriods: new Set([period]),
+      bindingKind: 'facility', facilityLimit: limit,
+    });
   } else {
     cur.affectedPeriods.add(period);
     if (balance > cur.peakBalance) { cur.peakBalance = balance; cur.peakPeriod = period; }
   }
 }
+// Suppress TS6133 for the currently-unused helper — see comment above.
+void recordFacilityLimitOvershoot;
 
 function recordAutoSize(facility: string, requested: number, finalPeak: number, cap: number): void {
   const m = _pendingFundingState.autoSize;
@@ -217,23 +260,72 @@ function flushPendingFundingSummaries(): void {
   // second solveFunding call (final after prelim) overwrites prior summaries.
 
   for (const [facility, info] of _pendingFundingState.covenantOvershoot) {
+    // Bug A — Two-tier severity routing.
+    //
+    // Pre-fix the engine emitted a single [FUNDING] WARN whenever the peak
+    // balance exceeded the engine's *internal* back-solved target. With the
+    // closed-form back-solve assuming day-0 worst-case draw, the internal
+    // target was up to ~28% below the lender's actual facility limit on
+    // capitalised facilities — so the WARN fired for slips that the lender
+    // wouldn't even see (the peak was still well within the headline limit).
+    //
+    // Post-fix: route the message based on what was actually breached.
+    //   • bindingKind === 'covenant'   → real LTC/LVR breach. WARN.
+    //   • bindingKind === 'facility' AND peak > facilityLimit
+    //                                  → real lender breach of headline limit. WARN.
+    //   • bindingKind === 'facility' AND peak ≤ facilityLimit
+    //                                  → engine's timing-aware target was
+    //                                    overshot by a small amount but the
+    //                                    real lender limit still has headroom.
+    //                                    INFO, not WARN — no real-world breach.
     const overshoot = info.peakBalance - info.cap;
-    const msg =
-      `[FUNDING] ${facilityLabel(facility)} covenant cap exceeded by ${fmtMoney(overshoot)} ` +
-      `— peak ${fmtMoney(info.peakBalance)} vs cap ${fmtMoney(info.cap)} ` +
-      `(peak month ${info.peakPeriod}, affected ${fmtPeriodRange(info.affectedPeriods)}). ` +
-      `Capitalised interest pushed balance above LTC/LVR ceiling — restructure: pay interest ` +
-      `current or increase commitment.`;
-    _summaryWarnings.set(`covenant-overshoot:${facility}`, msg);
+    if (info.bindingKind === 'covenant') {
+      const msg =
+        `[FUNDING] ${facilityLabel(facility)} covenant cap exceeded by ${fmtMoney(overshoot)} ` +
+        `— peak ${fmtMoney(info.peakBalance)} vs cap ${fmtMoney(info.cap)} ` +
+        `(peak month ${info.peakPeriod}, affected ${fmtPeriodRange(info.affectedPeriods)}). ` +
+        `Capitalised interest pushed balance above LTC/LVR ceiling — restructure: pay interest ` +
+        `current or increase commitment.`;
+      _summaryWarnings.set(`covenant-overshoot:${facility}`, msg);
+    } else if (Number.isFinite(info.facilityLimit) && info.peakBalance > info.facilityLimit + 1) {
+      // bindingKind === 'facility' AND real lender breach.
+      const limitOvershoot = info.peakBalance - info.facilityLimit;
+      const msg =
+        `[FUNDING] ${facilityLabel(facility)} covenant cap exceeded by ${fmtMoney(limitOvershoot)} ` +
+        `— peak ${fmtMoney(info.peakBalance)} vs facility limit ${fmtMoney(info.facilityLimit)} ` +
+        `(peak month ${info.peakPeriod}, affected ${fmtPeriodRange(info.affectedPeriods)}). ` +
+        `Capitalised interest pushed balance above committed facility limit — restructure: pay interest ` +
+        `current or increase commitment.`;
+      _summaryWarnings.set(`covenant-overshoot:${facility}`, msg);
+    } else {
+      // Internal slip only — peak is above the engine's timing-aware
+      // back-solved target but still within the lender's facility limit.
+      // Emit as INFO so dashboards / Checks tab can route to the info channel.
+      const headroom = Number.isFinite(info.facilityLimit)
+        ? Math.max(0, info.facilityLimit - info.peakBalance)
+        : Infinity;
+      const headroomLabel = Number.isFinite(headroom) ? fmtMoney(headroom) : 'covenant slack';
+      const limitLabel = Number.isFinite(info.facilityLimit) ? fmtMoney(info.facilityLimit) : 'unconstrained';
+      const msg =
+        `[INFO] ${facilityLabel(facility)} cap-int slightly above timing-aware target by ${fmtMoney(overshoot)} ` +
+        `— peak ${fmtMoney(info.peakBalance)}, target ${fmtMoney(info.cap)}, ` +
+        `facility limit ${limitLabel} still has ${headroomLabel} headroom ` +
+        `(peak month ${info.peakPeriod}, affected ${fmtPeriodRange(info.affectedPeriods)}). ` +
+        `Engine's back-solved principal cap was a touch tight; no real lender breach.`;
+      _summaryWarnings.set(`covenant-overshoot:${facility}`, msg);
+    }
   }
 
   for (const [facility, info] of _pendingFundingState.facilityLimitOvershoot) {
+    // Bug A — facilityLimitOvershoot is reserved for direct comparisons
+    // against the user's headline facilityLimit (peak > facilityLimit by
+    // construction), so this is always a real lender breach. WARN.
     const overshoot = info.peakBalance - info.cap;
     const msg =
-      `[FUNDING] ${facilityLabel(facility)} balance exceeded committed facility limit by ${fmtMoney(overshoot)} ` +
-      `— peak ${fmtMoney(info.peakBalance)} vs limit ${fmtMoney(info.cap)} ` +
+      `[FUNDING] ${facilityLabel(facility)} covenant cap exceeded by ${fmtMoney(overshoot)} ` +
+      `— peak ${fmtMoney(info.peakBalance)} vs facility limit ${fmtMoney(info.cap)} ` +
       `(peak month ${info.peakPeriod}, affected ${fmtPeriodRange(info.affectedPeriods)}). ` +
-      `Capitalised interest pushed balance above committed limit.`;
+      `Capitalised interest pushed balance above committed facility limit.`;
     _summaryWarnings.set(`limit-overshoot:${facility}`, msg);
   }
 
@@ -658,6 +750,233 @@ export function solveFunding(
   let iterationsRun = 0;
   let finalDelta = Infinity;
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Solution 2 — Timing-aware principal cap loop (Option 2a).
+  //
+  // For capitalised facilities, the closed-form `backSolveCapitalisedPrincipalCap`
+  // assumes worst-case day-0 full draw and compounds the entire principal
+  // through to maturity. Real drawdowns are progressive over construction
+  // (gap-fill from negative bank balance) and revenue inflows reduce the
+  // outstanding balance from settlement onward — so the actual peak is
+  // strictly below what the closed-form predicts. Applying the closed-form
+  // as a hard cap on principal leaves ~25-30% of facility headroom unused
+  // on typical multi-year capitalised builds.
+  //
+  // Approach: start permissive (principal cap = facilityLimit, the lender's
+  // headline limit), run the cost-convergence solver, then observe the actual
+  // peak balance. If peak > facilityLimit, scale the principal cap down by
+  // (facilityLimit / peak) and re-run. This finds the largest principal that
+  // keeps observed peak ≤ facilityLimit under the actual drawdown schedule.
+  //
+  // Convergence is monotonic-shrinking (the cap only goes down between outer
+  // iterations) and typically settles in 3-5 outer passes. If the loop
+  // doesn't converge, the previous (looser) cap result is the last fully
+  // valid attempt — but `BackSolveOuterCapMargin` keeps a small safety
+  // buffer below facilityLimit on the FIRST attempt that has peak >
+  // facilityLimit, and we also fall back to the closed-form cap as the
+  // ultimate safety floor.
+  //
+  // Cash-pay facilities: closed-form already returns facilityLimit (no
+  // compounding), so we skip the override / shrink path entirely for them.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const senior   = inputs.seniorFacility  ?? EMPTY_FACILITY;
+  const senior2  = inputs.seniorFacility2 ?? EMPTY_FACILITY;
+  const mezz     = inputs.mezzanine       ?? EMPTY_FACILITY;
+  const landLoan = inputs.landLoan        ?? EMPTY_FACILITY;
+
+  // Closed-form caps (worst-case) used as the SAFETY FLOOR if the
+  // timing-aware loop doesn't converge. These are also the values the engine
+  // would use without Solution 2, so falling back to them is at-least-as-safe
+  // as pre-Solution-2 behaviour.
+  const _snrStartFloor  = senior.startMonth   > 0 ? senior.startMonth   - 1 : -1;
+  const _snr2StartFloor = senior2.startMonth  > 0 ? senior2.startMonth  - 1 : -1;
+  const _mezzStartFloor = mezz.startMonth     > 0 ? mezz.startMonth     - 1 : -1;
+  const _llStartFloor   = landLoan.startMonth > 0 ? landLoan.startMonth - 1 : -1;
+  const _snrEndFloor    = senior.maturityMonth   > 0 ? senior.maturityMonth   - 1 : n - 1;
+  const _snr2EndFloor   = senior2.maturityMonth  > 0 ? senior2.maturityMonth  - 1 : n - 1;
+  const _mezzEndFloor   = mezz.maturityMonth     > 0 ? mezz.maturityMonth     - 1 : n - 1;
+  const _llEndFloor     = landLoan.maturityMonth > 0 ? landLoan.maturityMonth - 1 : n - 1;
+  const seniorClosedFormCap = backSolveCapitalisedPrincipalCap(
+    senior, senior.facilityLimit > 0 ? senior.facilityLimit : Infinity,
+    periods, daysPerYear, _snrStartFloor, _snrEndFloor, senior.margin + senior.bbsy);
+  const senior2ClosedFormCap = backSolveCapitalisedPrincipalCap(
+    senior2, senior2.facilityLimit > 0 ? senior2.facilityLimit : Infinity,
+    periods, daysPerYear, _snr2StartFloor, _snr2EndFloor, senior2.margin + senior2.bbsy);
+  const mezzClosedFormCap = backSolveCapitalisedPrincipalCap(
+    mezz, mezz.facilityLimit > 0 ? mezz.facilityLimit : Infinity,
+    periods, daysPerYear, _mezzStartFloor, _mezzEndFloor, mezz.margin + mezz.bbsy);
+  const landLoanClosedFormCap = backSolveCapitalisedPrincipalCap(
+    landLoan, landLoan.facilityLimit > 0 ? landLoan.facilityLimit : 0,
+    periods, daysPerYear, _llStartFloor, _llEndFloor, landLoan.interestRate);
+
+  // Timing-aware overrides — start permissive at facilityLimit for
+  // capitalised facilities. For cash-pay facilities we leave the override
+  // unset so `runFundingWaterfall` falls through to the (no-op) closed-form.
+  const principalCapOverrides: PrincipalCapOverrides = {};
+  if (senior.isCapitalised && senior.facilityLimit > 0) {
+    principalCapOverrides.senior = senior.facilityLimit;
+  }
+  if (senior2.isCapitalised && senior2.facilityLimit > 0) {
+    principalCapOverrides.senior2 = senior2.facilityLimit;
+  }
+  if (mezz.isCapitalised && mezz.facilityLimit > 0) {
+    principalCapOverrides.mezz = mezz.facilityLimit;
+  }
+  if (landLoan.isCapitalised && landLoan.facilityLimit > 0) {
+    principalCapOverrides.landLoan = landLoan.facilityLimit;
+  }
+
+  // Outer-loop bookkeeping — see comment block above for rationale.
+  // 6 outer iters is plenty: typical convergence is 3-5; the proportional
+  // scaler shrinks geometrically because each outer pass reduces both the
+  // cap AND the peak (cap-int is roughly proportional to principal).
+  const maxBackSolveOuterIters = 6;
+  const backSolveTolerance = Math.max(tolerance, 100); // $100 cushion for rounding
+  const backSolveSafetyMargin = 0.999; // shrink to 99.9% of facilityLimit/peak ratio
+  let outerConverged = false;
+  let lastValidOverrides: PrincipalCapOverrides | null = null;
+
+  for (let outer = 0; outer < maxBackSolveOuterIters; outer++) {
+    // Reset cost-convergence state for each outer iteration so each pass is
+    // a clean cost-convergence solve under the current principal caps.
+    prevSeniorFinCosts = 0;
+    prevMezzFinCosts   = 0;
+    prevSenior2FinCosts = 0;
+    prevPeakSnrBalance  = 0;
+    prevPeakSnr2Balance = 0;
+    prevPeakMezzBalance = 0;
+    converged = false;
+    finalDelta = Infinity;
+
+    // ── INNER: cost-convergence loop (the original loop, now nested). ──
+    for (let iter = 0; iter < maxIterations; iter++) {
+      iterationsRun = iter + 1;
+      resetPendingFundingState();
+      const tdc = sum(monthlyCostsExcFinance)
+        + prevSeniorFinCosts + prevMezzFinCosts
+        + prevSenior2FinCosts;
+
+      result = runFundingWaterfall(
+        periods, monthlyCostsExcFinance, monthlyRevenue, _monthlyGSTNet, gstOnRevenue,
+        inputs, tdc, daysPerYear,
+        prevPeakSnrBalance, prevPeakSnr2Balance, prevPeakMezzBalance,
+        equityDrawdownMode,
+        repaymentSequence,
+        principalCapOverrides,
+      );
+
+      const newSeniorFinCosts = result.totalSeniorInterest + result.totalSeniorFees
+        + result.totalLandLoanInterest + result.totalLandLoanFees;
+      const newMezzFinCosts = result.totalMezzInterest + result.totalMezzFees;
+      const newSenior2FinCosts = result.totalSenior2Interest + result.totalSenior2Fees;
+
+      const seniorDiff  = Math.abs(newSeniorFinCosts  - prevSeniorFinCosts);
+      const mezzDiff    = Math.abs(newMezzFinCosts    - prevMezzFinCosts);
+      const senior2Diff = Math.abs(newSenior2FinCosts - prevSenior2FinCosts);
+      finalDelta = Math.max(seniorDiff, mezzDiff, senior2Diff);
+
+      if (finalDelta < tolerance) {
+        converged = true;
+        break;
+      }
+      prevSeniorFinCosts  = newSeniorFinCosts;
+      prevMezzFinCosts    = newMezzFinCosts;
+      prevSenior2FinCosts = newSenior2FinCosts;
+      prevPeakSnrBalance  = result.seniorFacilitySize;
+      prevPeakSnr2Balance = result.senior2FacilitySize;
+      prevPeakMezzBalance = result.mezzFacilitySize;
+    }
+
+    // ── OUTER convergence check: did observed peaks exceed facilityLimit? ──
+    let mustShrink = false;
+
+    const checkAndShrink = (
+      key: keyof PrincipalCapOverrides,
+      facility: DebtFacility,
+      observedPeak: number,
+    ): void => {
+      if (!facility.isCapitalised || facility.facilityLimit <= 0) return;
+      const cap = principalCapOverrides[key];
+      if (cap === undefined) return;
+      const limit = facility.facilityLimit;
+      if (observedPeak > limit + backSolveTolerance) {
+        // Shrink proportionally with safety margin — cap-int compounds
+        // roughly linearly with principal (over a single outer step), so
+        // (limit / peak) is a reasonable shrink factor. Multiplying by
+        // backSolveSafetyMargin (0.999) gives a sliver of buffer to
+        // counteract rounding / non-linearity.
+        const shrinkFactor = (limit / observedPeak) * backSolveSafetyMargin;
+        principalCapOverrides[key] = cap * shrinkFactor;
+        mustShrink = true;
+      }
+    };
+
+    checkAndShrink('senior',   senior,   result.seniorFacilitySize);
+    checkAndShrink('senior2',  senior2,  result.senior2FacilitySize);
+    checkAndShrink('mezz',     mezz,     result.mezzFacilitySize);
+    // Land loan peak: lump-sum balance immediately after draw is the peak,
+    // which equals the override (no revenue/repayment before maturity here).
+    // The outer check is still useful because cap-int compounds toward
+    // maturity. We use the closed-form factor to project the peak.
+    if (landLoan.isCapitalised && landLoan.facilityLimit > 0) {
+      const llCap = principalCapOverrides.landLoan;
+      if (llCap !== undefined) {
+        const factor = capInterestCompoundFactor(
+          periods, daysPerYear, _llStartFloor, _llEndFloor, landLoan.interestRate);
+        const projectedPeak = llCap * factor;
+        if (projectedPeak > landLoan.facilityLimit + backSolveTolerance) {
+          const shrinkFactor = (landLoan.facilityLimit / projectedPeak) * backSolveSafetyMargin;
+          principalCapOverrides.landLoan = llCap * shrinkFactor;
+          mustShrink = true;
+        }
+      }
+    }
+
+    if (!mustShrink) {
+      outerConverged = true;
+      lastValidOverrides = { ...principalCapOverrides };
+      break;
+    }
+    // Save the last attempt that overshot — if we run out of outer iters,
+    // we'll fall back to the closed-form floor in the post-loop block below.
+    lastValidOverrides = { ...principalCapOverrides };
+  }
+
+  // Solution 2 — outer non-convergence safety net.
+  //
+  // If the timing-aware loop didn't settle within `maxBackSolveOuterIters`,
+  // the last solve had peak > facilityLimit + tolerance. Fall back to the
+  // closed-form cap (worst-case, guaranteed to satisfy peak ≤ facilityLimit
+  // by construction) and re-run cost-convergence. This is at-least-as-safe
+  // as pre-Solution-2 behaviour.
+  if (!outerConverged) {
+    if (senior.isCapitalised && senior.facilityLimit > 0)   principalCapOverrides.senior   = seniorClosedFormCap;
+    if (senior2.isCapitalised && senior2.facilityLimit > 0) principalCapOverrides.senior2  = senior2ClosedFormCap;
+    if (mezz.isCapitalised && mezz.facilityLimit > 0)       principalCapOverrides.mezz     = mezzClosedFormCap;
+    if (landLoan.isCapitalised && landLoan.facilityLimit > 0) principalCapOverrides.landLoan = landLoanClosedFormCap;
+
+    prevSeniorFinCosts = 0;
+    prevMezzFinCosts   = 0;
+    prevSenior2FinCosts = 0;
+    prevPeakSnrBalance  = 0;
+    prevPeakSnr2Balance = 0;
+    prevPeakMezzBalance = 0;
+    converged = false;
+
+    _fundingWarnings.push(
+      `[INFO] Timing-aware principal back-solve did not converge in ${maxBackSolveOuterIters} outer iterations — ` +
+      `falling back to closed-form (worst-case) caps. Some facility headroom may go unused.`
+    );
+    lastValidOverrides = { ...principalCapOverrides };
+  }
+
+  // Suppress the no-op TypeScript var-unused; we keep the pointer for
+  // diagnostics but don't read it after fallback.
+  void lastValidOverrides;
+
+  // Final cost-convergence pass under the chosen (timing-aware or fallback)
+  // principal caps. This is the original solver loop, gated by `iter < maxIterations`.
   for (let iter = 0; iter < maxIterations; iter++) {
     iterationsRun = iter + 1;
     // Reset per-iteration accumulator: per-period covenant breaches, auto-size
@@ -674,6 +993,7 @@ export function solveFunding(
       prevPeakSnrBalance, prevPeakSnr2Balance, prevPeakMezzBalance,
       equityDrawdownMode,
       repaymentSequence,
+      principalCapOverrides,
     );
 
     const newSeniorFinCosts = result.totalSeniorInterest + result.totalSeniorFees
@@ -830,6 +1150,36 @@ function applyFinancingActualsOverlay(
   }
 }
 
+/**
+ * Solution 2 — timing-aware principal cap overrides.
+ *
+ * `principalCapOverrides` lets `solveFunding` thread iteratively-tightened
+ * principal caps into the waterfall. When a value is `undefined`, the engine
+ * falls back to the closed-form `backSolveCapitalisedPrincipalCap` (worst-case
+ * day-0 full-draw assumption). When a value is provided, it overrides the
+ * back-solve and is used directly as the facility's hard principal limit.
+ *
+ * `solveFunding` starts the timing-aware loop with overrides == facilityLimit
+ * (most permissive — this is the headline limit that the closed-form would
+ * shrink to ~72% of for a typical 3yr facility). After each solve, observed
+ * peaks are compared to facilityLimit and overrides are scaled down
+ * proportionally. This lets capitalised facilities approach their actual
+ * lender limit instead of being capped at the closed-form's worst-case
+ * principal — typically unlocking ~25-30% of headroom on multi-year builds
+ * where progressive drawdown means cap-int compounds on a smaller average
+ * balance than the worst case.
+ *
+ * Cash-pay facilities are unaffected — closed-form already returns
+ * facilityLimit unchanged for `isCapitalised=false`, and the loop in
+ * `solveFunding` skips override updates for them.
+ */
+interface PrincipalCapOverrides {
+  senior?: number;
+  senior2?: number;
+  mezz?: number;
+  landLoan?: number;
+}
+
 function runFundingWaterfall(
   periods: Period[],
   monthlyCostsExcFinance: number[],
@@ -845,6 +1195,8 @@ function runFundingWaterfall(
   equityDrawdownMode: 'equity-first' | 'pro-rata' | 'senior-first' = 'equity-first',
   // M3 — Cash-sweep order for the revenue waterfall.
   repaymentSequence: readonly RepaymentTranche[] = ['senior', 'mezz', 'equity'],
+  // Solution 2 — timing-aware principal cap overrides (see interface comment).
+  principalCapOverrides: PrincipalCapOverrides = {},
 ): FundingResult {
   const n = periods.length;
   const landLoan = inputs.landLoan        ?? EMPTY_FACILITY;
@@ -906,9 +1258,14 @@ function runFundingWaterfall(
   const seniorLtcLimit  = senior.ltcTarget  > 0 ? tdc * senior.ltcTarget  : Infinity;
   const seniorLvrLimit  = senior.lvrTarget  > 0 ? nrv * senior.lvrTarget  : Infinity;
   const seniorFacilityHardLimitRaw = senior.facilityLimit > 0 ? senior.facilityLimit : Infinity;
-  const seniorFacilityHardLimit = backSolveCapitalisedPrincipalCap(
-    senior, seniorFacilityHardLimitRaw, periods, daysPerYear,
-    _snrStartIdxBS, _snrEndIdxBS, senior.margin + senior.bbsy);
+  // Solution 2 — timing-aware override (when provided by solveFunding's outer
+  // loop) replaces the closed-form worst-case back-solve. Closed-form remains
+  // the safety fallback for direct callers / unit tests / first-iteration.
+  const seniorFacilityHardLimit = principalCapOverrides.senior !== undefined
+    ? principalCapOverrides.senior
+    : backSolveCapitalisedPrincipalCap(
+        senior, seniorFacilityHardLimitRaw, periods, daysPerYear,
+        _snrStartIdxBS, _snrEndIdxBS, senior.margin + senior.bbsy);
   const seniorCovenantCap = Math.min(seniorLtcLimit, seniorLvrLimit);
   const seniorRequestedLimit = senior.facilityLimit > 0 ? seniorFacilityHardLimit : seniorCovenantCap;
   const seniorLimit     = Math.min(seniorRequestedLimit, seniorCovenantCap);
@@ -928,18 +1285,22 @@ function runFundingWaterfall(
   // senior2 hard cap not currently exposed (senior2Limit serves the role).
   const senior2CovenantCap = Math.min(senior2LtcLimit, senior2LvrLimit);
   const senior2FacilityHardLimitRaw = senior2.facilityLimit > 0 ? senior2.facilityLimit : Infinity;
-  const senior2FacilityHardLimit = backSolveCapitalisedPrincipalCap(
-    senior2, senior2FacilityHardLimitRaw, periods, daysPerYear,
-    _snr2StartIdxBS, _snr2EndIdxBS, senior2.margin + senior2.bbsy);
+  const senior2FacilityHardLimit = principalCapOverrides.senior2 !== undefined
+    ? principalCapOverrides.senior2
+    : backSolveCapitalisedPrincipalCap(
+        senior2, senior2FacilityHardLimitRaw, periods, daysPerYear,
+        _snr2StartIdxBS, _snr2EndIdxBS, senior2.margin + senior2.bbsy);
   const senior2Limit    = Math.min(senior2FacilityHardLimit, senior2CovenantCap);
   // (senior2 doesn't currently use a separate auto-size cap; senior2Limit serves that role.)
 
   const mezzLtcLimit    = mezz.ltcTarget    > 0 ? tdc * mezz.ltcTarget    : Infinity;
   const mezzLvrLimit    = mezz.lvrTarget    > 0 ? nrv * mezz.lvrTarget    : Infinity;
   const mezzFacilityHardLimitRaw = mezz.facilityLimit > 0 ? mezz.facilityLimit : Infinity;
-  const mezzFacilityHardLimit = backSolveCapitalisedPrincipalCap(
-    mezz, mezzFacilityHardLimitRaw, periods, daysPerYear,
-    _mezzStartIdxBS, _mezzEndIdxBS, mezz.margin + mezz.bbsy);
+  const mezzFacilityHardLimit = principalCapOverrides.mezz !== undefined
+    ? principalCapOverrides.mezz
+    : backSolveCapitalisedPrincipalCap(
+        mezz, mezzFacilityHardLimitRaw, periods, daysPerYear,
+        _mezzStartIdxBS, _mezzEndIdxBS, mezz.margin + mezz.bbsy);
   const mezzCovenantCap = Math.min(mezzLtcLimit, mezzLvrLimit);
   const mezzRequestedLimit = mezz.facilityLimit > 0 ? mezzFacilityHardLimit : mezzCovenantCap;
   const mezzLimit       = Math.min(mezzRequestedLimit, mezzCovenantCap);
@@ -948,12 +1309,15 @@ function runFundingWaterfall(
   // Land loan — lump-sum draw at startMonth. Back-solve the actual principal
   // drawn so that capitalised interest doesn't push the balance past
   // facilityLimit before the land loan matures (or is repaid by senior). For
-  // cash-pay land loans the formula reverts to facilityLimit.
-  const landLoanDrawCap = backSolveCapitalisedPrincipalCap(
-    landLoan,
-    landLoan.facilityLimit > 0 ? landLoan.facilityLimit : 0,
-    periods, daysPerYear,
-    _llStartIdxBS, _llEndIdxBS, landLoan.interestRate);
+  // cash-pay land loans the formula reverts to facilityLimit. Solution 2 —
+  // timing-aware override applies if provided.
+  const landLoanDrawCap = principalCapOverrides.landLoan !== undefined
+    ? principalCapOverrides.landLoan
+    : backSolveCapitalisedPrincipalCap(
+        landLoan,
+        landLoan.facilityLimit > 0 ? landLoan.facilityLimit : 0,
+        periods, daysPerYear,
+        _llStartIdxBS, _llEndIdxBS, landLoan.interestRate);
 
   // Cap-int back-solve transparency notice. When the back-solve materially
   // reduces the principal cap below the user-set facilityLimit (>1% reduction),
@@ -1295,7 +1659,11 @@ function runFundingWaterfall(
       // / period-range is captured by the consolidated covenant-overshoot
       // summary emitted at end of solve.
       if (snrRunningBalance > seniorAutoSizeCap + 1) {
-        recordCovenantOvershoot('senior', i + 1, snrRunningBalance, seniorAutoSizeCap);
+        // Bug A — same routing as the period-end emit. See mezz comment above.
+        const seniorBinding: 'covenant' | 'facility' =
+          seniorCovenantCap < seniorFacilityHardLimit ? 'covenant' : 'facility';
+        recordCovenantOvershoot('senior', i + 1, snrRunningBalance, seniorAutoSizeCap,
+          seniorBinding, senior.facilityLimit > 0 ? senior.facilityLimit : Infinity);
       }
     }
     llBalance[i] = llRunningBalance;
@@ -1836,7 +2204,16 @@ function runFundingWaterfall(
     // Iterations of the solver drift $X each pass; the consolidator keeps the
     // peak across iterations and emits ONE summary at end of converged solve.
     if (mzRunningBalance > mezzAutoSizeCap + 1) {
-      recordCovenantOvershoot('mezz', i + 1, mzRunningBalance, mezzAutoSizeCap);
+      // Bug A — bindingKind tracks WHICH cap of the min() set the binding.
+      // If covenant cap (LTC/LVR) < facility-derived cap, the binding cap is
+      // a real lender covenant — peak above is a covenant breach (WARN).
+      // Otherwise the binding cap is the back-solved facility principal cap
+      // and a peak above is only a real breach if peak > facilityLimit
+      // (decided at flush). mezz.facilityLimit is the user's headline limit.
+      const mezzBinding: 'covenant' | 'facility' =
+        mezzCovenantCap < mezzFacilityHardLimit ? 'covenant' : 'facility';
+      recordCovenantOvershoot('mezz', i + 1, mzRunningBalance, mezzAutoSizeCap,
+        mezzBinding, mezz.facilityLimit > 0 ? mezz.facilityLimit : Infinity);
     } else if (mezzRequestedLimit > 0 && mezzRequestedLimit < mezzAutoSizeCap && mzRunningBalance > mezzRequestedLimit + 1) {
       recordAutoSize('mezz', mezzRequestedLimit, mzRunningBalance, mezzAutoSizeCap);
     }
@@ -1844,13 +2221,23 @@ function runFundingWaterfall(
     // (capitalised interest pushed beyond covenant). Q1 — consolidate per-period
     // emits via the accumulator: peak / period-range / single summary at end.
     if (snrRunningBalance > seniorAutoSizeCap + 1) {
-      recordCovenantOvershoot('senior', i + 1, snrRunningBalance, seniorAutoSizeCap);
+      // Bug A — see mezz comment above. seniorCovenantCap = min(LTC, LVR);
+      // seniorFacilityHardLimit = back-solved principal cap (timing-aware).
+      const seniorBinding: 'covenant' | 'facility' =
+        seniorCovenantCap < seniorFacilityHardLimit ? 'covenant' : 'facility';
+      recordCovenantOvershoot('senior', i + 1, snrRunningBalance, seniorAutoSizeCap,
+        seniorBinding, senior.facilityLimit > 0 ? senior.facilityLimit : Infinity);
     } else if (seniorRequestedLimit > 0 && seniorRequestedLimit < seniorAutoSizeCap && snrRunningBalance > seniorRequestedLimit + 1) {
       recordAutoSize('senior', seniorRequestedLimit, snrRunningBalance, seniorAutoSizeCap);
     }
     if (senior2Limit > 0 && snr2RunningBalance > senior2Limit + 1) {
-      // Q1 — consolidate per-period Senior #2 facility-limit overshoots
-      recordFacilityLimitOvershoot('senior2', i + 1, snr2RunningBalance, senior2Limit);
+      // Q1 — consolidate per-period Senior #2 cap overshoots. Bug A — route
+      // through recordCovenantOvershoot with the proper bindingKind so the
+      // two-tier WARN/INFO flush applies uniformly to all three facilities.
+      const senior2Binding: 'covenant' | 'facility' =
+        senior2CovenantCap < senior2FacilityHardLimit ? 'covenant' : 'facility';
+      recordCovenantOvershoot('senior2', i + 1, snr2RunningBalance, senior2Limit,
+        senior2Binding, senior2.facilityLimit > 0 ? senior2.facilityLimit : Infinity);
     }
 
     peakDebt = Math.max(peakDebt,
