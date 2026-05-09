@@ -98,6 +98,22 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // Back-end commissions spread at settlement months
   const backEndCommByPeriod = spreadBackEndCommissions(inputs.grvItems, inputs.sellingCosts, periods);
 
+  // Named-line selling cost items entered through the Inputs UI. These are
+  // distinct from the % commission spread above — typical entries are
+  // "Sales Marketing" (front-end) and "Settlement Legal" (back-end). Until
+  // R2-v4 these arrays were declared in MainInputs but never read by the
+  // engine, so named items were silently dropped from cashflow,
+  // feasibility.totalCost, GST, and the PM fee base. Kew Demo Extra carried
+  // $1.5M (FE) + $1M (BE) under that asymmetry. Spread here, mixed into
+  // sellingCostsFrontEnd/Back on the cf row, included in GST-on-costs, and
+  // added to the PM-fee base + feasibility.totalCost below.
+  const frontEndSellingItems = inputs.frontEndSellingCosts ?? [];
+  const backEndSellingItems  = inputs.backEndSellingCosts  ?? [];
+  const frontEndSellingItemCosts = spreadCosts(frontEndSellingItems, periods, admin.manualSCurves, buildSCurves);
+  const backEndSellingItemCosts  = spreadCosts(backEndSellingItems,  periods, admin.manualSCurves, buildSCurves);
+  const totalFrontEndSellingItems = sum(frontEndSellingItems.map(c => c.totalCosts));
+  const totalBackEndSellingItems  = sum(backEndSellingItems.map(c => c.totalCosts));
+
   // ===== PM FEES (dynamic: rate × all other costs) =====
   // PM fee = rate × (all costs excluding PM fee itself, inclusive of GST on those costs).
   // Compute preliminary GST on non-PM cost items so it can be included in the base
@@ -109,6 +125,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     ...inputs.marketingCosts,
     ...inputs.otherStandardCosts,
     ...inputs.otherFinancingCosts,
+    ...frontEndSellingItems,
+    ...backEndSellingItems,
   ];
   for (const item of nonPMCostItems) {
     if (item.addGST !== false) {
@@ -124,6 +142,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     sum(devCosts) + sum(constCosts) + sum(contingency) +
     sum(marketingCosts) + sum(otherStdCosts) + sum(otherFinCosts) +
     sum(frontEndCommByPeriod) + sum(backEndCommByPeriod) +
+    sum(frontEndSellingItemCosts) + sum(backEndSellingItemCosts) +
     prelimGSTOnCosts;
   // PM fee rate comes from the dedicated feeRatePercent field on pmFees[0].
   // Historically the engine read the rate from the generic `units` column,
@@ -172,6 +191,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     ...pmFeesWithTotal,
     ...inputs.otherStandardCosts,
     ...inputs.otherFinancingCosts,
+    ...frontEndSellingItems,
+    ...backEndSellingItems,
   ];
   for (const item of allCostItems) {
     // Treat undefined as true (apply GST) — explicit false means GST-free
@@ -343,6 +364,7 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       devCosts[i] + constCosts[i] + contingency[i] +
       marketingCosts[i] + otherStdCosts[i] + pmFees[i] +
       otherFinCosts[i] + frontEndCommByPeriod[i] + backEndCommByPeriod[i] +
+      (frontEndSellingItemCosts[i] ?? 0) + (backEndSellingItemCosts[i] ?? 0) +
       gstOnCosts[i];
   }
 
@@ -424,8 +446,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     marketingCosts: at(marketingCosts, i),
     otherStandardCosts: at(otherStdCosts, i),
     pmFees: at(pmFees, i),
-    sellingCostsFrontEnd: at(frontEndCommByPeriod, i),
-    sellingCostsBackEnd: at(backEndCommByPeriod, i),
+    sellingCostsFrontEnd: at(frontEndCommByPeriod, i) + at(frontEndSellingItemCosts, i),
+    sellingCostsBackEnd:  at(backEndCommByPeriod,  i) + at(backEndSellingItemCosts,  i),
     lettingFees: 0,
     otherFinancingCosts: at(otherFinCosts, i),
     gstOnCosts: at(gstOnCosts, i),
@@ -579,7 +601,9 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // separately in totalProfit below, matching Excel's approach).
   const totalCost = totalLand + totalStampDuty + totalBuildCosts + totalContingency +
     totalSeniorFinCosts + totalLandLoanFinCosts + totalMezzFinCosts + totalOtherFin +
-    standardCosts + totalMarketing + commissions.total + totalPMFees +
+    standardCosts + totalMarketing + commissions.total +
+    totalFrontEndSellingItems + totalBackEndSellingItems +
+    totalPMFees +
     itcUnrecovered;
 
   const totalRentalIncome = sum(rentalInc);
