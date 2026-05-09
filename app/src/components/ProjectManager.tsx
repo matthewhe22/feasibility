@@ -82,7 +82,19 @@ export function ProjectManager({ onClose, onLoad }: Props) {
     // limit, no duplicates, non-empty). Publishing is best-effort — RLS may
     // deny non-admin writes, in which case the local save still proceeds and
     // the user is told the name was saved locally only.
-    if (useNewName && projectList.length > 0 && !projectList.includes(projectName)) {
+    // Track whether this save is for a brand-new master-list entry. The
+    // "Update" button sitting next to a freshly-typed (not-yet-published)
+    // name was previously taking the in-place rename path below — which
+    // overwrote the loaded record's name and depended on a best-effort
+    // saveProjectList() to publish the new name. When the master-list
+    // publish was rejected (RLS) or otherwise raced, the toast still said
+    // "Project updated." but the new name never appeared in admin.projectList
+    // on reload. Treat "+ New name + Update" as "save under new name" instead
+    // — route through createProject (the proven-working path the "Save as
+    // new version" button uses) and surface clearer wording.
+    const isNewMasterName =
+      useNewName && projectList.length > 0 && !projectList.includes(projectName);
+    if (isNewMasterName) {
       const err = validateProjectName(projectName, projectList);
       if (err) { setMsg(err); return; }
       try {
@@ -107,7 +119,13 @@ export function ProjectManager({ onClose, onLoad }: Props) {
 
     setBusy(true);
     try {
-      if (currentId !== null) {
+      // If the user typed a brand-new master-list name, always create a new
+      // project row — even if a project is currently loaded. Renaming the
+      // loaded record in place to a fresh name was the source of the
+      // "Project updated." false-positive: the row was renamed locally but
+      // (when the master-list publish failed) the new name was nowhere to be
+      // found in the dropdown after reload, making the project look absent.
+      if (currentId !== null && !isNewMasterName) {
         await Promise.all([
           saveProject(currentId, adminToSave, inputs, dashboardData),
           renameProject(currentId, recordName, versionName),
@@ -118,7 +136,7 @@ export function ProjectManager({ onClose, onLoad }: Props) {
         const id = await createProject(recordName, versionName, adminToSave, inputs, dashboardData);
         setCurrentId(id);
         setAdmin({ projectName, versionName });
-        setMsg('Project saved.');
+        setMsg(isNewMasterName ? `Project saved as "${projectName}".` : 'Project saved.');
       }
       await refresh();
     } catch (e) {
