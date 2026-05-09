@@ -1,19 +1,42 @@
-// Excel serial date to JS Date
+// Excel serial date to JS Date (UTC-anchored, TZ-stable).
+//
+// Dandenong B2 — the prior implementation used `new Date(1899, 11, 30)`
+// which is a LOCAL-timezone construction. Round-tripping via
+// `epoch.getTime() + serial * 86400000` and then reading the date back
+// with local getMonth() / getFullYear() worked correctly for serial
+// values in the standard range, but became fragile across DST transitions
+// when the result was further mutated via `addMonths` / `setMonth` over
+// many periods (the timeline iterates i = 0..N for cashflow labels, and
+// each setMonth call can pick up DST drift in TZs that change offsets in
+// the resulting year).
+//
+// Switching to a UTC-anchored epoch and reading dates back via UTC
+// methods eliminates DST + historical-TZ drift entirely. Excel itself has
+// no concept of timezones — its serials are wall-clock day counts — so
+// UTC is the correct semantic match.
+//
+// Verified Excel-serial → calendar date mapping:
+//   45017 → Apr 1, 2023 (default dateOfFirstPeriod)
+//   46388 → Jan 1, 2027
+//   46478 → Apr 1, 2027
+const EXCEL_EPOCH_UTC_MS = Date.UTC(1899, 11, 30);
+
 export function excelDateToDate(serial: number): Date {
-  const epoch = new Date(1899, 11, 30);
-  return new Date(epoch.getTime() + serial * 86400000);
+  return new Date(EXCEL_EPOCH_UTC_MS + serial * 86400000);
 }
 
-// JS Date to Excel serial
+// JS Date to Excel serial. Round-trip-stable with `excelDateToDate` for
+// any serial in the supported range.
 export function dateToExcelSerial(d: Date): number {
-  const epoch = new Date(1899, 11, 30);
-  return Math.round((d.getTime() - epoch.getTime()) / 86400000);
+  return Math.round((d.getTime() - EXCEL_EPOCH_UTC_MS) / 86400000);
 }
 
-// Format date as "Mon-YY"
+// Format date as "Mon-YY". Reads the UTC month / year so the label is
+// stable across timezones — pairs with the UTC-anchored converter so a
+// serial always renders the same wall-clock month label everywhere.
 export function formatMonthYear(d: Date): string {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${months[d.getMonth()]}-${String(d.getFullYear()).slice(2)}`;
+  return `${months[d.getUTCMonth()]}-${String(d.getUTCFullYear()).slice(2)}`;
 }
 
 // Format currency
@@ -66,21 +89,23 @@ export function formatNumber(value: number, decimals = 0): string {
   });
 }
 
-// Add months to a date
+// Add months to a date — UTC-stable. Pairs with the UTC-anchored
+// excelDateToDate so iterating period labels via addMonths(firstDate, i)
+// never picks up DST drift mid-iteration.
 export function addMonths(date: Date, months: number): Date {
-  const result = new Date(date);
-  result.setMonth(result.getMonth() + months);
+  const result = new Date(date.getTime());
+  result.setUTCMonth(result.getUTCMonth() + months);
   return result;
 }
 
-// Get end of month
+// Get end of month (UTC).
 export function endOfMonth(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
 }
 
-// Get start of month
+// Get start of month (UTC).
 export function startOfMonth(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
 }
 
 // Days between two dates

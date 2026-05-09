@@ -62,7 +62,7 @@ export function generateTimeline(admin: AdminConfig, inputs: MainInputs): Period
 
   for (let i = 0; i < totalPeriods; i++) {
     const startDate = addMonths(firstPeriodDate, i);
-    startDate.setDate(1);
+    startDate.setUTCDate(1);
     const end = endOfMonth(startDate);
     const isActual = end <= lastActualsDate;
 

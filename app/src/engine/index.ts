@@ -801,11 +801,23 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   let developmentCovenants: DevelopmentCovenants | undefined;
   if (seniorType === 'development') {
     const peakSeniorBalance = Math.max(...funding.seniorBalance, 0);
+    const peakMezzBalance = Math.max(...(funding.mezzBalance ?? [0]), 0);
     const seniorLimit = inputs.seniorFacility?.facilityLimit ?? 0;
     const lvrTarget = inputs.seniorFacility?.lvrTarget ?? 0.65;
     const ltcTarget = inputs.seniorFacility?.ltcTarget ?? 0.7;
     const lvr = grvForCovenants > 0 ? peakSeniorBalance / grvForCovenants : 0;
-    const ltc = totalCost > 0 ? funding.peakDebt / totalCost : 0;
+    // Dandenong B1 — LTC must be measured per facility, not against total
+    // peak debt. The senior LTC is `peakSenior / totalCost` (compared against
+    // the senior facility's ltcTarget). Mezz LTC is `peakMezz / totalCost`
+    // (compared against the mezz facility's own ltcTarget). Conflating the
+    // two led Table 12 to flag "LTC Met? = No" on Dandenong because the
+    // combined senior+mezz peak (85.04% of TDC) exceeded the senior 75%
+    // target — even though each facility individually was within its own
+    // covenant. The Checks tab already does it correctly per-facility.
+    const ltc = totalCost > 0 ? peakSeniorBalance / totalCost : 0;
+    const mezzPresent = peakMezzBalance > 0 || (inputs.mezzanine?.facilityLimit ?? 0) > 0;
+    const mezzLtcTarget = inputs.mezzanine?.ltcTarget ?? 0;
+    const mezzLtcRatio = totalCost > 0 ? peakMezzBalance / totalCost : 0;
     developmentCovenants = {
       lvr,
       ltc,
@@ -818,6 +830,17 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
       meetsLVR: grvForCovenants > 0 && lvr <= lvrTarget,
       meetsLTC: totalCost > 0 && ltc <= ltcTarget,
       withinSeniorLimit: seniorLimit > 0 ? peakSeniorBalance <= seniorLimit : true,
+      // B1 per-facility mezz covenant (only meaningful when a mezz facility
+      // is in the stack). meetsMezzLTC = true when the mezz facility is
+      // within its own LTC target. If no mezz is in the stack, the field
+      // is reported as `mezzPresent: false` and the UI hides the row.
+      mezzPresent,
+      ...(mezzPresent ? {
+        mezzLTC: mezzLtcRatio,
+        mezzLTCTarget: mezzLtcTarget,
+        peakMezz: peakMezzBalance,
+        meetsMezzLTC: mezzLtcTarget > 0 ? mezzLtcRatio <= mezzLtcTarget : true,
+      } : {}),
     };
   }
 

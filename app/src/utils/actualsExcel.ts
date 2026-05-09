@@ -29,7 +29,7 @@ export function getActualPeriodCount(
   let count = 0;
   for (let i = 0; i < 120; i++) {
     const d = new Date(addMonths(firstDate, i));
-    d.setDate(1);
+    d.setUTCDate(1);
     const end = endOfMonth(d);
     if (end > lastActualsDate) break;
     count++;
@@ -42,7 +42,7 @@ export function monthCountToExcelSerial(firstPeriodSerial: number, monthCount: n
   if (monthCount <= 0) return 0;
   const firstDate = excelDateToDate(firstPeriodSerial);
   const d = new Date(addMonths(firstDate, monthCount - 1));
-  d.setDate(1);
+  d.setUTCDate(1);
   return dateToExcelSerial(endOfMonth(d));
 }
 
@@ -51,7 +51,7 @@ export function getPeriodLabels(firstPeriodSerial: number, count: number): strin
   const firstDate = excelDateToDate(firstPeriodSerial);
   return Array.from({ length: count }, (_, i) => {
     const d = new Date(addMonths(firstDate, i));
-    d.setDate(1);
+    d.setUTCDate(1);
     return formatMonthYear(endOfMonth(d));
   });
 }

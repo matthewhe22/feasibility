@@ -581,7 +581,14 @@ export interface EquityReturnSummary {
 export interface DevelopmentCovenants {
   /** Peak senior debt balance / total GRV. */
   lvr: number;
-  /** Peak total debt / total project cost. */
+  /**
+   * Senior LTC = peak senior balance / total project cost. Compared
+   * against the senior facility's own `ltcTarget`. Dandenong B1 — this
+   * was previously `peak total debt / total cost`, which conflated
+   * senior + mezz + land into a single ratio and made `meetsLTC`
+   * spuriously fail when the combined stack exceeded the senior 75%
+   * target even though each facility was individually within covenant.
+   */
   ltc: number;
   /** Peak total debt across all facilities (informational). */
   peakDebt: number;
@@ -595,12 +602,23 @@ export interface DevelopmentCovenants {
   lvrTarget: number;
   /** Senior facility's ltcTarget (typical 0.7). */
   ltcTarget: number;
-  /** lvr <= lvrTarget. */
+  /** lvr <= lvrTarget (senior). */
   meetsLVR: boolean;
-  /** ltc <= ltcTarget. */
+  /** ltc <= ltcTarget (senior LTC vs senior target — per-facility, post-B1). */
   meetsLTC: boolean;
   /** Peak senior balance <= senior limit (no overdraw). */
   withinSeniorLimit: boolean;
+  // === B1 per-facility mezz covenant (optional — only when mezz is in the stack)
+  /** True when a mezz facility is sized > 0 OR carries a non-zero peak balance. */
+  mezzPresent: boolean;
+  /** Mezz LTC = peak mezz balance / total project cost. */
+  mezzLTC?: number;
+  /** Mezz facility's own ltcTarget (e.g. 0.85). */
+  mezzLTCTarget?: number;
+  /** Peak mezz balance (informational). */
+  peakMezz?: number;
+  /** mezzLTC <= mezzLTCTarget — independent of senior. */
+  meetsMezzLTC?: boolean;
 }
 
 /**

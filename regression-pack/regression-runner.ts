@@ -315,12 +315,12 @@ function staticJ1_noDSCRSymbols(): InvariantResult {
 }
 
 function staticK1_persistVersionFive(): InvariantResult {
-  // Bumped to 10 (Kew UAT v3, Land Loan interest-payment-frequency feature):
-  // backfill `interestPaymentFrequency: 1` on facilities lacking a value.
-  // Expected version is the latest schema; new migrations bump this constant in
-  // lockstep with `version: N` in useStore.ts (see migration tests for proof
-  // that prior versions stay backwards-compatible).
-  const EXPECTED = 10;
+  // Bumped to 11 (Dandenong B5 — heal `landPurchase.gstRate` when missing /
+  // non-finite / out of [0,1) on Supabase-loaded projects). Expected version is
+  // the latest schema; new migrations bump this constant in lockstep with
+  // `version: N` in useStore.ts (see migration tests for proof that prior
+  // versions stay backwards-compatible).
+  const EXPECTED = 11;
   try {
     const useStore = readFileSync(join(repoRoot, 'app/src/store/useStore.ts'), 'utf8');
     const m = useStore.match(/version:\s*(\d+)/);

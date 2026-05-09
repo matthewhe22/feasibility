@@ -214,9 +214,21 @@ function createDebouncedLocalStorage(delayMs: number): StateStorage {
  *        backfill `interestPaymentFrequency: 1` (monthly) on every facility
  *        that lacks a finite positive value. Additive + idempotent — a
  *        facility already carrying a valid frequency is untouched.
+ *  v11 — Dandenong B5 (gstRate persistence edge-case): heal
+ *        `inputs.landPurchase.gstRate` when it is missing, null, non-finite,
+ *        negative, or ≥ 1. Pre-v11 saved Supabase projects could land in the
+ *        store with the field literally absent (older schema shapes) — the
+ *        UI's PercentInput then rendered 0% via `(value ?? 0) * 100` while
+ *        the engine silently clamped to 0.10 (Australian default), creating
+ *        a confusing UI/engine mismatch the user could only resolve by
+ *        manually re-typing the rate. v11 backfills the field to 0.10
+ *        whenever it is not a finite value in [0, 1). Idempotent on a valid
+ *        finite value in [0, 1) — pass-through. CONSERVATIVE: explicit 0
+ *        IS preserved (legitimate non-Australian projects); only invalid
+ *        shapes are healed.
  *
- * The function is idempotent on each version: running v10 migration on
- * already-migrated v10 data produces no change (the existence checks
+ * The function is idempotent on each version: running v11 migration on
+ * already-migrated v11 data produces no change (the existence checks
  * short-circuit).
  */
 export function migratePersistedState(persisted: unknown, version: number): unknown {
@@ -356,6 +368,25 @@ export function migratePersistedState(persisted: unknown, version: number): unkn
       }
     }
   }
+  // v11 — Dandenong B5 (gstRate persistence). Heal `landPurchase.gstRate`
+  // when the field is missing / null / non-finite / out of [0, 1). The UI's
+  // PercentInput uses `(value ?? 0) * 100` so a missing value renders as 0%,
+  // while the engine independently clamps to 0.10 — projects loaded from
+  // Supabase with this shape silently disagreed between display and engine.
+  // Backfilling at migration time fixes both surfaces in one place.
+  // CONSERVATIVE: an explicit, valid 0 is preserved (legitimate non-Australian
+  // GST regimes still possible). Idempotent on already-valid values.
+  if (version < 11 && p.inputs && typeof p.inputs === 'object') {
+    const inputs = p.inputs as Record<string, unknown>;
+    const lp = inputs.landPurchase;
+    if (lp && typeof lp === 'object') {
+      const landPurchase = lp as Record<string, unknown>;
+      const cur = landPurchase.gstRate;
+      if (typeof cur !== 'number' || !Number.isFinite(cur) || cur < 0 || cur >= 1) {
+        landPurchase.gstRate = 0.10;
+      }
+    }
+  }
   return p;
 }
 
@@ -401,7 +432,7 @@ export const useStore = create<AppState>()(
       //      when missing/undefined. PR-D (PR #31) added it as a configurable
       //      field but no migration step — v4 users hit the engine with
       //      undefined and the funding solver branches on this value.
-      version: 10,
+      version: 11,
       migrate: migratePersistedState,
       // Debounce localStorage writes to coalesce rapid keystrokes into a single
       // serialization+write. 250 ms is imperceptible to users but eliminates
