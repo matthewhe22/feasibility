@@ -395,6 +395,102 @@ export function ChecksTab() {
     }
   }
 
+  // ── 6.6 EQUITY WITHIN USER CAP ──────────────────────────────────────────────
+  // Bug B — surface when the engine's auto-backstop (minEquityRequirement
+  // floor + equity-of-last-resort gap-fill) pushed cumulativeEquity above
+  // the user-set `equityDeveloper.equityCap` (and `equityJV.equityCap` if
+  // active). Both mechanisms are correct cash-mechanics behaviour, but a
+  // financier reading the Internal Dashboard sees `Equity drawn = $24.12M`
+  // while the term-sheet commitment is `$16.5M` with NO indication that
+  // the stated cap was breached.
+  //
+  // Reads the engine's `data.equityCapCheck` telemetry directly so this
+  // row's numbers match the [FUNDING] warning byte-for-byte.
+  //
+  // Status mapping (mirrors engine severity ladder):
+  //   • cap === 0 (uncapped) AND no JV cap → N/A (check disabled)
+  //   • severity === 'pass'                → PASS
+  //   • severity === 'info'                → INFO  (≤ 5% over)
+  //   • severity === 'warn'                → WARN  (5–20% over)
+  //   • severity === 'fail'                → FAIL  (> 20% over OR > cap×1.5)
+  //
+  // For projects with both Developer and JV caps, the worst severity wins
+  // and the notes string lists both lines.
+  {
+    const ecc = data.equityCapCheck;
+    const devCapped = !!ecc?.developer && ecc.developer.cap > 0;
+    const jvCapped  = !!ecc?.jv && ecc.jv.cap > 0;
+
+    if (!ecc || (!devCapped && !jvCapped)) {
+      checks.push({
+        id: 'equity-cap',
+        category: 'Equity',
+        description: 'Equity within user cap',
+        expected: 'Not configured',
+        actual: '—',
+        status: 'N/A',
+        notes: 'Set Inputs → Financing → Developer Equity Cap (value > 0) to enable this term-sheet cross-check. ' +
+          'When `equityCap = 0` the engine treats developer equity as uncapped gap-fill (legacy behaviour preserved).',
+      });
+    } else {
+      // Map severity → CheckStatus, take the worst across entities.
+      const sevRank = (sev: 'pass' | 'info' | 'warn' | 'fail'): number =>
+        sev === 'fail' ? 3 : sev === 'warn' ? 2 : sev === 'info' ? 1 : 0;
+      const devSev = devCapped ? ecc.developer.severity : 'pass';
+      const jvSev  = jvCapped  ? ecc.jv.severity        : 'pass';
+      const worstSev = sevRank(devSev) >= sevRank(jvSev) ? devSev : jvSev;
+      const status: CheckStatus =
+        worstSev === 'fail' ? 'FAIL' :
+        worstSev === 'warn' ? 'WARN' :
+        worstSev === 'info' ? 'INFO' :
+        'PASS';
+
+      // Expected/actual values use the binding (worst) entity for the
+      // headline numbers. Notes string lists both entities for transparency.
+      const binding = (sevRank(devSev) >= sevRank(jvSev)) ? ecc.developer : ecc.jv;
+      const bindingLabel = (sevRank(devSev) >= sevRank(jvSev)) ? 'Developer' : 'JV';
+      const overshoot = binding.overshoot;
+      const overshootPctLabel = formatPercent(binding.overshootPct);
+      const variance = -overshoot; // negative = over the cap
+
+      const lines: string[] = [];
+      if (devCapped) {
+        lines.push(
+          `Developer: drawn ${formatCurrency(ecc.developer.drawn)} vs cap ${formatCurrency(ecc.developer.cap)}` +
+          (ecc.developer.overshoot > 0
+            ? ` (${formatCurrency(ecc.developer.overshoot)} over, ${formatPercent(ecc.developer.overshootPct)})`
+            : ' (within cap)'),
+        );
+      }
+      if (jvCapped) {
+        lines.push(
+          `JV: drawn ${formatCurrency(ecc.jv.drawn)} vs cap ${formatCurrency(ecc.jv.cap)}` +
+          (ecc.jv.overshoot > 0
+            ? ` (${formatCurrency(ecc.jv.overshoot)} over, ${formatPercent(ecc.jv.overshootPct)})`
+            : ' (within cap)'),
+        );
+      }
+      const remedy =
+        status === 'FAIL'
+          ? ` Capital stack is fundamentally inconsistent with stated equity commitment — increase ${bindingLabel} cap to ${formatCurrency(binding.drawn)}+, raise senior/mezz facility, or reduce project scope.`
+          : status === 'WARN'
+          ? ` Auto-backstop filled funding gap of ${formatCurrency(binding.fundingGap)}. Increase ${bindingLabel} cap to ${formatCurrency(binding.drawn)}+, raise senior/mezz facility, or reduce project scope.`
+          : status === 'INFO'
+          ? ` Small auto-backstop within tolerance (${overshootPctLabel} over) — review if intentional.`
+          : '';
+      checks.push({
+        id: 'equity-cap',
+        category: 'Equity',
+        description: 'Equity within user cap',
+        expected: `≤ ${formatCurrency(binding.cap)}`,
+        actual: formatCurrency(binding.drawn),
+        variance: overshoot > 0 ? formatCurrency(variance) : formatCurrency(0),
+        status,
+        notes: lines.join('. ') + '.' + remedy,
+      });
+    }
+  }
+
   // ── 7. SENIOR FACILITY WITHIN LIMIT ─────────────────────────────────────────
   {
     // R10 — use the engine-sized senior limit (= min of input limit, LTC ceiling,

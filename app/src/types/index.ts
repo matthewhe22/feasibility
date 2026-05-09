@@ -752,6 +752,34 @@ export interface DashboardData {
     basisName: 'TDC' | 'TDC + financing costs';
     shortfall: number;
   };
+  /**
+   * Bug B — Equity-cap overshoot telemetry from the converged final solve.
+   * Single source of truth for the [FUNDING] / [INFO] warning + Checks-tab
+   * "Equity within user cap" row. Populated for BOTH entities (developer,
+   * jv) regardless of whether either fired — `severity: 'pass'` means the
+   * draw came in at or under the user-set cap (or the entity is uncapped /
+   * inactive). When `equityDeveloper.equityCap === 0` (or `equityJV.equityCap
+   * === 0`) the entity is treated as uncapped and `severity: 'pass'` is set
+   * regardless of drawn amount — no warning emitted.
+   */
+  equityCapCheck: {
+    developer: {
+      drawn: number;
+      cap: number;
+      overshoot: number;
+      overshootPct: number;
+      severity: 'pass' | 'info' | 'warn' | 'fail';
+      fundingGap: number;
+    };
+    jv: {
+      drawn: number;
+      cap: number;
+      overshoot: number;
+      overshootPct: number;
+      severity: 'pass' | 'info' | 'warn' | 'fail';
+      fundingGap: number;
+    };
+  };
 }
 
 /** Budget control metrics for a single cost line item. */

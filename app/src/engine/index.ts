@@ -1185,5 +1185,9 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     // cash-basis-incl-GST computation on every project with non-zero GST on
     // costs or non-exempt lender fees.
     minEquityCheck: funding.minEquityCheck,
+    // Bug B — forward the engine's equity-cap-overshoot cross-check so the
+    // Checks tab and any other consumer see the SAME numbers the [FUNDING]
+    // warning emitted from. Cap=0 means uncapped (severity='pass', no warning).
+    equityCapCheck: funding.equityCapCheck,
   };
 }
