@@ -74,7 +74,7 @@ function inputsWithManualCurveDevCost(): MainInputs {
       paymentStages: [], acquisitionCosts: [],
     },
     developmentCosts: [{
-      code: 'D1', description: 'Architects', costType: 'Development Cost',
+      code: 'D1', description: 'Architects', costType: 'Development Costs',
       units: 1, baseRate: 4_500_000, totalCosts: 4_500_000,
       sCurve: 'Manual S-curve 1', monthStart: 1, monthSpan: 27,
       addGST: false, ctd: 0, ctc: 4_500_000,

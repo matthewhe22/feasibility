@@ -98,13 +98,13 @@ function baseInputs(): MainInputs {
 function inputsWithSellingCosts(): MainInputs {
   const inp = baseInputs();
   inp.frontEndSellingCosts = [{
-    code: 'FS1', description: 'Sales Marketing', costType: 'Selling Costs (Front End)',
+    code: 'FS1', description: 'Sales Marketing', costType: 'Selling & Leasing Costs',
     units: 1, baseRate: 1_500_000, totalCosts: 1_500_000,
     sCurve: 'Evenly Split', monthStart: 22, monthSpan: 6,
     addGST: true, ctd: 0, ctc: 1_500_000,
   }];
   inp.backEndSellingCosts = [{
-    code: 'BS1', description: 'Settlement Legal', costType: 'Selling Costs (Back End)',
+    code: 'BS1', description: 'Settlement Legal', costType: 'Selling & Leasing Costs',
     units: 1, baseRate: 1_000_000, totalCosts: 1_000_000,
     sCurve: 'Evenly Split', monthStart: 26, monthSpan: 3,
     addGST: true, ctd: 0, ctc: 1_000_000,
