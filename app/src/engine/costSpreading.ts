@@ -62,18 +62,34 @@ export function getSCurveWeights(
     }
     return buildSCurveWeightsFallback(buildMonths);
   }
-  // Manual S-curves — use configured weights if available, else fall back to even split
+  // Manual S-curves — use configured weights if available, else fall back to even split.
+  //
+  // Truncate to `span` and renormalise — matches the contract of Evenly Split
+  // and N Month Build, both of which return exactly `span` weights summing to
+  // 1. Without truncation, weights past `span` would be silently dropped by
+  // the spreading loop in spreadCost(), producing a feasibility-vs-waterfall
+  // wedge equal to the dropped portion of the curve. Kew Demo Extra carried
+  // a $3.47M residual under that asymmetry — Architects et al referenced a
+  // 75-element manual curve while the cost item only ran 27 months.
   if (sCurve.startsWith('Manual S-curve') && manualSCurves) {
     const num = parseInt(sCurve.replace('Manual S-curve ', '')) - 1; // 0-indexed
     const curveWeights = manualSCurves[num];
     if (curveWeights && curveWeights.length > 0) {
-      const total = curveWeights.reduce((a, b) => a + b, 0);
-      if (total > 0) return curveWeights.map(w => w / total);
+      const truncated = curveWeights.slice(0, span);
+      const total = truncated.reduce((a, b) => a + b, 0);
+      if (total > 0) return truncated.map(w => w / total);
+      // total === 0 — all in-window weights are zero. Warn and fall through
+      // to even split so the item still reaches the cashflow with the right
+      // nominal.
+      _sCurveWarnings.add(
+        `"${sCurve}" has no in-window weights for span=${span} — falling back to even split.`
+      );
+    } else {
+      // Curve missing or empty — warn
+      _sCurveWarnings.add(
+        `"${sCurve}" has no weights defined — falling back to even split.`
+      );
     }
-    // Curve exists but is empty — warn
-    _sCurveWarnings.add(
-      `"${sCurve}" has no weights defined — falling back to even split.`
-    );
   }
   return evenSplitWeights(span);
 }
