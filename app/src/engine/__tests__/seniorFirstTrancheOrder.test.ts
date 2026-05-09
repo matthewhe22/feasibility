@@ -90,11 +90,25 @@ const totalCost = d.feasibility.totalCost;
 // Pre-fix this test used totalCost * 0.60 (LTC) directly; post-fix the user's
 // facilityLimit ($18M) is below the LTC × TDC (≈ $19.6M), so the hard cap is
 // $18M. Compute the effective cap explicitly so the assertion stays correct.
+//
+// CAP-INT BACK-SOLVE: for a capitalised senior facility, the auto-size cap on
+// the running balance during construction is the BACK-SOLVED principal cap
+// `facilityLimit / (1+r)^N`, not facilityLimit itself. Cap-int will compound
+// from there up to facilityLimit by maturity, but mezz starts drawing once
+// senior principal saturates the back-solved cap. Mirror the engine's binding
+// cap here so the tranche-order assertion fires at the right threshold.
 const seniorLtcCap = totalCost * 0.60;
 const seniorFacilityLimit = inputs.seniorFacility.facilityLimit;
-const seniorCovCap = seniorFacilityLimit > 0 && seniorFacilityLimit < seniorLtcCap
-  ? seniorFacilityLimit
+const _snrTermPeriods = Math.max(0, (inputs.seniorFacility.maturityMonth || 0) - inputs.seniorFacility.startMonth + 1);
+const _snrAnnual = inputs.seniorFacility.margin + inputs.seniorFacility.bbsy;
+const _snrCompoundFactor = (1 + (_snrAnnual * 30) / 365) ** _snrTermPeriods;
+const seniorBackSolveCap = inputs.seniorFacility.isCapitalised && _snrCompoundFactor > 1 && seniorFacilityLimit > 0
+  ? seniorFacilityLimit / _snrCompoundFactor
+  : seniorFacilityLimit;
+const seniorHardCap = seniorFacilityLimit > 0 && seniorBackSolveCap < seniorLtcCap
+  ? seniorBackSolveCap
   : seniorLtcCap;
+const seniorCovCap = seniorHardCap;
 
 console.log(`peakSnr=$${peakSnr.toFixed(0)} peakMz=$${peakMz.toFixed(0)} seniorCovCap=$${seniorCovCap.toFixed(0)} totalCost=$${totalCost.toFixed(0)}`);
 

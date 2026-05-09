@@ -88,10 +88,20 @@ function fixture(landLoanCapitalised: boolean): MainInputs {
   // bankBalance is NOT decremented; instead llRunningBalance grows. So the
   // cashflow row's `landLoanInterest` shows the accrual (for transparency)
   // but it's offset by an equal landLoanDrawdown (synthetic). Net cash = 0.
-  // Verify: balance at month 3 > facility (compounded).
-  const balancePeriod3 = cf[2]?.landLoanBalance ?? 0;
-  assert(balancePeriod3 > 4_000_000,
-    `LL1 — capitalised: balance at month 3 > facility (compounding); got $${balancePeriod3.toFixed(2)}`);
+  //
+  // CAP-INT BACK-SOLVE INVARIANT: facilityLimit is the lender's covenant cap
+  // on PEAK OUTSTANDING BALANCE, not a draw cap. The engine back-solves the
+  // principal drawn so worst-case compounded balance stays ≤ facilityLimit.
+  // Pre-fix the engine drew the full $4M and let cap-int compound past $4M;
+  // post-fix the principal drawn is reduced and the peak balance stays
+  // at-or-below $4M for every holding period.
+  const peakBalance = Math.max(...cf.map(c => c.landLoanBalance ?? 0));
+  assert(peakBalance <= 4_000_000 + 1,
+    `LL1 — capitalised: peak land loan balance ≤ facilityLimit (covenant cap on peak); got $${peakBalance.toFixed(2)}`);
+  // Verify the principal drawn IS reduced from $4M (i.e. back-solve took effect).
+  const drawnAtStart = cf[0]?.landLoanDrawdown ?? 0;
+  assert(drawnAtStart < 4_000_000,
+    `LL1 — capitalised: principal drawn back-solved < facilityLimit; got $${drawnAtStart.toFixed(2)}`);
   // The cumulative netCashflow should still balance (synthetic drawdown
   // matches the recorded interest on each capitalised period).
   const netCashSum = cf.reduce((s, c) => s + c.netCashflow, 0);
@@ -118,20 +128,27 @@ function fixture(landLoanCapitalised: boolean): MainInputs {
     `LL2 — senior drawdown at takeout absorbs land loan principal (got $${takeoutPeriod?.seniorDrawdown ?? 0})`);
 }
 
-// LL2 capitalised: takeout amount equals principal + accrued interest (larger)
+// LL2 capitalised: takeout amount = peak balance, capped at facilityLimit.
+//
+// CAP-INT BACK-SOLVE: cash-pay land loan draws the full $4M facility and
+// senior takes it out at construction start ($4M). Capitalised land loan
+// back-solves principal so compounded balance peaks at-or-below $4M; the
+// takeout therefore stays at-or-below $4M too, with the back-solved principal
+// (< $4M) compounding up to the facilityLimit by maturity.
 {
   const rA = runCalculations(baseAdmin, fixture(false));
   const rB = runCalculations(baseAdmin, fixture(true));
   const takeoutA = rA.cashflows[5]?.landLoanTakeoutBySenior ?? 0;
   const takeoutB = rB.cashflows[5]?.landLoanTakeoutBySenior ?? 0;
-  // Capitalised takeout > cash-pay takeout (because interest compounded into balance)
-  assert(takeoutB > takeoutA,
-    `LL2 — capitalised takeout ($${takeoutB.toFixed(0)}) > cash-pay takeout ($${takeoutA.toFixed(0)})`);
-  // Both takeouts should be ≥ principal $4M
-  assert(takeoutA >= 4_000_000 - 100,
-    `LL2 — cash-pay takeout ≥ principal (got $${takeoutA.toFixed(0)})`);
-  assert(takeoutB >= 4_000_000,
-    `LL2 — capitalised takeout ≥ principal (got $${takeoutB.toFixed(0)})`);
+  // Cash-pay takeout = full principal (no compounding to balance).
+  assert(Math.abs(takeoutA - 4_000_000) < 100,
+    `LL2 — cash-pay takeout = principal $4M (got $${takeoutA.toFixed(0)})`);
+  // Capitalised takeout ≤ facilityLimit (covenant cap on peak balance).
+  assert(takeoutB <= 4_000_000 + 1,
+    `LL2 — capitalised takeout ≤ facilityLimit covenant (got $${takeoutB.toFixed(0)})`);
+  // Capitalised takeout > 0 (loan still operates, just smaller principal).
+  assert(takeoutB > 0,
+    `LL2 — capitalised takeout > 0 (got $${takeoutB.toFixed(0)})`);
 }
 
 // LL2 covenant respected (no warning on this fixture; senior facility large enough)

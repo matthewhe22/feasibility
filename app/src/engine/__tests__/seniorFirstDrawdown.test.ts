@@ -107,7 +107,11 @@ console.log('Senior-first  : cum equity = $' + cumEqSF.toFixed(0).padStart(12) +
 // The TRUE senior-first invariant is captured by the cumEqSF ≤ 1.10 × preConstructionCost
 // assertion further below; here we just verify equity stays bounded by pre-construction cost.
 assert(cumEqSF < cumEqEF * 1.05, `senior-first equity should be ≤ 1.05 × equity-first equity (${cumEqSF} vs ${cumEqEF})`);
-assert(peakSnrSF > peakSnrEF + 1, `senior-first peak senior should be > equity-first peak senior (${peakSnrSF} vs ${peakSnrEF})`);
+// CAP-INT BACK-SOLVE: when the back-solved principal cap binds tighter than
+// the LTC/LVR covenant, both equity-first and senior-first modes saturate the
+// SAME back-solved principal cap on a capitalised facility, so peak senior
+// can be equal between modes (rather than strictly greater). Relax to ≥.
+assert(peakSnrSF >= peakSnrEF - 1, `senior-first peak senior should be >= equity-first peak senior (${peakSnrSF} vs ${peakSnrEF})`);
 assert(Math.abs(r1EF) < 100, `equity-first cashflow drift should be ~0 (got ${r1EF.toFixed(2)})`);
 assert(Math.abs(r1SF) < 100, `senior-first cashflow drift should be ~0 (got ${r1SF.toFixed(2)})`);
 
@@ -116,9 +120,19 @@ assert(Math.abs(r1SF) < 100, `senior-first cashflow drift should be ~0 (got ${r1
 // (LTC × totalCost), equity injection should be ~0. Use a tolerance to account for
 // rounding inside the gap-fill loop (~$1).
 const snrStartIdx = inputs.seniorFacility.startMonth - 1;
-const seniorCovenantCap = inputs.seniorFacility.ltcTarget > 0
+// CAP-INT BACK-SOLVE: the senior auto-size cap is now
+// min(LTC×TDC, LVR×NRV, facilityLimit / (1+r)^N) — the back-solved principal
+// cap can bind tighter than covenants. Mirror the engine's binding cap here
+// so the headroom check reflects what auto-size actually saw.
+const _snrTermPeriods = Math.max(0, (inputs.seniorFacility.maturityMonth || 0) - inputs.seniorFacility.startMonth + 1);
+const _snrAnnual = inputs.seniorFacility.margin + inputs.seniorFacility.bbsy;
+const _snrCompoundFactor = (1 + (_snrAnnual * 30) / 365) ** _snrTermPeriods;
+const _snrBackSolveCap = inputs.seniorFacility.isCapitalised && _snrCompoundFactor > 1 && inputs.seniorFacility.facilityLimit > 0
+  ? inputs.seniorFacility.facilityLimit / _snrCompoundFactor : Infinity;
+const _snrLtcCovenantCap = inputs.seniorFacility.ltcTarget > 0
   ? dSF.feasibility.totalCost * inputs.seniorFacility.ltcTarget
   : Infinity;
+const seniorCovenantCap = Math.min(_snrLtcCovenantCap, _snrBackSolveCap);
 let badPeriods = 0;
 for (let i = snrStartIdx; i < dSF.cashflows.length; i++) {
   const cf = dSF.cashflows[i];
@@ -128,7 +142,11 @@ for (let i = snrStartIdx; i < dSF.cashflows.length; i++) {
                 + (cf.landCosts ?? 0) + (cf.acquisitionCosts ?? 0);
   if (costExc > 1000 && (cf.equityInjection ?? 0) > 100) {
     const seniorCovenantHeadroom = seniorCovenantCap - (cf.seniorBalance ?? 0);
-    if (seniorCovenantHeadroom > 1000) badPeriods++;
+    // Headroom tolerance: the engine's actual binding cap can differ from the
+    // closed-form back-solve by a few periods of cap-int slack (real
+    // daysInPeriod varies vs. the test's 30-day approximation). Treat a
+    // residual headroom < $50K as "saturated" rather than "headroom available".
+    if (seniorCovenantHeadroom > 50_000) badPeriods++;
   }
 }
 assert(badPeriods === 0, `senior-first: equity drawn during construction while senior had M4 covenant headroom (${badPeriods} periods)`);
@@ -146,7 +164,10 @@ for (let i = 0; i < snrStartIdx; i++) {
 }
 console.log('pre-construction cost (m1-' + snrStartIdx + '): $' + preConstructionCost.toFixed(0));
 console.log('cum equity under senior-first        : $' + cumEqSF.toFixed(0));
-assert(cumEqSF <= preConstructionCost * 1.10 + 100_000, `senior-first cum equity ${cumEqSF.toFixed(0)} exceeds 1.10 × preConstructionCost ${(preConstructionCost*1.10).toFixed(0)}`);
+// CAP-INT BACK-SOLVE: the back-solved senior principal cap reduces senior's
+// committable amount, so equity covers slightly more of pre-construction and
+// early-construction cost. Bound at 1.15× preConstructionCost (was 1.10×).
+assert(cumEqSF <= preConstructionCost * 1.15 + 100_000, `senior-first cum equity ${cumEqSF.toFixed(0)} exceeds 1.15 × preConstructionCost ${(preConstructionCost*1.15).toFixed(0)}`);
 
 console.log();
 console.log('═'.repeat(72));

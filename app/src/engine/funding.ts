@@ -483,6 +483,73 @@ function periodInterest(balance: number, rate: number, daysInPeriod: number, day
 }
 
 /**
+ * Worst-case compound factor for a capitalised facility. Walks every active
+ * period from `startIdx` to `endIdx` (inclusive) and accumulates the
+ * per-period growth factor `(1 + annualRate * days[t] / daysPerYear)`. Used by
+ * `backSolveCapitalisedPrincipalCap` so that the per-period rate matches the
+ * engine's daily-rate convention exactly (see `periodInterest`). Returns 1 for
+ * degenerate inputs so callers fall back to the un-back-solved limit.
+ */
+export function capInterestCompoundFactor(
+  periods: Period[],
+  daysPerYear: number,
+  startIdx: number,
+  endIdx: number,
+  annualRate: number,
+): number {
+  if (!Number.isFinite(annualRate) || annualRate <= 0) return 1;
+  if (!Number.isFinite(daysPerYear) || daysPerYear <= 0) return 1;
+  if (startIdx < 0 || endIdx < startIdx) return 1;
+  let factor = 1;
+  const lastIdx = Math.min(endIdx, periods.length - 1);
+  for (let t = startIdx; t <= lastIdx; t++) {
+    const days = periods[t]?.daysInPeriod ?? 0;
+    if (days <= 0) continue;
+    factor *= 1 + (annualRate * days) / daysPerYear;
+  }
+  return Number.isFinite(factor) && factor > 0 ? factor : 1;
+}
+
+/**
+ * Back-solve the *principal* cap for a capitalised facility so that the
+ * worst-case peak outstanding balance over the loan term stays at-or-below the
+ * user-configured `facilityLimit` (which lenders interpret as a covenant cap
+ * on peak outstanding balance, NOT a draw cap).
+ *
+ * Worst case (most conservative): full principal drawn at the first active
+ * period, all interest capitalised through to maturity with no repayments:
+ *
+ *     balance(t)        = principal * prod_{s=start..t} (1 + r_s)
+ *     balance(maturity) = principal * prod_{s=start..end} (1 + r_s) = principal * F
+ *     balance <= facilityLimit  =>  principal_cap = facilityLimit / F
+ *
+ * where r_s = annualRate * days[s] / daysPerYear (matches the engine's daily
+ * rate convention). For non-capitalised facilities the formula reverts:
+ * interest is cash-paid and never adds to balance, so `principal_cap = facilityLimit`.
+ *
+ * This is conservative: real drawdowns are progressive over construction, so
+ * realised cap-int is less than the worst-case here. Erring conservatively
+ * protects the lender's covenant. Line fees and establishment fees are NOT
+ * included in the back-solve formula - those are caught mid-solve by the FU2
+ * cap-int ceiling guard.
+ */
+export function backSolveCapitalisedPrincipalCap(
+  facility: DebtFacility,
+  facilityLimit: number,
+  periods: Period[],
+  daysPerYear: number,
+  startIdx: number,
+  endIdx: number,
+  annualRate: number,
+): number {
+  if (!facility?.isCapitalised) return facilityLimit;
+  if (!Number.isFinite(facilityLimit) || facilityLimit <= 0) return facilityLimit;
+  const factor = capInterestCompoundFactor(periods, daysPerYear, startIdx, endIdx, annualRate);
+  if (!Number.isFinite(factor) || factor <= 1) return facilityLimit;
+  return facilityLimit / factor;
+}
+
+/**
  * Returns the line fee basis balance for a given facility configuration.
  *   - 'peak-drawn'         (default): peak drawn balance from the prior solver iteration
  *   - 'committed-limit':   the full committed/approved limit (conservative term-sheet convention)
@@ -817,11 +884,33 @@ function runFundingWaterfall(
   // projects. M4: senior/mezz auto-size up to min(ltcCap, lvrCap), with a
   // funding warning when the actual peak balance exceeds the user-configured
   // facilityLimit. LTC/LVR caps are NEVER breached.
+  //
+  // CAP-INT FIX: lenders treat `facilityLimit` as a covenant cap on PEAK
+  // OUTSTANDING BALANCE — not a draw cap. For a capitalised facility, accruing
+  // interest itself adds to the balance, so the principal we can safely draw
+  // is strictly less than the headline facility limit. We back-solve the
+  // principal so that worst-case (full draw at start, full compounding to
+  // maturity, no repayments) keeps balance ≤ facilityLimit. See
+  // `backSolveCapitalisedPrincipalCap`. Cash-pay facilities are unchanged.
+  // Local timeline indices for the back-solve — kept in sync with the canonical
+  // timeline-flag block below.
+  const _snrStartIdxBS  = senior.startMonth   > 0 ? senior.startMonth   - 1 : -1;
+  const _snr2StartIdxBS = senior2.startMonth  > 0 ? senior2.startMonth  - 1 : -1;
+  const _mezzStartIdxBS = mezz.startMonth     > 0 ? mezz.startMonth     - 1 : -1;
+  const _llStartIdxBS   = landLoan.startMonth > 0 ? landLoan.startMonth - 1 : -1;
+  const _snrEndIdxBS    = senior.maturityMonth   > 0 ? senior.maturityMonth   - 1 : n - 1;
+  const _snr2EndIdxBS   = senior2.maturityMonth  > 0 ? senior2.maturityMonth  - 1 : n - 1;
+  const _mezzEndIdxBS   = mezz.maturityMonth     > 0 ? mezz.maturityMonth     - 1 : n - 1;
+  const _llEndIdxBS     = landLoan.maturityMonth > 0 ? landLoan.maturityMonth - 1 : n - 1;
+
   const seniorLtcLimit  = senior.ltcTarget  > 0 ? tdc * senior.ltcTarget  : Infinity;
   const seniorLvrLimit  = senior.lvrTarget  > 0 ? nrv * senior.lvrTarget  : Infinity;
-  const seniorFacilityHardLimit = senior.facilityLimit > 0 ? senior.facilityLimit : Infinity;
+  const seniorFacilityHardLimitRaw = senior.facilityLimit > 0 ? senior.facilityLimit : Infinity;
+  const seniorFacilityHardLimit = backSolveCapitalisedPrincipalCap(
+    senior, seniorFacilityHardLimitRaw, periods, daysPerYear,
+    _snrStartIdxBS, _snrEndIdxBS, senior.margin + senior.bbsy);
   const seniorCovenantCap = Math.min(seniorLtcLimit, seniorLvrLimit);
-  const seniorRequestedLimit = senior.facilityLimit > 0 ? senior.facilityLimit : seniorCovenantCap;
+  const seniorRequestedLimit = senior.facilityLimit > 0 ? seniorFacilityHardLimit : seniorCovenantCap;
   const seniorLimit     = Math.min(seniorRequestedLimit, seniorCovenantCap);
   // Auto-size cap — Bug 2 (Kew UAT): facilityLimit MUST act as a hard ceiling
   // alongside LTC and LVR, so that senior peak ≤ min(LTC×TDC, LVR×NRV, facilityLimit).
@@ -829,22 +918,82 @@ function runFundingWaterfall(
   // user-configured facilityLimit when covenants had headroom — surfaced as a
   // facilityLimitOvershoot warning but did not bind. Now the user-configured
   // facilityLimit binds and the equity backstop fires when all three caps are hit.
+  // Cap-int fix: when capitalised, `seniorFacilityHardLimit` is the back-solved
+  // principal cap, so the auto-size loop can never draw enough principal for
+  // worst-case compounded balance to exceed the user-set facilityLimit.
   const seniorAutoSizeCap = Math.min(seniorCovenantCap, seniorFacilityHardLimit);
 
   const senior2LtcLimit = senior2.ltcTarget > 0 ? tdc * senior2.ltcTarget : Infinity;
   const senior2LvrLimit = senior2.lvrTarget > 0 ? nrv * senior2.lvrTarget : Infinity;
   // senior2 hard cap not currently exposed (senior2Limit serves the role).
   const senior2CovenantCap = Math.min(senior2LtcLimit, senior2LvrLimit);
-  const senior2Limit    = Math.min(senior2.facilityLimit > 0 ? senior2.facilityLimit : senior2CovenantCap, senior2CovenantCap);
+  const senior2FacilityHardLimitRaw = senior2.facilityLimit > 0 ? senior2.facilityLimit : Infinity;
+  const senior2FacilityHardLimit = backSolveCapitalisedPrincipalCap(
+    senior2, senior2FacilityHardLimitRaw, periods, daysPerYear,
+    _snr2StartIdxBS, _snr2EndIdxBS, senior2.margin + senior2.bbsy);
+  const senior2Limit    = Math.min(senior2FacilityHardLimit, senior2CovenantCap);
   // (senior2 doesn't currently use a separate auto-size cap; senior2Limit serves that role.)
 
   const mezzLtcLimit    = mezz.ltcTarget    > 0 ? tdc * mezz.ltcTarget    : Infinity;
   const mezzLvrLimit    = mezz.lvrTarget    > 0 ? nrv * mezz.lvrTarget    : Infinity;
-  const mezzFacilityHardLimit = mezz.facilityLimit > 0 ? mezz.facilityLimit : Infinity;
+  const mezzFacilityHardLimitRaw = mezz.facilityLimit > 0 ? mezz.facilityLimit : Infinity;
+  const mezzFacilityHardLimit = backSolveCapitalisedPrincipalCap(
+    mezz, mezzFacilityHardLimitRaw, periods, daysPerYear,
+    _mezzStartIdxBS, _mezzEndIdxBS, mezz.margin + mezz.bbsy);
   const mezzCovenantCap = Math.min(mezzLtcLimit, mezzLvrLimit);
-  const mezzRequestedLimit = mezz.facilityLimit > 0 ? mezz.facilityLimit : mezzCovenantCap;
+  const mezzRequestedLimit = mezz.facilityLimit > 0 ? mezzFacilityHardLimit : mezzCovenantCap;
   const mezzLimit       = Math.min(mezzRequestedLimit, mezzCovenantCap);
   const mezzAutoSizeCap = Math.min(mezzCovenantCap, mezzFacilityHardLimit);
+
+  // Land loan — lump-sum draw at startMonth. Back-solve the actual principal
+  // drawn so that capitalised interest doesn't push the balance past
+  // facilityLimit before the land loan matures (or is repaid by senior). For
+  // cash-pay land loans the formula reverts to facilityLimit.
+  const landLoanDrawCap = backSolveCapitalisedPrincipalCap(
+    landLoan,
+    landLoan.facilityLimit > 0 ? landLoan.facilityLimit : 0,
+    periods, daysPerYear,
+    _llStartIdxBS, _llEndIdxBS, landLoan.interestRate);
+
+  // Cap-int back-solve transparency notice. When the back-solve materially
+  // reduces the principal cap below the user-set facilityLimit (>1% reduction),
+  // surface a one-shot INFO note explaining: the lender's covenant cap is on
+  // PEAK OUTSTANDING BALANCE, so capitalised facilities can only draw a
+  // fraction of facilityLimit as principal — cap-int compounds the rest. The
+  // capital stack widget will show this back-solved principal cap rather than
+  // the headline limit; the C1 regression invariant uses this text to
+  // recognise that the smaller stack is correct, not silent under-funding.
+  const _emitBackSolveNote = (
+    label: string, raw: number, solved: number, annualRate: number, periodsCount: number,
+  ): void => {
+    if (!Number.isFinite(raw) || raw <= 0 || solved >= raw - 1) return;
+    if (raw - solved < raw * 0.01) return; // <1% shrinkage — noise, skip.
+    _summaryWarnings.set(`capint-backsolve:${label}`,
+      `[INFO] Cap-int back-solve: ${label} principal cap reduced from ${fmtMoney(raw)} ` +
+      `(facilityLimit, lender covenant on peak balance) to ${fmtMoney(solved)} ` +
+      `at ${(annualRate * 100).toFixed(2)}% over ${periodsCount} periods. ` +
+      `Capitalised interest compounds the principal up to facilityLimit by maturity — ` +
+      `the capital stack widget reports the principal cap; the gap to total cost is ` +
+      `cap-int + revenue inflows (additional equity required only if revenue and equity ` +
+      `together can't fund the residual gap).`);
+  };
+  if (senior.isCapitalised && senior.facilityLimit > 0) {
+    _emitBackSolveNote('Senior #1', seniorFacilityHardLimitRaw, seniorFacilityHardLimit,
+      senior.margin + senior.bbsy, Math.max(0, _snrEndIdxBS - _snrStartIdxBS + 1));
+  }
+  if (senior2.isCapitalised && senior2.facilityLimit > 0) {
+    _emitBackSolveNote('Senior #2', senior2FacilityHardLimitRaw, senior2FacilityHardLimit,
+      senior2.margin + senior2.bbsy, Math.max(0, _snr2EndIdxBS - _snr2StartIdxBS + 1));
+  }
+  if (mezz.isCapitalised && mezz.facilityLimit > 0) {
+    _emitBackSolveNote('Mezzanine', mezzFacilityHardLimitRaw, mezzFacilityHardLimit,
+      mezz.margin + mezz.bbsy, Math.max(0, _mezzEndIdxBS - _mezzStartIdxBS + 1));
+  }
+  if (landLoan.isCapitalised && landLoan.facilityLimit > 0) {
+    _emitBackSolveNote('Land Loan', landLoan.facilityLimit, landLoanDrawCap,
+      landLoan.interestRate, Math.max(0, _llEndIdxBS - _llStartIdxBS + 1));
+  }
+
 
   // ===== Equity caps (per entity) =====
   const totalCostsExcFin  = sum(monthlyCostsExcFinance);
@@ -1028,10 +1177,17 @@ function runFundingWaterfall(
           `[INFO] ${cadenceLabel} (cash-pay mode). Interest accrues monthly on the prior closing balance and is paid in cash at the end of each ${llFreqRaw}-period window — first cash charge: period ${landLoan.startMonth + llFreqRaw}.`
         );
       }
-      llDrawdowns[i]     = landLoan.facilityLimit;
-      llRunningBalance  += landLoan.facilityLimit;
-      bankBalance       += landLoan.facilityLimit;
-      const estFee = landLoan.facilityLimit * landLoan.establishmentFeePercent;
+      // Cap-int fix: when the land loan is capitalised, the principal we
+      // can safely draw is back-solved (`landLoanDrawCap`) so that the
+      // worst-case compounded balance at maturity stays at-or-below the user
+      // facilityLimit (covenant cap on peak balance). For cash-pay land
+      // loans `landLoanDrawCap === landLoan.facilityLimit` so the drawdown
+      // is unchanged from prior behaviour.
+      const llActualDraw = landLoanDrawCap;
+      llDrawdowns[i]     = llActualDraw;
+      llRunningBalance  += llActualDraw;
+      bankBalance       += llActualDraw;
+      const estFee = llActualDraw * landLoan.establishmentFeePercent;
       if (estFee > 0) {
         llFees[i]      = estFee;
         totalLandFees += estFee;
