@@ -17,7 +17,8 @@ import {
 } from '../db/projectDb';
 import { validateProjectName } from '../admin/projectSetupValidator';
 import { exportToExcel } from '../utils/exportToExcel';
-import { useStore, migratePersistedState } from '../store/useStore';
+import { useStore, migratePersistedState, defaultAdmin, defaultInputs } from '../store/useStore';
+import { deepMerge } from '../utils/deepMerge';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -153,16 +154,37 @@ export function ProjectManager({ onClose, onLoad }: Props) {
     try {
       const rec = await loadProject(id);
       if (!rec) { setMsg('Project not found.'); return; }
-      // Review #1 fix — route the loaded record through migratePersistedState
-      // so any pre-v7 fields (e.g. equityDeveloper.fixedAmount instead of
-      // .equityCap) are migrated before the engine sees them. Without this,
-      // existing Supabase / IndexedDB records saved on schema v6 fall through
-      // to the engine with .equityCap === undefined, and the funding solver
-      // silently treats the cap as 0 (or the % fallback). Migrates from any
-      // version up to and including 6 — v7+ records pass through unchanged.
+      // P1 fix (this PR) — TWO-LAYER load normalisation.
+      //
+      // Layer A: deep-merge the loaded payload over the current defaults so
+      // that fields added since the record was saved (e.g. otherFinancingCosts,
+      // backEndSellingCosts, lettingFees, new sub-fields on seniorFacility/
+      // equityDeveloper/etc.) are filled in with their default values. Without
+      // this, engine iterators that assume `for (const x of inputs.foo)` hit
+      // undefined on legacy records and hard-crash. The merge is non-
+      // destructive: anything the record carries wins; only missing keys are
+      // back-filled from the default template.
+      //
+      // Layer B: hand the normalised state to migratePersistedState, which
+      // owns version-specific schema changes (e.g. units→feeRatePercent for
+      // every pmFees entry on v3, equityCap renaming on v7, etc.).
+      // Normalisation must run BEFORE migration so the migration ladder sees
+      // all expected fields.
+      //
+      // Migration is invoked from version `rec.version ?? 0` up to current,
+      // so a record saved on any historical schema version is brought fully
+      // up to date — not just pre-v7 records as the prior implementation did.
+      const normalisedAdmin = deepMerge(defaultAdmin, rec.admin);
+      const normalisedInputs = deepMerge(defaultInputs, rec.inputs);
+      // ProjectRecord has no schema-version stamp (projects are saved without
+      // one), so we conservatively assume v0 — i.e. run every migration step
+      // up to current. The migration ladder is idempotent on already-migrated
+      // data, so doing this on a modern record is a no-op. If a `version`
+      // field is added to ProjectRecord later, it'll be picked up here.
+      const recVersion = (rec as { version?: number }).version ?? 0;
       const migrated = migratePersistedState(
-        { admin: rec.admin, inputs: rec.inputs },
-        6,
+        { admin: normalisedAdmin, inputs: normalisedInputs },
+        recVersion,
       ) as { admin: typeof rec.admin; inputs: typeof rec.inputs };
       rec.admin = migrated.admin;
       rec.inputs = migrated.inputs;
