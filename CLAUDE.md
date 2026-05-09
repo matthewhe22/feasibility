@@ -90,6 +90,32 @@ src/
 └── utils/                # Formatting, date helpers
 ```
 
+## Build / Pre-push Validation
+
+Before opening a PR, run the canonical build from `app/`:
+
+```
+cd app && npm run build
+```
+
+This runs `tsc -b && vite build`, which is what Vercel runs on every preview deploy. **Use this — not `tsc --noEmit` — as the pre-push gate.**
+
+### Why `tsc --noEmit` isn't enough
+
+`tsc --noEmit` from the project root only typechecks files reachable from the root `tsconfig.json`. The repo uses TypeScript project references — `tsconfig.app.json` covers `src/**`, and `tsconfig.test.json` (or equivalent) covers `__tests__/**`. The root config doesn't cross those references, so type errors confined to test files (e.g. invalid string literal types like `costType`) silently slip through.
+
+`tsc -b` is the build-mode invocation: it walks every referenced project and typechecks all of them. That's why `npm run build` catches what plain `tsc --noEmit` misses.
+
+### Concrete example — PR #48
+
+Local `npx tsc --noEmit` came back clean, but Vercel's preview deploy failed with two invalid `CostType` literals in newly-added test fixtures (`manualSCurveSpan.test.ts`, `sellingCostsWiring.test.ts`). The fix landed in commit `99d8f6c` before the PR could be merged. Running `cd app && npm run build` before pushing would have caught it locally in seconds.
+
+### TL;DR
+
+- Pre-push: `cd app && npm run build`
+- Optional fast loop while editing: `npx tsc -b --watch` from `app/`
+- Plain `tsc --noEmit` is fine for a quick sanity check on app source, but **not** as your final pre-push gate.
+
 ## Implementation Phases
 1. Project setup + types + state management
 2. Input forms (4 tabs with Excel defaults pre-loaded)
