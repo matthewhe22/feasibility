@@ -153,10 +153,20 @@ function Table1FeasibilitySummary({
             <div className="h-1 bg-gray-300" />
             <CompareRow label="Total Profit" current={current.totalProfit} previous={p('totalProfit')} bold highlight />
             {/* K03: hide the "after Loan Coupon Interest" row when it equals
-                Total Profit (i.e. coupon = 0) to avoid visual duplication. */}
-            {Math.abs(current.totalProfit - current.totalProfitAfterCoupon) > 1 && (
-              <CompareRow label="Total Profit (after Loan Coupon Interest)" current={current.totalProfitAfterCoupon} previous={p('totalProfitAfterCoupon')} bold />
-            )}
+                Total Profit (i.e. coupon = 0) to avoid visual duplication.
+                In compare mode, keep the row if EITHER side has a non-zero
+                coupon delta — otherwise hiding it loses the previous version's
+                after-coupon figure entirely. */}
+            {(() => {
+              const currentDiffers = Math.abs(current.totalProfit - current.totalProfitAfterCoupon) > 1;
+              const prevTotalProfit = p('totalProfit') ?? 0;
+              const prevAfterCoupon = p('totalProfitAfterCoupon') ?? 0;
+              const prevDiffers = prev != null && Math.abs(prevTotalProfit - prevAfterCoupon) > 1;
+              if (!currentDiffers && !prevDiffers) return null;
+              return (
+                <CompareRow label="Total Profit (after Loan Coupon Interest)" current={current.totalProfitAfterCoupon} previous={p('totalProfitAfterCoupon')} bold />
+              );
+            })()}
           </>
         ) : (
           <>
