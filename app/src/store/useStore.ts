@@ -66,7 +66,13 @@ interface AppState {
   setProjectList: (list: string[]) => void;
 }
 
-const defaultAdmin: AdminConfig = {
+/**
+ * Default AdminConfig used to seed a fresh session and to backfill missing
+ * fields when a legacy project record is loaded (see ProjectManager.handleLoad
+ * → deepMerge). Exported so the load path can reach it without having to
+ * duplicate the literal here.
+ */
+export const defaultAdmin: AdminConfig = {
   projectName: 'Project Demo',
   modelStartDate: 44927, // Jan 2023
   monthsPerPeriod: 1,
@@ -92,7 +98,13 @@ const defaultAdmin: AdminConfig = {
   repaymentSequence: ['senior', 'mezz', 'equity'],
 };
 
-const defaultInputs: MainInputs = {
+/**
+ * Default MainInputs used to seed a fresh session and to backfill missing
+ * fields when a legacy project record is loaded (see ProjectManager.handleLoad
+ * → deepMerge). Exported so the load path can reach it without having to
+ * duplicate the literal here.
+ */
+export const defaultInputs: MainInputs = {
   preliminary: {
     dateOfFirstPeriod: 45017, // Apr 2023
     cashFlowPeriod: 'Monthly',
@@ -246,19 +258,43 @@ export function migratePersistedState(persisted: unknown, version: number): unkn
   }
   if (version < 3 && p.inputs && typeof p.inputs === 'object') {
     // Migrate legacy PM-fee rate. Adopt legacy `units` as the rate only when
-    // it looks like a rate (strictly between 0 and 1). Anything outside that
-    // range is most likely a quantity / dollar amount the user typed when the
-    // engine silently treated it as 100%/10000%/etc — default to 0.02 (2%)
-    // and rely on the runtime warning to nudge the user.
+    // it looks like a rate (strictly between 0 and 1, exclusive). Anything
+    // outside that range is most likely a quantity / dollar amount the user
+    // typed when the engine silently treated it as 100% / 10000% / etc.
+    //
+    // Coverage extended (P1 fix on PR #54): the v3 step originally walked only
+    // `pmFees[0]`, leaving every other PM-fee entry with `feeRatePercent`
+    // undefined and `units` carrying a sensible rate value. The engine reads
+    // only `pmFees[0]`, so this was latent — but legacy records with the
+    // PM-fee rate stored on `pmFees[0].units` (e.g. units=0.015 for 1.5%)
+    // and no `feeRatePercent` would silently fall back to the engine's 2%
+    // default and quietly drift the user's actual fee rate. Now we walk
+    // every `pmFees[i]` so the rate is recovered wherever the user put it,
+    // and so any future engine consumer can rely on the field being canonical.
+    //
+    // Idempotent: only writes when `feeRatePercent` is not a finite number
+    // (i.e. missing/null/NaN). Already-migrated entries pass through.
     const inputs = p.inputs as { pmFees?: Array<Record<string, unknown>> };
-    if (Array.isArray(inputs.pmFees) && inputs.pmFees.length > 0) {
-      const first = inputs.pmFees[0];
-      if (first && typeof first === 'object' && first['feeRatePercent'] === undefined) {
-        const legacyUnits = first['units'];
-        if (typeof legacyUnits === 'number' && legacyUnits > 0 && legacyUnits < 1) {
-          first['feeRatePercent'] = legacyUnits;
-        } else {
-          first['feeRatePercent'] = 0.02;
+    if (Array.isArray(inputs.pmFees)) {
+      for (let i = 0; i < inputs.pmFees.length; i++) {
+        const item = inputs.pmFees[i];
+        if (!item || typeof item !== 'object') continue;
+        const existing = item['feeRatePercent'];
+        const alreadySet = typeof existing === 'number' && Number.isFinite(existing);
+        if (alreadySet) continue;
+        const legacyUnits = item['units'];
+        const isSensibleRate =
+          typeof legacyUnits === 'number' && Number.isFinite(legacyUnits) &&
+          legacyUnits > 0 && legacyUnits < 1;
+        if (isSensibleRate) {
+          item['feeRatePercent'] = legacyUnits;
+        } else if (i === 0) {
+          // Preserve historical v3 behaviour for the engine-read entry: fall
+          // back to 2% when the legacy units value isn't a plausible rate, so
+          // the engine doesn't silently consume `undefined`. Subsequent
+          // entries (i > 0) are not read by the engine — leave them as-is to
+          // avoid stamping every PM-fee placeholder row with a phantom rate.
+          item['feeRatePercent'] = 0.02;
         }
       }
     }
