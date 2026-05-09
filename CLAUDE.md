@@ -112,9 +112,9 @@ Local `npx tsc --noEmit` came back clean, but Vercel's preview deploy failed wit
 
 ### TL;DR
 
-- Pre-push: `cd app && npm run build`
-- Optional fast loop while editing: `npx tsc -b --watch` from `app/`
-- Plain `tsc --noEmit` is fine for a quick sanity check on app source, but **not** as your final pre-push gate.
+- **Pre-push gate:** `cd app && npm run build`
+- **Editor watch loop:** `cd app && npx tsc -b --watch`
+- **Don't use `tsc --noEmit` from `app/`** — with `files: []` + project references, it's a no-op that gives false confidence. Always use `-b` (build mode) so referenced configs are walked.
 
 ## Implementation Phases
 1. Project setup + types + state management
