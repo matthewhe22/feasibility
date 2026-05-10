@@ -653,6 +653,39 @@ export interface FundingResult {
   senior2FacilitySize: number;
   senior2FacilityLimit: number;
   mezzFacilitySize: number;
+  /**
+   * Issue 3 — Timing-aware back-solve raw peaks (would-be balance).
+   *
+   * `seniorFacilitySize` / `senior2FacilitySize` / `mezzFacilitySize` report
+   * the POST cap-int ceiling peak — i.e. after FU2 has converted would-be
+   * cap-int into cash-pay to keep balance <= covenant cap. That makes them
+   * useless as a feedback signal for the timing-aware shrink loop in
+   * `solveFunding`: by definition the post-ceiling peak never exceeds the
+   * cap, so the outer shrink loop never sees an overshoot and the principal
+   * cap never tightens. Result on Dandenong: $30M principal + forced cash-pay
+   * overflow instead of the intended $22M principal + $8M cap-int rolling
+   * into the same $30M cap.
+   *
+   * `rawPeak.X` is the WOULD-BE peak. Every period, BEFORE the cap-int
+   * ceiling decides whether to capitalise or switch to cash-pay, we
+   * accumulate `max(rawPeak.X, currentBalance + would-be-cap-int)`.
+   * The outer shrink loop in `solveFunding` compares rawPeak.X against
+   * facilityLimit (rather than the post-ceiling peak), so when timing
+   * means cap-int would push balance over the cap, we shrink the principal
+   * cap proportionally and re-solve. Cash-pay facilities are unaffected:
+   * rawPeak.X tracks the running balance directly (no ceiling check fires)
+   * so it equals *FacilitySize and the shrink loop is a no-op.
+   *
+   * Optional because legacy callers (createEmptyResult, direct
+   * runFundingWaterfall users in tests) may not populate it; downstream
+   * readers should treat undefined as a fallback to *FacilitySize.
+   */
+  rawPeak?: {
+    senior: number;
+    senior2: number;
+    mezz: number;
+    landLoan: number;
+  };
   /** Whether the iterative solver converged within tolerance */
   converged: boolean;
   /** Number of iterations actually performed (1..maxIterations) */
@@ -1069,9 +1102,22 @@ export function solveFunding(
       }
     };
 
-    checkAndShrink('senior',   senior,   result.seniorFacilitySize);
-    checkAndShrink('senior2',  senior2,  result.senior2FacilitySize);
-    checkAndShrink('mezz',     mezz,     result.mezzFacilitySize);
+    // Issue 3 — feed checkAndShrink the WOULD-BE peak (rawPeak) instead of
+    // the POST cap-int ceiling peak (*FacilitySize). The post-ceiling peak
+    // is, by construction, never above the covenant cap (FU2 converts cap-int
+    // to cash-pay specifically to keep it under), so the shrink loop never
+    // sees an overshoot and the principal cap never tightens. rawPeak is the
+    // balance the engine WOULD have produced if cap-int had been free to
+    // capitalise — which is the right signal for sizing principal.
+    const rawPeak = result.rawPeak ?? {
+      senior:  result.seniorFacilitySize,
+      senior2: result.senior2FacilitySize,
+      mezz:    result.mezzFacilitySize,
+      landLoan: 0,
+    };
+    checkAndShrink('senior',   senior,   rawPeak.senior);
+    checkAndShrink('senior2',  senior2,  rawPeak.senior2);
+    checkAndShrink('mezz',     mezz,     rawPeak.mezz);
     // Land loan peak: lump-sum balance immediately after draw is the peak,
     // which equals the override (no revenue/repayment before maturity here).
     // The outer check is still useful because cap-int compounds toward
@@ -1682,6 +1728,16 @@ function runFundingWaterfall(
   let peakEquityDrawn      = 0;
   let peakEquityMonth      = 0;
 
+  // Issue 3 — Timing-aware back-solve raw peaks (would-be balance, before
+  // cap-int hard ceiling converts to cash-pay). See FundingResult.rawPeak
+  // doc for the full rationale. The shrink loop in `solveFunding` reads
+  // these to detect overshoots that the post-ceiling *FacilitySize peaks
+  // would otherwise hide.
+  let rawPeakSnrBalance    = 0;
+  let rawPeakSnr2Balance   = 0;
+  let rawPeakMezzBalance   = 0;
+  let rawPeakLandLoanBal   = 0;
+
   const snrAllInRate  = senior.margin  + senior.bbsy;
   const snr2AllInRate = senior2.margin + senior2.bbsy;
   const mezzAllInRate = mezz.margin    + mezz.bbsy;
@@ -1903,6 +1959,11 @@ function runFundingWaterfall(
       snrInterest[i]      = snrInt;
       totalSeniorInterest += snrInt;
       if (senior.isCapitalised) {
+        // Issue 3 — Capture would-be balance BEFORE the cap-int ceiling fires.
+        // rawPeakSnrBalance is the signal the timing-aware shrink loop reads:
+        // it sees the balance that capitalisation WOULD have produced even
+        // when the ceiling converts cap-int to cash-pay.
+        rawPeakSnrBalance = Math.max(rawPeakSnrBalance, snrRunningBalance + snrInt);
         // FU2 — Cap-int ceiling: if capitalising this period's interest would
         // push the senior running balance above its M4 covenant cap, switch
         // THIS period's interest to cash-pay instead of capitalising. Avoids
@@ -1935,6 +1996,8 @@ function runFundingWaterfall(
         snrFees[i]        = periodFees;
         totalSeniorFees  += periodFees;
         if (senior.isCapitalised) {
+          // Issue 3 — would-be peak before fee-cap-int ceiling fires.
+          rawPeakSnrBalance = Math.max(rawPeakSnrBalance, snrRunningBalance + periodFees);
           // FU2 — same cap-int ceiling guard for capitalised fees.
           if (snrRunningBalance + periodFees > seniorAutoSizeCap + 1) {
             bankBalance -= periodFees;
@@ -1962,6 +2025,8 @@ function runFundingWaterfall(
       snr2Interest[i]      = snr2Int;
       totalSenior2Interest += snr2Int;
       if (senior2.isCapitalised) {
+        // Issue 3 — would-be peak before cap-int ceiling fires.
+        rawPeakSnr2Balance = Math.max(rawPeakSnr2Balance, snr2RunningBalance + snr2Int);
         if (snr2RunningBalance + snr2Int > senior2CovenantCap + 1) {
           bankBalance -= snr2Int;
           recordCapIntCeilingHit('senior2', i + 1, snr2Int);
@@ -1984,6 +2049,8 @@ function runFundingWaterfall(
         snr2Fees[i]       = periodFees;
         totalSenior2Fees += periodFees;
         if (senior2.isCapitalised) {
+          // Issue 3 — would-be peak before fee-cap-int ceiling fires.
+          rawPeakSnr2Balance = Math.max(rawPeakSnr2Balance, snr2RunningBalance + periodFees);
           if (snr2RunningBalance + periodFees > senior2CovenantCap + 1) {
             bankBalance -= periodFees;
             recordCapIntCeilingHit('senior2', i + 1, periodFees);
@@ -2010,6 +2077,11 @@ function runFundingWaterfall(
       mzInterest[i]      = mzInt;
       totalMezzInterest += mzInt;
       if (mezz.isCapitalised) {
+        // Issue 3 — would-be peak before cap-int ceiling fires. This is the
+        // signal that lets the timing-aware shrink loop tighten the principal
+        // cap when interest accrual on a near-cap balance would otherwise
+        // get silently converted to cash-pay (the original Dandenong bug).
+        rawPeakMezzBalance = Math.max(rawPeakMezzBalance, mzRunningBalance + mzInt);
         if (mzRunningBalance + mzInt > mezzAutoSizeCap + 1) {
           bankBalance -= mzInt;
           recordCapIntCeilingHit('mezz', i + 1, mzInt);
@@ -2028,6 +2100,8 @@ function runFundingWaterfall(
         mzFees[i]       += mzLineFee;
         totalMezzFees   += mzLineFee;
         if (mezz.isCapitalised) {
+          // Issue 3 — would-be peak before fee-cap-int ceiling fires.
+          rawPeakMezzBalance = Math.max(rawPeakMezzBalance, mzRunningBalance + mzLineFee);
           if (mzRunningBalance + mzLineFee > mezzAutoSizeCap + 1) {
             bankBalance -= mzLineFee;
             recordCapIntCeilingHit('mezz', i + 1, mzLineFee);
@@ -2054,6 +2128,8 @@ function runFundingWaterfall(
         mzFees[i]     += mzEstFee;
         totalMezzFees += mzEstFee;
         if (mezz.isCapitalised) {
+          // Issue 3 — would-be peak before est-fee-cap-int ceiling fires.
+          rawPeakMezzBalance = Math.max(rawPeakMezzBalance, mzRunningBalance + mzEstFee);
           if (mzRunningBalance + mzEstFee > mezzAutoSizeCap + 1) {
             bankBalance -= mzEstFee;
             recordCapIntCeilingHit('mezz', i + 1, mzEstFee);
@@ -2471,6 +2547,18 @@ function runFundingWaterfall(
     peakSnr2Balance = Math.max(peakSnr2Balance, snr2RunningBalance);
     peakMezzBalance = Math.max(peakMezzBalance, mzRunningBalance);
 
+    // Issue 3 — Baseline raw-peak floor. The interest/fee cap-int ceiling
+    // already updated rawPeak* with would-be values BEFORE the ceiling
+    // fired (see senior/mezz interest blocks above). For cash-pay
+    // facilities (no ceiling fires) and for periods where principal
+    // drawdown alone exceeds the prior raw peak, ensure rawPeak* stays
+    // >= the post-period running balance so the shrink loop never
+    // under-counts the actual exposure.
+    rawPeakSnrBalance  = Math.max(rawPeakSnrBalance,  snrRunningBalance);
+    rawPeakSnr2Balance = Math.max(rawPeakSnr2Balance, snr2RunningBalance);
+    rawPeakMezzBalance = Math.max(rawPeakMezzBalance, mzRunningBalance);
+    rawPeakLandLoanBal = Math.max(rawPeakLandLoanBal, llRunningBalance);
+
     // Peak equity outstanding (cumulative injections − repatriations at this period)
     const equityOutstanding = cumulativeEquity - totalEqRepatriated;
     if (equityOutstanding > peakEquityDrawn) {
@@ -2530,6 +2618,14 @@ function runFundingWaterfall(
     senior2FacilitySize: peakSnr2Balance,
     senior2FacilityLimit: hasSenior2 ? senior2Limit : 0,
     mezzFacilitySize: peakMezzBalance,
+    // Issue 3 — Timing-aware would-be peaks for the shrink loop. See
+    // FundingResult.rawPeak doc for full rationale.
+    rawPeak: {
+      senior:   rawPeakSnrBalance,
+      senior2:  rawPeakSnr2Balance,
+      mezz:     rawPeakMezzBalance,
+      landLoan: rawPeakLandLoanBal,
+    },
     // Populated in solveFunding():
     converged: false,
     convergedIn: null,
@@ -2569,6 +2665,7 @@ function createEmptyResult(n: number): FundingResult {
     seniorFacilitySize: 0, seniorFacilityLimit: 0,
     senior2FacilitySize: 0, senior2FacilityLimit: 0,
     mezzFacilitySize: 0,
+    rawPeak: { senior: 0, senior2: 0, mezz: 0, landLoan: 0 },
     converged: false,
     convergedIn: null, iterations: 0, convergenceDelta: Infinity,
     // Empty stub — overwritten by computeMinEquityCheck post-convergence.
