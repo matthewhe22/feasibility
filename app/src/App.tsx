@@ -281,28 +281,41 @@ function App() {
         </div>
       )}
 
-      {!dismissedWarnings && dashboardData?.warningsDetail && dashboardData.warningsDetail.length > 0 && (
-        <div role="status" className="bg-yellow-50 border-b border-yellow-300 px-4 py-2 flex items-start justify-between">
+      {!dismissedWarnings && dashboardData?.warningsDetail && dashboardData.warningsDetail.length > 0 && (() => {
+        // Issue 2 — when ANY warning has severity 'error' (FAIL covenant
+        // breach, equity-cap overshoot >20%, or solver non-convergence), the
+        // banner background flips to red so the FAIL is visible at a glance.
+        // Per-row colour is still driven by each item's severity.
+        const hasError = dashboardData.warningsDetail.some(w => w.severity === 'error');
+        const bannerCls = hasError
+          ? 'bg-red-50 border-b border-red-300 px-4 py-2 flex items-start justify-between'
+          : 'bg-yellow-50 border-b border-yellow-300 px-4 py-2 flex items-start justify-between';
+        const headingCls = hasError ? 'text-red-800 text-xs font-semibold' : 'text-yellow-800 text-xs font-semibold';
+        const moreCls = hasError ? 'text-xs text-red-700 italic' : 'text-xs text-yellow-700 italic';
+        const dismissCls = hasError ? 'text-red-700 text-xs underline ml-4 shrink-0' : 'text-yellow-600 text-xs underline ml-4 shrink-0';
+        return (
+        <div role="status" className={bannerCls}>
           <div className="flex-1 min-w-0">
-            <span className="text-yellow-800 text-xs font-semibold">
+            <span className={headingCls}>
               {dashboardData.warningsDetail.length} calculation {dashboardData.warningsDetail.length === 1 ? 'warning' : 'warnings'}:
             </span>
             <ul className="mt-0.5 space-y-0.5">
               {dashboardData.warningsDetail.slice(0, 6).map((w, i) => (
-                <li key={i} className={`text-xs font-mono ${w.severity === 'error' ? 'text-red-700' : 'text-yellow-700'}`}>
+                <li key={i} className={`text-xs font-mono ${w.severity === 'error' ? 'text-red-700' : w.severity === 'info' ? 'text-blue-700' : 'text-yellow-700'}`}>
                   <span className="uppercase font-semibold mr-2">[{w.category}]</span>{w.message}
                 </li>
               ))}
               {dashboardData.warningsDetail.length > 6 && (
-                <li className="text-xs text-yellow-700 italic">…and {dashboardData.warningsDetail.length - 6} more (see Checks tab)</li>
+                <li className={moreCls}>…and {dashboardData.warningsDetail.length - 6} more (see Checks tab)</li>
               )}
             </ul>
           </div>
-          <button onClick={() => setDismissedWarnings(true)} aria-label="Dismiss calculation warnings" className="text-yellow-600 text-xs underline ml-4 shrink-0">
+          <button onClick={() => setDismissedWarnings(true)} aria-label="Dismiss calculation warnings" className={dismissCls}>
             Dismiss
           </button>
         </div>
-      )}
+        );
+      })()}
 
       {!dismissedWarnings && !dashboardData?.warningsDetail && dashboardData?.warnings && dashboardData.warnings.length > 0 && (
         <div role="status" className="bg-yellow-50 border-b border-yellow-300 px-4 py-2 flex items-start justify-between">

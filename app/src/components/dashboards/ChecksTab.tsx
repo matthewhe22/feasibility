@@ -755,13 +755,15 @@ export function ChecksTab() {
     });
   } else {
     fundingWarns.forEach((w, i) => {
-      const isSolverError = w.severity === 'error';
-      // B08 — Prefix-aware severity. Messages prefixed with [INFO] are
-      // informational notes (auto-size summaries, IPF>1 disclosure) — render
-      // as INFO not WARN. The Q1 consolidator already emits auto-size with
-      // this prefix; B08 also adds it to the LL IPF>1 INFO note.
-      const isInfo = !isSolverError && /^\[INFO\]/.test(w.message);
-      const status: CheckStatus = isSolverError ? 'FAIL' : isInfo ? 'INFO' : 'WARN';
+      // Severity is set by the engine (engine/index.ts) based on the message
+      // prefix: [FUNDING] FAIL or solver-non-convergence → 'error', [INFO] →
+      // 'info', otherwise → 'warning'. We distinguish solver non-convergence
+      // from a FAIL covenant breach by category so the notes stay accurate.
+      const isError = w.severity === 'error';
+      const isSolverError = isError && w.category === 'solver';
+      const isFail = isError && !isSolverError;
+      const isInfo = w.severity === 'info';
+      const status: CheckStatus = isError ? 'FAIL' : isInfo ? 'INFO' : 'WARN';
       checks.push({
         id: `funding-warn-${i}`,
         category: 'Funding',
@@ -771,6 +773,8 @@ export function ChecksTab() {
         status,
         notes: isSolverError
           ? 'Debt solver did not converge — finance costs and facility sizes may be inaccurate.'
+          : isFail
+          ? 'Capital stack is fundamentally inconsistent — review the message and apply the suggested remedy (raise cap, increase facility, or reduce scope).'
           : isInfo
           ? 'Informational note from the funding solver — no action required.'
           : 'Funding constraint or covenant flag from the cashflow solver.',
