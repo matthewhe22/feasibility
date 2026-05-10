@@ -13,6 +13,38 @@ import {
 import { solveFunding, clearFundingWarnings, getFundingWarnings } from './funding';
 import { sum, calculateIRR, at } from '../utils';
 
+
+/**
+ * Issue 2 — Prefix-aware severity for funding warnings.
+ *
+ * PR #57 introduced explicit severity tags in the warning text so the engine
+ * can route FAIL/INFO without recognising every per-message phrasing.
+ *
+ *   • messages containing 'solver' (case-insensitive) → severity 'error',
+ *     category 'solver' — debt-solver non-convergence (PR #46 path)
+ *   • starts with '[FUNDING] FAIL' → severity 'error', category 'funding' —
+ *     covenant breach, equity cap overshoot >20% etc. The capital stack is
+ *     fundamentally inconsistent and the user must restructure.
+ *   • starts with '[INFO]' or '[FUNDING] [INFO]' → severity 'info' — auto-
+ *     size summary, IPF>1 disclosure, etc; no action required.
+ *   • everything else → severity 'warning' (existing default).
+ *
+ * Exported so the unit test can exercise the prefix grammar without spinning
+ * up the full engine.
+ */
+export function classifyFundingWarning(m: string): {
+  severity: 'error' | 'warning' | 'info';
+  category: 'solver' | 'funding';
+} {
+  const isSolver = m.toLowerCase().includes('solver');
+  if (isSolver) return { severity: 'error', category: 'solver' };
+  const isFail = /^\[FUNDING\]\s+FAIL\b/.test(m);
+  if (isFail) return { severity: 'error', category: 'funding' };
+  const isInfo = /^(\[INFO\]|\[FUNDING\]\s+\[INFO\])/.test(m);
+  if (isInfo) return { severity: 'info', category: 'funding' };
+  return { severity: 'warning', category: 'funding' };
+}
+
 export function runCalculations(admin: AdminConfig, inputs: MainInputs): DashboardData {
   // Reset warnings for this run
   clearSCurveWarnings();
@@ -1148,12 +1180,8 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
         out.push({ message: m, severity: 'warning', category: 'sCurve' });
       }
       for (const m of getFundingWarnings()) {
-        const isSolver = m.toLowerCase().includes('solver');
-        out.push({
-          message: m,
-          severity: isSolver ? 'error' : 'warning',
-          category: isSolver ? 'solver' : 'funding',
-        });
+        const { severity, category } = classifyFundingWarning(m);
+        out.push({ message: m, severity, category });
       }
       for (const m of getRevenueWarnings()) {
         out.push({ message: m, severity: 'warning', category: 'revenue' });

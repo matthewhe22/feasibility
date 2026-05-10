@@ -154,47 +154,45 @@ export function ProjectManager({ onClose, onLoad }: Props) {
     try {
       const rec = await loadProject(id);
       if (!rec) { setMsg('Project not found.'); return; }
-      // P1 fix (this PR) — TWO-LAYER load normalisation.
+      // Issue 4 (review batch) — MIGRATE-FIRST, then back-fill defaults.
       //
-      // Layer A: deep-merge the loaded payload over the current defaults so
-      // that fields added since the record was saved (e.g. otherFinancingCosts,
-      // backEndSellingCosts, lettingFees, new sub-fields on seniorFacility/
-      // equityDeveloper/etc.) are filled in with their default values. Without
-      // this, engine iterators that assume `for (const x of inputs.foo)` hit
-      // undefined on legacy records and hard-crash. The merge is non-
-      // destructive: anything the record carries wins; only missing keys are
-      // back-filled from the default template.
+      // Earlier order (PR #55) was: deepMerge(defaults, rec) → migrate.
+      // Bug: deepMerge filled missing fields with defaults BEFORE migration
+      // ran, so a v6-or-earlier record carrying `equityDeveloper.fixedAmount:
+      // 16500000` (and no `equityCap`) had `equityCap` populated with the
+      // default ($130.4M) by the time the v6→v7 migration looked at it. The
+      // v7 migration only copies fixedAmount→equityCap when `equityCap` is
+      // undefined, so it silently skipped the copy and the user's $16.5M cap
+      // was lost.
       //
-      // Layer B: hand the normalised state to migratePersistedState, which
-      // owns version-specific schema changes (e.g. units→feeRatePercent for
-      // every pmFees entry on v3, equityCap renaming on v7, etc.).
-      // Normalisation must run BEFORE migration so the migration ladder sees
-      // all expected fields.
+      // The correct order is:
+      //   1. migratePersistedState on the RAW record so v7 sees legacy
+      //      `fixedAmount` and copies it into `equityCap` correctly.
+      //   2. deepMerge with defaults to back-fill any other missing fields
+      //      (otherFinancingCosts, backEndSellingCosts, etc — same purpose
+      //      as the original Layer A: stop legacy iterators from crashing
+      //      on undefined arrays).
       //
-      // Migration is invoked from version `rec.version ?? 0` up to current,
-      // so a record saved on any historical schema version is brought fully
-      // up to date — not just pre-v7 records as the prior implementation did.
-      const normalisedAdmin = deepMerge(defaultAdmin, rec.admin);
-      const normalisedInputs = deepMerge(defaultInputs, rec.inputs);
-      // ProjectRecord has no schema-version stamp (projects are saved without
-      // one), so we conservatively assume v0 — i.e. run every migration step
-      // up to current. The migration ladder is idempotent on already-migrated
-      // data, so doing this on a modern record is a no-op. If a `version`
-      // field is added to ProjectRecord later, it'll be picked up here.
+      // Migration is run from version `rec.version ?? 0` up to current. The
+      // ladder is idempotent on already-migrated data, so doing this on a
+      // modern record is a no-op. If a `version` field is added to
+      // ProjectRecord later, it'll be picked up here.
       const recVersion = (rec as { version?: number }).version ?? 0;
       const migrated = migratePersistedState(
-        { admin: normalisedAdmin, inputs: normalisedInputs },
+        { admin: rec.admin, inputs: rec.inputs },
         recVersion,
       ) as { admin: typeof rec.admin; inputs: typeof rec.inputs };
-      rec.admin = migrated.admin;
-      rec.inputs = migrated.inputs;
+      const normalisedAdmin = deepMerge(defaultAdmin, migrated.admin);
+      const normalisedInputs = deepMerge(defaultInputs, migrated.inputs);
+      rec.admin = normalisedAdmin;
+      rec.inputs = normalisedInputs;
       // Wholesale replace — never partial-merge over the previous project's inputs.
       // The previous setAdmin/setInputs implementation merged top-level keys into
       // the existing object, so any field present in the prior project but absent
       // in the loaded record would leak through. That, plus the cached
       // dashboardData below, was the root of the v2-UAT "state drift" P0.
-      replaceAdmin(rec.admin);
-      replaceInputs(rec.inputs);
+      replaceAdmin(normalisedAdmin);
+      replaceInputs(normalisedInputs);
       // Do NOT hydrate cached dashboardData. It can be stale relative to the
       // loaded inputs (different calc revision, different inputs version) and
       // we'd flash the wrong figures on Dashboard/Cashflow/Checks until the

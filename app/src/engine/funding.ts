@@ -911,6 +911,43 @@ function computeMinEquityCheck(
   return { required, actual, basisAmount, basisName, shortfall };
 }
 
+
+/**
+ * Issue 5 — Effective land-loan back-solve compounding horizon.
+ *
+ * Returns the period index (0-based, inclusive) at which the land-loan
+ * back-solve loop should stop compounding cap-int. PR #32 (LL2) refinances
+ * the land loan in full when the senior facility starts, so cap-int
+ * compounding past `senior.startMonth - 1` never materialises in reality.
+ * Using the full `landLoan.maturityMonth` horizon makes the closed-form
+ * principal cap unnecessarily conservative on every project that takes
+ * senior out before LL maturity.
+ *
+ * Clipping is applied only when:
+ *   • a senior facility exists (facilityLimit > 0), AND
+ *   • senior starts after period 0 (startMonth > 0), AND
+ *   • takeout fires strictly before the LL would naturally mature
+ *     (`senior.startMonth - 1 < landLoanMaturityIdx`)
+ *
+ * Otherwise the original LL maturity end-index is returned unchanged.
+ *
+ * Exported so the invariant test can exercise the threshold without spinning
+ * up the engine.
+ */
+export function computeLandLoanBackSolveEndIdx(
+  senior: { facilityLimit: number; startMonth: number },
+  landLoanMaturityEndIdx: number,
+): number {
+  if (
+    senior.facilityLimit > 0 &&
+    senior.startMonth > 0 &&
+    (senior.startMonth - 1) < landLoanMaturityEndIdx
+  ) {
+    return senior.startMonth - 1;
+  }
+  return landLoanMaturityEndIdx;
+}
+
 export function solveFunding(
   periods: Period[],
   monthlyCostsExcFinance: number[],
@@ -986,7 +1023,9 @@ export function solveFunding(
   const _snrEndFloor    = senior.maturityMonth   > 0 ? senior.maturityMonth   - 1 : n - 1;
   const _snr2EndFloor   = senior2.maturityMonth  > 0 ? senior2.maturityMonth  - 1 : n - 1;
   const _mezzEndFloor   = mezz.maturityMonth     > 0 ? mezz.maturityMonth     - 1 : n - 1;
-  const _llEndFloor     = landLoan.maturityMonth > 0 ? landLoan.maturityMonth - 1 : n - 1;
+  const _llMaturityEndFloor = landLoan.maturityMonth > 0 ? landLoan.maturityMonth - 1 : n - 1;
+  // Issue 5 — see `computeLandLoanBackSolveEndIdx`.
+  const _llEndFloor = computeLandLoanBackSolveEndIdx(senior, _llMaturityEndFloor);
   const seniorClosedFormCap = backSolveCapitalisedPrincipalCap(
     senior, senior.facilityLimit > 0 ? senior.facilityLimit : Infinity,
     periods, daysPerYear, _snrStartFloor, _snrEndFloor, senior.margin + senior.bbsy);
@@ -1523,7 +1562,9 @@ function runFundingWaterfall(
   const _snrEndIdxBS    = senior.maturityMonth   > 0 ? senior.maturityMonth   - 1 : n - 1;
   const _snr2EndIdxBS   = senior2.maturityMonth  > 0 ? senior2.maturityMonth  - 1 : n - 1;
   const _mezzEndIdxBS   = mezz.maturityMonth     > 0 ? mezz.maturityMonth     - 1 : n - 1;
-  const _llEndIdxBS     = landLoan.maturityMonth > 0 ? landLoan.maturityMonth - 1 : n - 1;
+  const _llMaturityEndIdxBS = landLoan.maturityMonth > 0 ? landLoan.maturityMonth - 1 : n - 1;
+  // Issue 5 — see `computeLandLoanBackSolveEndIdx`.
+  const _llEndIdxBS = computeLandLoanBackSolveEndIdx(senior, _llMaturityEndIdxBS);
 
   const seniorLtcLimit  = senior.ltcTarget  > 0 ? tdc * senior.ltcTarget  : Infinity;
   const seniorLvrLimit  = senior.lvrTarget  > 0 ? nrv * senior.lvrTarget  : Infinity;

@@ -2,6 +2,7 @@ import { useStore } from '../../store/useStore';
 import { CurrencyInput, PercentInput, NumberInput, SectionHeader } from '../common/FormFields';
 import { computeDrawdownSequence } from '../../engine/funding';
 import type { EquityConfig, DebtFacility, MainInputs, MinEquityRequirement } from '../../types';
+import { getFacilityLimitHelperText } from './facilityLimitHelperText';
 
 // ===== DRAWDOWN SEQUENCE BANNER =====
 
@@ -84,11 +85,8 @@ function EquitySection({ title, config, onChange }: {
  * When NOT capitalised, the facility limit is the maximum principal drawn
  * (interest is cash-paid each period and never adds to the balance).
  */
-function FacilityLimitHint({ facility }: { facility: DebtFacility }) {
-  const isCap = !!facility.isCapitalised;
-  const helperText = isCap
-    ? 'Maximum outstanding balance (includes accrued interest). Engine dynamically sizes principal during drawdown to keep peak balance within this limit.'
-    : "Maximum principal drawn. Interest is paid as cash and doesn't add to outstanding balance.";
+function FacilityLimitHint({ facility, isResidualStock = false }: { facility: DebtFacility; isResidualStock?: boolean }) {
+  const helperText = getFacilityLimitHelperText(facility, isResidualStock);
   return (
     <div className="-mt-1 mb-1 ml-[14.5rem] text-[10px]">
       <span className="text-gray-500">{helperText}</span>
@@ -97,10 +95,11 @@ function FacilityLimitHint({ facility }: { facility: DebtFacility }) {
 }
 
 
-function DebtSection({ title, facility, isLandLoan = false, onChange }: {
+function DebtSection({ title, facility, isLandLoan = false, isResidualStock = false, onChange }: {
   title: string;
   facility: DebtFacility;
   isLandLoan?: boolean;
+  isResidualStock?: boolean;
   onChange: (f: DebtFacility) => void;
 }) {
   // L4 — generic-bound update: TS now type-checks every call site against the
@@ -118,7 +117,7 @@ function DebtSection({ title, facility, isLandLoan = false, onChange }: {
       </div>
       <div className="p-3 space-y-1.5">
         <CurrencyInput label="Facility Limit" value={facility.facilityLimit} onChange={v => update('facilityLimit', v)} />
-        <FacilityLimitHint facility={facility} />
+        <FacilityLimitHint facility={facility} isResidualStock={isResidualStock} />
         <NumberInput label="Start Month" value={facility.startMonth} onChange={v => update('startMonth', v)} />
         <NumberInput label="Maturity (months from start)" value={facility.maturityMonth} onChange={v => update('maturityMonth', v)} />
         <div className="border-t border-gray-100 pt-1.5 mt-1.5">
@@ -410,6 +409,7 @@ export function FinancingInputs() {
             <DebtSection
               title="Residual Stock Facility"
               facility={inputs.residualStockFacility}
+              isResidualStock={true}
               onChange={(f) => setInputs({ residualStockFacility: f })}
             />
           </div>
