@@ -1996,6 +1996,7 @@ function runFundingWaterfall(
       snrDrawdowns[i]   += takeoutAmount;
       snrRunningBalance += takeoutAmount;
       rawSnrBalance     += takeoutAmount;
+      rawPeakSnrBalance = Math.max(rawPeakSnrBalance, rawSnrBalance);
       // Land loan: explicit repayment, no cash decrement (senior paid it).
       llRepayments[i]   += takeoutAmount;
       llRunningBalance   = 0;
@@ -2240,6 +2241,7 @@ function runFundingWaterfall(
         snrDrawdowns[i]   += llRepayments[i];
         snrRunningBalance += llRepayments[i];
         rawSnrBalance     += llRepayments[i];
+        rawPeakSnrBalance = Math.max(rawPeakSnrBalance, rawSnrBalance);
         bankBalance       += llRepayments[i];
       }
       if (cumulativeEquity > totalEquityCap) {
@@ -2250,6 +2252,7 @@ function runFundingWaterfall(
           snrDrawdowns[i]    += draw;
           snrRunningBalance  += draw;
           rawSnrBalance      += draw;
+          rawPeakSnrBalance = Math.max(rawPeakSnrBalance, rawSnrBalance);
           // Split repatriation pro-rata between JV and Developer
           const jvFrac = cumulativeEquity > 0 ? jvCumulative / cumulativeEquity : 0;
           const jvRep  = draw * jvFrac;
@@ -2287,6 +2290,7 @@ function runFundingWaterfall(
             snrDrawdowns[i]   += snrDraw;
             snrRunningBalance += snrDraw;
             rawSnrBalance     += snrDraw;
+            rawPeakSnrBalance = Math.max(rawPeakSnrBalance, rawSnrBalance);
             bankBalance       += snrDraw;
           }
         }
@@ -2333,6 +2337,7 @@ function runFundingWaterfall(
               snrDrawdowns[i]   += draw;
               snrRunningBalance += draw;
               rawSnrBalance     += draw;
+              rawPeakSnrBalance = Math.max(rawPeakSnrBalance, rawSnrBalance);
               bankBalance       += draw;
             }
           } else if (entry.type === 'senior2' && senior2DrawActive) {
@@ -2342,6 +2347,7 @@ function runFundingWaterfall(
               snr2Drawdowns[i]   += draw;
               snr2RunningBalance += draw;
               rawSnr2Balance     += draw;
+              rawPeakSnr2Balance = Math.max(rawPeakSnr2Balance, rawSnr2Balance);
               bankBalance        += draw;
             }
           } else if (entry.type === 'mezz' && hasMezz && i >= mezzStartIdx) {
@@ -2351,6 +2357,7 @@ function runFundingWaterfall(
               mzDrawdowns[i]    += draw;
               mzRunningBalance  += draw;
               rawMezzBalance    += draw;
+              rawPeakMezzBalance = Math.max(rawPeakMezzBalance, rawMezzBalance);
               totalMezzDrawn    += draw;
               bankBalance       += draw;
             }
@@ -2389,6 +2396,7 @@ function runFundingWaterfall(
               snrDrawdowns[i]   += draw;
               snrRunningBalance += draw;
               rawSnrBalance     += draw;
+              rawPeakSnrBalance = Math.max(rawPeakSnrBalance, rawSnrBalance);
               bankBalance       += draw;
             }
           } else if (entry.type === 'senior2' && senior2DrawActive) {
@@ -2398,6 +2406,7 @@ function runFundingWaterfall(
               snr2Drawdowns[i]   += draw;
               snr2RunningBalance += draw;
               rawSnr2Balance     += draw;
+              rawPeakSnr2Balance = Math.max(rawPeakSnr2Balance, rawSnr2Balance);
               bankBalance        += draw;
             }
           } else if (entry.type === 'mezz' && hasMezz && i >= mezzStartIdx) {
@@ -2408,6 +2417,7 @@ function runFundingWaterfall(
               mzDrawdowns[i]    += draw;
               mzRunningBalance  += draw;
               rawMezzBalance    += draw;
+              rawPeakMezzBalance = Math.max(rawPeakMezzBalance, rawMezzBalance);
               totalMezzDrawn    += draw;
               bankBalance       += draw;
             }
@@ -2653,9 +2663,9 @@ function runFundingWaterfall(
     // drawdown alone exceeds the prior raw peak, ensure rawPeak* stays
     // >= the post-period running balance so the shrink loop never
     // under-counts the actual exposure.
-    rawPeakSnrBalance  = Math.max(rawPeakSnrBalance,  snrRunningBalance);
-    rawPeakSnr2Balance = Math.max(rawPeakSnr2Balance, snr2RunningBalance);
-    rawPeakMezzBalance = Math.max(rawPeakMezzBalance, mzRunningBalance);
+    rawPeakSnrBalance  = Math.max(rawPeakSnrBalance,  rawSnrBalance);
+    rawPeakSnr2Balance = Math.max(rawPeakSnr2Balance, rawSnr2Balance);
+    rawPeakMezzBalance = Math.max(rawPeakMezzBalance, rawMezzBalance);
     rawPeakLandLoanBal = Math.max(rawPeakLandLoanBal, rawLLBalance);
 
     // Peak equity outstanding (cumulative injections − repatriations at this period)
