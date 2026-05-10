@@ -95,5 +95,53 @@ function assert(cond: boolean, msg: string): void {
   assert(out === llMaturityIdx, 'I5.7 — facilityLimit>0 but startMonth=0 keeps LL horizon (got ' + out + ')');
 }
 
+
+// IA.1 — Issue A new gate: landLoan.startMonth === 0 (no land loan present)
+// → keep full LL maturity (no clip). With backwards-compat default, the
+// old call (2 args) would clip; new behaviour requires explicit landLoan
+// with startMonth>0 to clip.
+{
+  const llMaturityIdx = 11;
+  const senior = { facilityLimit: 80_000_000, startMonth: 7 };
+  const landLoan = { startMonth: 0 };
+  const out = computeLandLoanBackSolveEndIdx(senior, llMaturityIdx, landLoan);
+  assert(out === llMaturityIdx,
+    'IA.1 — landLoan.startMonth=0 keeps full LL horizon (got ' + out + ')');
+}
+
+// IA.2 — Issue A new gate: landLoan.startMonth > senior.startMonth
+// (LL begins AFTER senior takeover — degenerate config, no takeout
+// refinance). Keep full LL horizon (no clip).
+{
+  const llMaturityIdx = 11;
+  const senior = { facilityLimit: 80_000_000, startMonth: 7 };
+  const landLoan = { startMonth: 8 }; // LL starts AFTER senior takeover
+  const out = computeLandLoanBackSolveEndIdx(senior, llMaturityIdx, landLoan);
+  assert(out === llMaturityIdx,
+    'IA.2 — landLoan.startMonth > senior.startMonth keeps full LL horizon (got ' + out + ')');
+}
+
+// IA.3 — Issue A: landLoan.startMonth === senior.startMonth (boundary —
+// LL starts on the same period as senior takeover). Allow clip — the
+// takeout still fires at senior.startMonth.
+{
+  const llMaturityIdx = 11;
+  const senior = { facilityLimit: 80_000_000, startMonth: 7 };
+  const landLoan = { startMonth: 7 };
+  const out = computeLandLoanBackSolveEndIdx(senior, llMaturityIdx, landLoan);
+  assert(out === 6,
+    'IA.3 — landLoan.startMonth == senior.startMonth still clips (got ' + out + ')');
+}
+
+// IA.4 — Issue A: landLoan.startMonth < senior.startMonth, normal
+// case — clip applies (matches I5.1 behaviour).
+{
+  const llMaturityIdx = 11;
+  const senior = { facilityLimit: 80_000_000, startMonth: 7 };
+  const landLoan = { startMonth: 1 };
+  const out = computeLandLoanBackSolveEndIdx(senior, llMaturityIdx, landLoan);
+  assert(out === 6,
+    'IA.4 — normal LL-before-senior config clips (got ' + out + ')');
+}
 console.log('\nIssue 5 — Land Loan Back-Solve Horizon — ' + passed + ' passed, ' + failed + ' failed');
 if (failed) { failures.forEach(f => console.log('  x ' + f)); process.exit(1); }

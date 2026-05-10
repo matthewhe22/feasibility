@@ -926,6 +926,10 @@ function computeMinEquityCheck(
  * Clipping is applied only when:
  *   • a senior facility exists (facilityLimit > 0), AND
  *   • senior starts after period 0 (startMonth > 0), AND
+ *   • a land loan actually exists (landLoan.startMonth > 0), AND
+ *   • the land loan starts on-or-before senior takeover
+ *     (landLoan.startMonth <= senior.startMonth) — otherwise no takeout
+ *     refinance applies, AND
  *   • takeout fires strictly before the LL would naturally mature
  *     (`senior.startMonth - 1 < landLoanMaturityIdx`)
  *
@@ -937,10 +941,13 @@ function computeMinEquityCheck(
 export function computeLandLoanBackSolveEndIdx(
   senior: { facilityLimit: number; startMonth: number },
   landLoanMaturityEndIdx: number,
+  landLoan: { startMonth: number } = { startMonth: 1 },
 ): number {
   if (
     senior.facilityLimit > 0 &&
     senior.startMonth > 0 &&
+    landLoan.startMonth > 0 &&
+    landLoan.startMonth <= senior.startMonth &&
     (senior.startMonth - 1) < landLoanMaturityEndIdx
   ) {
     return senior.startMonth - 1;
@@ -1025,7 +1032,7 @@ export function solveFunding(
   const _mezzEndFloor   = mezz.maturityMonth     > 0 ? mezz.maturityMonth     - 1 : n - 1;
   const _llMaturityEndFloor = landLoan.maturityMonth > 0 ? landLoan.maturityMonth - 1 : n - 1;
   // Issue 5 — see `computeLandLoanBackSolveEndIdx`.
-  const _llEndFloor = computeLandLoanBackSolveEndIdx(senior, _llMaturityEndFloor);
+  const _llEndFloor = computeLandLoanBackSolveEndIdx(senior, _llMaturityEndFloor, landLoan);
   const seniorClosedFormCap = backSolveCapitalisedPrincipalCap(
     senior, senior.facilityLimit > 0 ? senior.facilityLimit : Infinity,
     periods, daysPerYear, _snrStartFloor, _snrEndFloor, senior.margin + senior.bbsy);
@@ -1564,7 +1571,7 @@ function runFundingWaterfall(
   const _mezzEndIdxBS   = mezz.maturityMonth     > 0 ? mezz.maturityMonth     - 1 : n - 1;
   const _llMaturityEndIdxBS = landLoan.maturityMonth > 0 ? landLoan.maturityMonth - 1 : n - 1;
   // Issue 5 — see `computeLandLoanBackSolveEndIdx`.
-  const _llEndIdxBS = computeLandLoanBackSolveEndIdx(senior, _llMaturityEndIdxBS);
+  const _llEndIdxBS = computeLandLoanBackSolveEndIdx(senior, _llMaturityEndIdxBS, landLoan);
 
   const seniorLtcLimit  = senior.ltcTarget  > 0 ? tdc * senior.ltcTarget  : Infinity;
   const seniorLvrLimit  = senior.lvrTarget  > 0 ? nrv * senior.lvrTarget  : Infinity;
@@ -1778,6 +1785,16 @@ function runFundingWaterfall(
   let rawPeakSnr2Balance   = 0;
   let rawPeakMezzBalance   = 0;
   let rawPeakLandLoanBal   = 0;
+  // Issue B — Per-facility "would-be" running balance: parallels each
+  // *RunningBalance but compounds the cap-int the FU2 ceiling suppresses.
+  // The shrink loop reads rawPeak* — feeding it raw balances detects
+  // overshoots that the post-ceiling actuals hide. For cash-pay facilities
+  // raw==actual (mirror only); divergence is exclusive to capitalised
+  // facilities whose cap-int ceiling fires at least once.
+  let rawSnrBalance        = 0;
+  let rawSnr2Balance       = 0;
+  let rawMezzBalance       = 0;
+  let rawLLBalance         = 0;
 
   const snrAllInRate  = senior.margin  + senior.bbsy;
   const snr2AllInRate = senior2.margin + senior2.bbsy;
@@ -1817,6 +1834,13 @@ function runFundingWaterfall(
     const snrOpenBalance  = snrRunningBalance;
     const snr2OpenBalance = snr2RunningBalance;
     const mzOpenBalance   = mzRunningBalance;
+    // Issue B — raw open balances feed `periodInterest` for the would-be
+    // cap-int that the FU2 ceiling may suppress on actuals.
+    const rawSnrOpenBalance  = rawSnrBalance;
+    const rawSnr2OpenBalance = rawSnr2Balance;
+    const rawMezzOpenBalance = rawMezzBalance;
+    // LL has no in-loop cap-int ceiling, so no rawLLOpenBalance is needed —
+    // rawLLBalance mirrors llRunningBalance exactly through every change.
 
     // Carry forward any surplus held from prior periods (distributions gated)
     let bankBalance = heldBankBalance;
@@ -1871,6 +1895,7 @@ function runFundingWaterfall(
       const llActualDraw = landLoanDrawCap;
       llDrawdowns[i]     = llActualDraw;
       llRunningBalance  += llActualDraw;
+      rawLLBalance      += llActualDraw;
       bankBalance       += llActualDraw;
       const estFee = llActualDraw * landLoan.establishmentFeePercent;
       if (estFee > 0) {
@@ -1917,6 +1942,7 @@ function runFundingWaterfall(
           // Capitalised: compound into balance; no cash impact this period.
           // The takeout transaction (step 4) will repay this in full from senior.
           llRunningBalance += llAccruedInterest;
+          rawLLBalance     += llAccruedInterest;
           // Track as a synthetic drawdown for cashflow balance — interest
           // creates new debt rather than draining cash.
           llDrawdowns[i] += llAccruedInterest;
@@ -1948,6 +1974,7 @@ function runFundingWaterfall(
       // the takeout amount captures the full obligation.
       if (llAccruedInterest > 0) {
         llRunningBalance += llAccruedInterest;
+        rawLLBalance     += llAccruedInterest;
         // B01 — at takeout the unpaid accrued interest is de facto rolled
         // into senior (no actual cash outflow from the developer's bank
         // account; senior refinances it). This applies to BOTH branches:
@@ -1968,9 +1995,11 @@ function runFundingWaterfall(
       // Senior absorbs the takeout: drawdown + balance increase, no cash impact.
       snrDrawdowns[i]   += takeoutAmount;
       snrRunningBalance += takeoutAmount;
+      rawSnrBalance     += takeoutAmount;
       // Land loan: explicit repayment, no cash decrement (senior paid it).
       llRepayments[i]   += takeoutAmount;
       llRunningBalance   = 0;
+      rawLLBalance       = 0;
       // Track for UI display.
       landLoanTakeoutBySenior[i] = takeoutAmount;
 
@@ -2000,11 +2029,13 @@ function runFundingWaterfall(
       snrInterest[i]      = snrInt;
       totalSeniorInterest += snrInt;
       if (senior.isCapitalised) {
-        // Issue 3 — Capture would-be balance BEFORE the cap-int ceiling fires.
-        // rawPeakSnrBalance is the signal the timing-aware shrink loop reads:
-        // it sees the balance that capitalisation WOULD have produced even
-        // when the ceiling converts cap-int to cash-pay.
-        rawPeakSnrBalance = Math.max(rawPeakSnrBalance, snrRunningBalance + snrInt);
+        // Issue B — accrue WOULD-BE cap-int onto rawSnrBalance unconditionally.
+        // rawSnrInt compounds on rawSnrOpenBalance (the un-capped raw balance),
+        // so rawPeakSnrBalance is the true no-ceiling peak the shrink loop
+        // needs to detect overshoots that FU2 hides.
+        const rawSnrInt = periodInterest(rawSnrOpenBalance, snrAllInRate, days, daysPerYear);
+        rawSnrBalance += rawSnrInt;
+        rawPeakSnrBalance = Math.max(rawPeakSnrBalance, rawSnrBalance);
         // FU2 — Cap-int ceiling: if capitalising this period's interest would
         // push the senior running balance above its M4 covenant cap, switch
         // THIS period's interest to cash-pay instead of capitalising. Avoids
@@ -2037,8 +2068,11 @@ function runFundingWaterfall(
         snrFees[i]        = periodFees;
         totalSeniorFees  += periodFees;
         if (senior.isCapitalised) {
-          // Issue 3 — would-be peak before fee-cap-int ceiling fires.
-          rawPeakSnrBalance = Math.max(rawPeakSnrBalance, snrRunningBalance + periodFees);
+          // Issue B — fees always grow the would-be balance even when the
+          // ceiling diverts them to cash. rawSnrBalance therefore captures
+          // the unsuppressed peak.
+          rawSnrBalance += periodFees;
+          rawPeakSnrBalance = Math.max(rawPeakSnrBalance, rawSnrBalance);
           // FU2 — same cap-int ceiling guard for capitalised fees.
           if (snrRunningBalance + periodFees > seniorAutoSizeCap + 1) {
             bankBalance -= periodFees;
@@ -2066,8 +2100,10 @@ function runFundingWaterfall(
       snr2Interest[i]      = snr2Int;
       totalSenior2Interest += snr2Int;
       if (senior2.isCapitalised) {
-        // Issue 3 — would-be peak before cap-int ceiling fires.
-        rawPeakSnr2Balance = Math.max(rawPeakSnr2Balance, snr2RunningBalance + snr2Int);
+        // Issue B — see senior interest block.
+        const rawSnr2Int = periodInterest(rawSnr2OpenBalance, snr2AllInRate, days, daysPerYear);
+        rawSnr2Balance += rawSnr2Int;
+        rawPeakSnr2Balance = Math.max(rawPeakSnr2Balance, rawSnr2Balance);
         if (snr2RunningBalance + snr2Int > senior2CovenantCap + 1) {
           bankBalance -= snr2Int;
           recordCapIntCeilingHit('senior2', i + 1, snr2Int);
@@ -2090,8 +2126,9 @@ function runFundingWaterfall(
         snr2Fees[i]       = periodFees;
         totalSenior2Fees += periodFees;
         if (senior2.isCapitalised) {
-          // Issue 3 — would-be peak before fee-cap-int ceiling fires.
-          rawPeakSnr2Balance = Math.max(rawPeakSnr2Balance, snr2RunningBalance + periodFees);
+          // Issue B — see senior fees block.
+          rawSnr2Balance += periodFees;
+          rawPeakSnr2Balance = Math.max(rawPeakSnr2Balance, rawSnr2Balance);
           if (snr2RunningBalance + periodFees > senior2CovenantCap + 1) {
             bankBalance -= periodFees;
             recordCapIntCeilingHit('senior2', i + 1, periodFees);
@@ -2118,11 +2155,14 @@ function runFundingWaterfall(
       mzInterest[i]      = mzInt;
       totalMezzInterest += mzInt;
       if (mezz.isCapitalised) {
-        // Issue 3 — would-be peak before cap-int ceiling fires. This is the
-        // signal that lets the timing-aware shrink loop tighten the principal
-        // cap when interest accrual on a near-cap balance would otherwise
-        // get silently converted to cash-pay (the original Dandenong bug).
-        rawPeakMezzBalance = Math.max(rawPeakMezzBalance, mzRunningBalance + mzInt);
+        // Issue B — accrue would-be cap-int onto rawMezzBalance regardless
+        // of the FU2 ceiling firing. This is the signal that lets the
+        // timing-aware shrink loop tighten the principal cap when interest
+        // accrual on a near-cap balance would otherwise get silently
+        // converted to cash-pay (the original Dandenong bug).
+        const rawMzInt = periodInterest(rawMezzOpenBalance, mezzAllInRate, days, daysPerYear);
+        rawMezzBalance += rawMzInt;
+        rawPeakMezzBalance = Math.max(rawPeakMezzBalance, rawMezzBalance);
         if (mzRunningBalance + mzInt > mezzAutoSizeCap + 1) {
           bankBalance -= mzInt;
           recordCapIntCeilingHit('mezz', i + 1, mzInt);
@@ -2141,8 +2181,10 @@ function runFundingWaterfall(
         mzFees[i]       += mzLineFee;
         totalMezzFees   += mzLineFee;
         if (mezz.isCapitalised) {
-          // Issue 3 — would-be peak before fee-cap-int ceiling fires.
-          rawPeakMezzBalance = Math.max(rawPeakMezzBalance, mzRunningBalance + mzLineFee);
+          // Issue B — fees grow the would-be balance even when the ceiling
+          // diverts them to cash.
+          rawMezzBalance += mzLineFee;
+          rawPeakMezzBalance = Math.max(rawPeakMezzBalance, rawMezzBalance);
           if (mzRunningBalance + mzLineFee > mezzAutoSizeCap + 1) {
             bankBalance -= mzLineFee;
             recordCapIntCeilingHit('mezz', i + 1, mzLineFee);
@@ -2169,8 +2211,9 @@ function runFundingWaterfall(
         mzFees[i]     += mzEstFee;
         totalMezzFees += mzEstFee;
         if (mezz.isCapitalised) {
-          // Issue 3 — would-be peak before est-fee-cap-int ceiling fires.
-          rawPeakMezzBalance = Math.max(rawPeakMezzBalance, mzRunningBalance + mzEstFee);
+          // Issue B — est fee grows would-be balance even when ceiling diverts.
+          rawMezzBalance += mzEstFee;
+          rawPeakMezzBalance = Math.max(rawPeakMezzBalance, rawMezzBalance);
           if (mzRunningBalance + mzEstFee > mezzAutoSizeCap + 1) {
             bankBalance -= mzEstFee;
             recordCapIntCeilingHit('mezz', i + 1, mzEstFee);
@@ -2196,6 +2239,7 @@ function runFundingWaterfall(
       if (llRepayments[i] > 0) {
         snrDrawdowns[i]   += llRepayments[i];
         snrRunningBalance += llRepayments[i];
+        rawSnrBalance     += llRepayments[i];
         bankBalance       += llRepayments[i];
       }
       if (cumulativeEquity > totalEquityCap) {
@@ -2205,6 +2249,7 @@ function runFundingWaterfall(
         if (draw > 0) {
           snrDrawdowns[i]    += draw;
           snrRunningBalance  += draw;
+          rawSnrBalance      += draw;
           // Split repatriation pro-rata between JV and Developer
           const jvFrac = cumulativeEquity > 0 ? jvCumulative / cumulativeEquity : 0;
           const jvRep  = draw * jvFrac;
@@ -2241,6 +2286,7 @@ function runFundingWaterfall(
           if (snrDraw > 0) {
             snrDrawdowns[i]   += snrDraw;
             snrRunningBalance += snrDraw;
+            rawSnrBalance     += snrDraw;
             bankBalance       += snrDraw;
           }
         }
@@ -2286,6 +2332,7 @@ function runFundingWaterfall(
               const draw         = Math.min(-bankBalance, avail);
               snrDrawdowns[i]   += draw;
               snrRunningBalance += draw;
+              rawSnrBalance     += draw;
               bankBalance       += draw;
             }
           } else if (entry.type === 'senior2' && senior2DrawActive) {
@@ -2294,6 +2341,7 @@ function runFundingWaterfall(
               const draw          = Math.min(-bankBalance, avail);
               snr2Drawdowns[i]   += draw;
               snr2RunningBalance += draw;
+              rawSnr2Balance     += draw;
               bankBalance        += draw;
             }
           } else if (entry.type === 'mezz' && hasMezz && i >= mezzStartIdx) {
@@ -2302,6 +2350,7 @@ function runFundingWaterfall(
               const draw         = Math.min(-bankBalance, avail);
               mzDrawdowns[i]    += draw;
               mzRunningBalance  += draw;
+              rawMezzBalance    += draw;
               totalMezzDrawn    += draw;
               bankBalance       += draw;
             }
@@ -2339,6 +2388,7 @@ function runFundingWaterfall(
               const draw         = Math.min(-bankBalance, avail);
               snrDrawdowns[i]   += draw;
               snrRunningBalance += draw;
+              rawSnrBalance     += draw;
               bankBalance       += draw;
             }
           } else if (entry.type === 'senior2' && senior2DrawActive) {
@@ -2347,6 +2397,7 @@ function runFundingWaterfall(
               const draw          = Math.min(-bankBalance, avail);
               snr2Drawdowns[i]   += draw;
               snr2RunningBalance += draw;
+              rawSnr2Balance     += draw;
               bankBalance        += draw;
             }
           } else if (entry.type === 'mezz' && hasMezz && i >= mezzStartIdx) {
@@ -2356,6 +2407,7 @@ function runFundingWaterfall(
               const draw         = Math.min(-bankBalance, avail);
               mzDrawdowns[i]    += draw;
               mzRunningBalance  += draw;
+              rawMezzBalance    += draw;
               totalMezzDrawn    += draw;
               bankBalance       += draw;
             }
@@ -2407,12 +2459,14 @@ function runFundingWaterfall(
           const repay        = Math.min(bankBalance, snrRunningBalance);
           snrRepayments[i]  += repay;
           snrRunningBalance -= repay;
+          rawSnrBalance     -= repay;
           bankBalance       -= repay;
         }
         if (bankBalance > 0 && snr2RunningBalance > 0) {
           const repay         = Math.min(bankBalance, snr2RunningBalance);
           snr2Repayments[i]  += repay;
           snr2RunningBalance -= repay;
+          rawSnr2Balance    -= repay;
           bankBalance        -= repay;
         }
       };
@@ -2421,6 +2475,7 @@ function runFundingWaterfall(
           const repay        = Math.min(bankBalance, mzRunningBalance);
           mzRepayments[i]   += repay;
           mzRunningBalance  -= repay;
+          rawMezzBalance    -= repay;
           bankBalance       -= repay;
         }
       };
@@ -2504,12 +2559,14 @@ function runFundingWaterfall(
               const r = Math.min(snrRunningBalance, toApply);
               snrRepayments[i] = (snrRepayments[i] ?? 0) + r;
               snrRunningBalance -= r;
+              rawSnrBalance     -= r;
               toApply -= r;
             }
             if (toApply > 1 && snr2RunningBalance > 0) {
               const r = Math.min(snr2RunningBalance, toApply);
               snr2Repayments[i] = (snr2Repayments[i] ?? 0) + r;
               snr2RunningBalance -= r;
+              rawSnr2Balance     -= r;
               toApply -= r;
             }
           } else if (t === 'mezz') {
@@ -2517,6 +2574,7 @@ function runFundingWaterfall(
               const r = Math.min(mzRunningBalance, toApply);
               mzRepayments[i] = (mzRepayments[i] ?? 0) + r;
               mzRunningBalance -= r;
+              rawMezzBalance   -= r;
               toApply -= r;
             }
           }
@@ -2598,7 +2656,7 @@ function runFundingWaterfall(
     rawPeakSnrBalance  = Math.max(rawPeakSnrBalance,  snrRunningBalance);
     rawPeakSnr2Balance = Math.max(rawPeakSnr2Balance, snr2RunningBalance);
     rawPeakMezzBalance = Math.max(rawPeakMezzBalance, mzRunningBalance);
-    rawPeakLandLoanBal = Math.max(rawPeakLandLoanBal, llRunningBalance);
+    rawPeakLandLoanBal = Math.max(rawPeakLandLoanBal, rawLLBalance);
 
     // Peak equity outstanding (cumulative injections − repatriations at this period)
     const equityOutstanding = cumulativeEquity - totalEqRepatriated;
