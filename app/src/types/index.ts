@@ -294,6 +294,10 @@ export interface ProjectPreliminary {
   projectEndMonth: number;
   equityDistStartMonth: number;
   equityDistSpanMonths: number;
+  /** Property address (free text). Suburb is extracted and matched against a
+   *  built-in Australian suburb table to auto-seed the GRV benchmark's state
+   *  + location grade. Optional — defaults to '' on legacy projects. */
+  propertyAddress?: string;
 }
 
 /**

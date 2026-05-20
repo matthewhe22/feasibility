@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   GRV_BENCHMARKS,
   STATE_FACTORS_GRV,
@@ -15,6 +15,7 @@ import {
   type GRVBenchmarkInputs,
   type PricingBasis,
 } from '../../utils/grvBenchmarks';
+import { lookupSuburb } from '../../utils/suburbLookup';
 import { formatCurrency, formatMillions, formatPercent } from '../../utils';
 
 interface GRVReferenceCardProps {
@@ -26,6 +27,10 @@ interface GRVReferenceCardProps {
   defaultState?: State;
   /** Current modelled total GRV — used for variance comparison. */
   currentTotalGRV?: number;
+  /** Free-text property address. When a known suburb is detected, state +
+   *  location grade are auto-seeded (user can still override). Also forwarded
+   *  to the live AI research panel so prompts ground prices to the address. */
+  propertyAddress?: string;
 }
 
 /* ── Live AI research types (GRV mode) ───────────────────────────────────── */
@@ -76,19 +81,38 @@ export function GRVReferenceCard({
   defaultUnits = 0,
   defaultState = 'QLD',
   currentTotalGRV,
+  propertyAddress = '',
 }: GRVReferenceCardProps) {
   const [expanded, setExpanded] = useState(false);
 
+  // Suburb match drives the initial state / location grade selection. Once
+  // the user manually edits either field we stop overriding (tracked via the
+  // `userTouched` ref) so the address auto-seed never clobbers an explicit
+  // pick.
+  const addressMatch = useMemo(() => lookupSuburb(propertyAddress), [propertyAddress]);
+
   // Static-benchmark controlled inputs
   const [assetType, setAssetType]   = useState<GRVAssetType>('apartments-high-rise');
-  const [state, setState]           = useState<State>(defaultState);
-  const [location, setLocation]     = useState<LocationGrade>('cbd');
+  const [state, setState]           = useState<State>(addressMatch?.state ?? defaultState);
+  const [location, setLocation]     = useState<LocationGrade>(addressMatch?.locationGrade ?? 'cbd');
   const [quality, setQuality]       = useState<QualityGrade>('standard');
   const [targetYear, setTargetYear] = useState<number>(CURRENT_YEAR);
   const [units, setUnits]           = useState<number>(defaultUnits);
   const [unitArea, setUnitArea]     = useState<number>(0);
   const [totalArea, setTotalArea]   = useState<number>(defaultSaleableArea);
   const [customEscalation, setCustomEscalation] = useState<number | null>(null);
+
+  // Track whether the user has manually picked state / location grade. After
+  // a manual change we stop applying the address-driven auto-seed so the
+  // user's choice persists across address edits.
+  const userTouchedRef = useRef(false);
+  useEffect(() => {
+    if (userTouchedRef.current) return;
+    if (!addressMatch) return;
+    setState(addressMatch.state);
+    setLocation(addressMatch.locationGrade);
+  }, [addressMatch]);
+  const markTouched = () => { userTouchedRef.current = true; };
 
   // Live AI research state
   const [liveLoading, setLiveLoading] = useState(false);
@@ -127,6 +151,7 @@ export function GRVReferenceCard({
         units: units || undefined,
         totalSaleableArea: totalArea || undefined,
         unitArea: unitArea || undefined,
+        propertyAddress: propertyAddress || undefined,
       };
       const r = await fetch('/api/benchmarks/research', {
         method: 'POST',
@@ -163,6 +188,22 @@ export function GRVReferenceCard({
 
       {expanded && (
         <div className="px-3 pb-3 pt-1 border-t border-emerald-200 bg-white rounded-b">
+          {propertyAddress && (
+            <div className="mb-2 text-[11px] bg-emerald-50 border border-emerald-200 rounded px-2 py-1">
+              <span className="font-bold text-emerald-800">Property:</span>{' '}
+              <span className="text-emerald-900">{propertyAddress}</span>
+              {addressMatch ? (
+                <span className="text-emerald-700 ml-2">
+                  → auto-seeded <strong>{addressMatch.state}</strong> / <strong>{addressMatch.locationGrade}</strong>
+                  {userTouchedRef.current && ' (manually overridden below)'}
+                </span>
+              ) : (
+                <span className="text-amber-700 ml-2 italic">
+                  Suburb not in built-in table — pick state / location grade manually below.
+                </span>
+              )}
+            </div>
+          )}
           <RequiredMetricsPanel />
 
           <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 mb-1">
@@ -185,7 +226,7 @@ export function GRVReferenceCard({
             <Field label="State / city">
               <select
                 value={state}
-                onChange={e => setState(e.target.value as State)}
+                onChange={e => { markTouched(); setState(e.target.value as State); }}
                 className="w-full px-1 py-0.5 text-[11px] border border-gray-300 rounded bg-yellow-50"
               >
                 {(Object.keys(STATE_FACTORS_GRV) as State[]).map(s => (
@@ -198,7 +239,7 @@ export function GRVReferenceCard({
             <Field label="Location grade">
               <select
                 value={location}
-                onChange={e => setLocation(e.target.value as LocationGrade)}
+                onChange={e => { markTouched(); setLocation(e.target.value as LocationGrade); }}
                 className="w-full px-1 py-0.5 text-[11px] border border-gray-300 rounded bg-yellow-50"
               >
                 {(Object.keys(LOCATION_FACTORS) as LocationGrade[]).map(l => (

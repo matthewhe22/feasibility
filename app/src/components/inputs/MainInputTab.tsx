@@ -16,7 +16,8 @@ import {
   applyActualsToInputs,
 } from '../../utils/actualsExcel';
 import { downloadSCurveTemplate, parseSCurveFile } from '../../utils/sCurveExcel';
-import type { CostLineItem, RevenueLineItem, DebtFacility } from '../../types';
+import type { CostLineItem, RevenueLineItem, DebtFacility, SellingCostConfig, AcquisitionCostItem } from '../../types';
+import { lookupSuburb } from '../../utils/suburbLookup';
 
 // ── Manual S-Curve Editor ─────────────────────────────────────────────────────
 // Renders a period-by-period weight input for one manual S-curve.
@@ -347,6 +348,42 @@ function ActualCostsEditor({ label, items, onChange }: {
   );
 }
 
+// Property Address input with live suburb detection. Echoes the detected
+// suburb + matched state / GRV location grade so the user can see why the
+// benchmark card seeds itself the way it does (and override on the card if
+// the auto-pick is wrong).
+function PropertyAddressInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const match = lookupSuburb(value);
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-gray-600 w-40 shrink-0" title="Free-text property address. The suburb is matched against a built-in Australian suburb table to auto-seed the GRV benchmark's state and location grade. You can still override on the GRV section.">Property Address</span>
+        <input
+          type="text"
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder="e.g. 123 High Street, Kew VIC 3101"
+          className="flex-1 text-xs bg-yellow-50 border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+      {value && (
+        <div className="ml-40 mt-1 text-[10px]">
+          {match ? (
+            <span className="text-emerald-700">
+              ✓ Detected <strong className="capitalize">{match.suburb}</strong> — GRV benchmark will use{' '}
+              <strong>{match.state}</strong> / <strong>{match.locationGrade}</strong>
+            </span>
+          ) : (
+            <span className="text-gray-500 italic">
+              No suburb match — GRV benchmark will use the manually-selected state / location grade.
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CostLineTable({ items, onChange, defaultCostType }: {
   items: CostLineItem[];
   onChange: (items: CostLineItem[]) => void;
@@ -514,6 +551,129 @@ function CostLineTable({ items, onChange, defaultCostType }: {
   );
 }
 
+// Acquisition costs editor (Stamp Duty + Registration + PEXA + any user-added
+// rows). Surfaced in section 2.1 because legacy projects shipped with the
+// $124M Excel defaults' registration fee (~$1.13M) baked in — invisible until
+// you opened the table — making small-land projects look like they had absurd
+// acquisition costs. Stamp Duty is shown read-only here because it's driven
+// by the auto-calc above.
+function AcquisitionCostsTable({ items, onChange }: {
+  items: AcquisitionCostItem[];
+  onChange: (items: AcquisitionCostItem[]) => void;
+}) {
+  const updateItem = (idx: number, field: keyof AcquisitionCostItem, value: unknown) => {
+    const updated = [...items];
+    const orig = updated[idx];
+    if (!orig) return;
+    updated[idx] = { ...orig, [field]: value };
+    onChange(updated);
+  };
+  const deleteItem = (idx: number) => onChange(items.filter((_, i) => i !== idx));
+  const addRow = () => {
+    const newId = `acq${Date.now().toString(36)}`;
+    const newRow: AcquisitionCostItem = {
+      id: newId, description: '', percentOfLand: 0, amount: 0, lumpSum: 0,
+      monthStart: 1, monthSpan: 1, addGST: false,
+    };
+    onChange([...items, newRow]);
+  };
+  const total = items.reduce((s, i) => s + i.amount, 0);
+
+  return (
+    <div className="mt-3">
+      <div className="text-xs font-semibold text-gray-700 mb-1">Acquisition Cost Line Items</div>
+      <p className="text-[10px] text-gray-500 italic mb-2">
+        Editable transfer-and-settlement costs. Non-stamp-duty items are scaled proportionally
+        when the Land Purchase Price changes (so the demo defaults don't carry over to smaller projects).
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="bg-gray-600 text-white">
+              <th className="px-2 py-1 text-left">Description</th>
+              <th className="px-2 py-1 text-right w-32">Amount</th>
+              <th className="px-2 py-1 text-right w-20">Month</th>
+              <th className="px-2 py-1 text-right w-20">Span</th>
+              <th className="px-2 py-1 text-center w-14">GST</th>
+              <th className="px-2 py-1 text-center w-10"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item, idx) => {
+              const isStampDuty = item.id === 'sd';
+              return (
+                <tr key={item.id} className={`border-b border-gray-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                  <td className="px-2 py-0.5">
+                    <input
+                      type="text" value={item.description}
+                      onChange={e => updateItem(idx, 'description', e.target.value)}
+                      className="w-full bg-transparent text-xs border-0 p-0 focus:ring-0"
+                    />
+                    {isStampDuty && <span className="text-[9px] text-gray-400 italic ml-1">(auto from Stamp Duty above)</span>}
+                  </td>
+                  <td className="px-1 py-0.5">
+                    <input
+                      type="text"
+                      value={(item.amount ?? 0).toLocaleString('en-AU', { maximumFractionDigits: 2 })}
+                      onChange={e => updateItem(idx, 'amount', parseFloat(e.target.value.replace(/[^0-9.-]/g, '')) || 0)}
+                      readOnly={isStampDuty}
+                      className={`w-full text-xs text-right border border-gray-200 rounded px-1 py-0.5 ${isStampDuty ? 'bg-gray-100 text-gray-500' : 'bg-yellow-50'}`}
+                    />
+                  </td>
+                  <td className="px-1 py-0.5">
+                    <input type="number" value={item.monthStart}
+                      onChange={e => updateItem(idx, 'monthStart', parseInt(e.target.value) || 0)}
+                      className="w-full text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
+                    />
+                  </td>
+                  <td className="px-1 py-0.5">
+                    <input type="number" value={item.monthSpan}
+                      onChange={e => updateItem(idx, 'monthSpan', parseInt(e.target.value) || 0)}
+                      className="w-full text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
+                    />
+                  </td>
+                  <td className="px-2 py-0.5 text-center">
+                    <input type="checkbox" checked={item.addGST}
+                      onChange={e => updateItem(idx, 'addGST', e.target.checked)}
+                      className="w-3 h-3"
+                    />
+                  </td>
+                  <td className="px-1 py-0.5 text-center">
+                    {!isStampDuty && (
+                      <button
+                        type="button"
+                        onClick={() => deleteItem(idx)}
+                        title="Delete this row"
+                        className="text-[10px] text-gray-400 hover:text-red-600 hover:bg-red-50 px-1.5 py-0.5 rounded"
+                      >×</button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="bg-gray-100 font-bold border-t-2 border-gray-400">
+              <td className="px-2 py-1">Total Acquisition Costs</td>
+              <td className="px-2 py-1 text-right font-mono">{formatCurrency(total)}</td>
+              <td colSpan={4}></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div className="mt-2">
+        <button
+          type="button"
+          onClick={addRow}
+          className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded"
+        >
+          + Add row
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function GRVTable({ items, onChange }: {
   items: RevenueLineItem[];
   onChange: (items: RevenueLineItem[]) => void;
@@ -526,10 +686,32 @@ function GRVTable({ items, onChange }: {
     onChange(updated);
   };
 
+  const deleteItem = (idx: number) => onChange(items.filter((_, i) => i !== idx));
+
+  const addRows = (count: number) => {
+    const existingCodes = items.map(i => parseInt(i.code, 10)).filter(n => !isNaN(n));
+    const startCode = existingCodes.length > 0 ? Math.max(...existingCodes) + 1 : 9001;
+    const newRows: RevenueLineItem[] = Array.from({ length: count }, (_, i) => ({
+      code: String(startCode + i),
+      description: '',
+      revenueType: 'Residential',
+      units: 1,
+      totalArea: 0,
+      currentSalePrice: 0,
+      preSaleExchangeMonth: 0,
+      preSaleSpan: 1,
+      settlementMonth: 0,
+      settlementSpan: 1,
+      gstIncluded: true,
+    }));
+    onChange([...items, ...newRows]);
+  };
+
   const total = items.reduce((s, i) => s + i.currentSalePrice, 0);
 
   return (
-    <div className="overflow-x-auto mb-4">
+    <div className="mb-4">
+      <div className="overflow-x-auto">
       <table className="w-full text-xs border-collapse">
         <thead>
           <tr className="bg-green-700 text-white">
@@ -542,6 +724,7 @@ function GRVTable({ items, onChange }: {
             <th className="px-2 py-1 text-right w-16">Settle</th>
             <th className="px-2 py-1 text-right w-16">Span</th>
             <th className="px-2 py-1 text-center w-20 cursor-help" title="GST Included in sale price? Check for GST-taxable supplies (residential, new commercial property). Uncheck for input-taxed or GST-free supplies (going concern, residential rental). Determines whether the margin scheme deduction applies.">GST Inc.</th>
+            <th className="px-2 py-1 text-center w-10"></th>
           </tr>
         </thead>
         <tbody>
@@ -593,6 +776,14 @@ function GRVTable({ items, onChange }: {
                   className="w-3 h-3"
                 />
               </td>
+              <td className="px-1 py-0.5 text-center">
+                <button
+                  type="button"
+                  onClick={() => deleteItem(idx)}
+                  title="Delete this row"
+                  className="text-[10px] text-gray-400 hover:text-red-600 hover:bg-red-50 px-1.5 py-0.5 rounded"
+                >×</button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -600,10 +791,27 @@ function GRVTable({ items, onChange }: {
           <tr className="bg-gray-100 font-bold border-t-2 border-gray-400">
             <td colSpan={3} className="px-2 py-1">Total GRV</td>
             <td className="px-2 py-1 text-right font-mono">{formatCurrency(total)}</td>
-            <td colSpan={5}></td>
+            <td colSpan={6}></td>
           </tr>
         </tfoot>
       </table>
+      </div>
+      <div className="flex items-center gap-2 mt-2">
+        <button
+          type="button"
+          onClick={() => addRows(1)}
+          className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded"
+        >
+          + Add row
+        </button>
+        <button
+          type="button"
+          onClick={() => addRows(10)}
+          className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 border border-blue-300 px-2 py-1 rounded"
+        >
+          + Add 10 rows
+        </button>
+      </div>
     </div>
   );
 }
@@ -1025,16 +1233,31 @@ export function MainInputTab() {
   };
 
   const handleLandPriceChangeWithSD = (landPrice: number) => {
+    // Proportionally scale non-stamp-duty acquisition costs (registration fees,
+    // PEXA, etc.) by the change in land price. Without this, the defaults that
+    // ship with the model (Registration Fees ≈ $1.13M baked-in from the $124M
+    // demo project) carry over to small-land projects and look absurd next to
+    // a $2M land value. Stamp duty has its own engine so we skip 'sd' here.
+    const oldPrice = inputs.landPurchase.landPurchasePrice;
+    const ratio = oldPrice > 0 && landPrice > 0 ? landPrice / oldPrice : 1;
     if (inputs.landPurchase.stampDutyManual) {
-      // Manual override — do not recompute
-      setInputs({ landPurchase: { ...inputs.landPurchase, landPurchasePrice: landPrice } });
+      const scaledAcq = inputs.landPurchase.acquisitionCosts.map(a =>
+        a.id === 'sd' || ratio === 1 ? a : { ...a, amount: a.amount * ratio }
+      );
+      setInputs({
+        landPurchase: {
+          ...inputs.landPurchase,
+          landPurchasePrice: landPrice,
+          acquisitionCosts: scaledAcq,
+        },
+      });
       return;
     }
     const state = (inputs.landPurchase.stampDutyState as StampDutyState) || 'QLD';
     const concession = inputs.landPurchase.stampDutyConcession ?? 'none';
     const autoSD = calculateStampDuty(landPrice, state, concession);
     const updatedAcq = inputs.landPurchase.acquisitionCosts.map(a =>
-      a.id === 'sd' ? { ...a, amount: autoSD } : a
+      a.id === 'sd' ? { ...a, amount: autoSD } : (ratio === 1 ? a : { ...a, amount: a.amount * ratio })
     );
     setInputs({
       landPurchase: {
@@ -1165,6 +1388,10 @@ export function MainInputTab() {
             <p className="text-[11px] text-gray-500 italic">
               Project name and master project list are managed in the <strong>Admin Portal</strong> (top-right corner).
             </p>
+            <PropertyAddressInput
+              value={inputs.preliminary.propertyAddress ?? ''}
+              onChange={v => setInputs({ preliminary: { ...inputs.preliminary, propertyAddress: v } })}
+            />
             <NumberInput label="Project Lots #" value={inputs.preliminary.projectLots}
               onChange={v => setInputs({ preliminary: { ...inputs.preliminary, projectLots: v } })} />
             <NumberInput label="Project GFA SqM" value={inputs.preliminary.projectGFA}
@@ -1295,6 +1522,11 @@ export function MainInputTab() {
                 );
                 setInputs({ landPurchase: { ...inputs.landPurchase, stampDutyAmount: v, acquisitionCosts: updatedAcq } });
               }} />
+
+            <AcquisitionCostsTable
+              items={inputs.landPurchase.acquisitionCosts}
+              onChange={items => setInputs({ landPurchase: { ...inputs.landPurchase, acquisitionCosts: items } })}
+            />
           </div>
         </div>
       )}
@@ -1465,6 +1697,7 @@ export function MainInputTab() {
                     <th className="px-2 py-1 text-right w-24">Commission %</th>
                     <th className="px-2 py-1 text-right w-24">Pre-Sale %</th>
                     <th className="px-2 py-1 text-right w-24">Deposit %</th>
+                    <th className="px-2 py-1 text-center w-10"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1511,10 +1744,63 @@ export function MainInputTab() {
                           className="w-full text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
                         />
                       </td>
+                      <td className="px-1 py-0.5 text-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = inputs.sellingCosts.filter((_, i) => i !== idx);
+                            setInputs({ sellingCosts: updated });
+                          }}
+                          title="Delete this row"
+                          className="text-[10px] text-gray-400 hover:text-red-600 hover:bg-red-50 px-1.5 py-0.5 rounded"
+                        >×</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const existingCodes = inputs.sellingCosts.map(s => parseInt(s.code, 10)).filter(n => !isNaN(n));
+                  const startCode = existingCodes.length > 0 ? Math.max(...existingCodes) + 1 : 7001;
+                  const newRow: SellingCostConfig = {
+                    code: String(startCode),
+                    description: '',
+                    salesCommission: 0,
+                    preCommissionPercent: 0,
+                    depositPercent: 0.1,
+                    sCurve: 'Evenly Split',
+                    addGST: true,
+                  };
+                  setInputs({ sellingCosts: [...inputs.sellingCosts, newRow] });
+                }}
+                className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded"
+              >
+                + Add row
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const existingCodes = inputs.sellingCosts.map(s => parseInt(s.code, 10)).filter(n => !isNaN(n));
+                  const startCode = existingCodes.length > 0 ? Math.max(...existingCodes) + 1 : 7001;
+                  const newRows: SellingCostConfig[] = Array.from({ length: 10 }, (_, i) => ({
+                    code: String(startCode + i),
+                    description: '',
+                    salesCommission: 0,
+                    preCommissionPercent: 0,
+                    depositPercent: 0.1,
+                    sCurve: 'Evenly Split',
+                    addGST: true,
+                  }));
+                  setInputs({ sellingCosts: [...inputs.sellingCosts, ...newRows] });
+                }}
+                className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 border border-blue-300 px-2 py-1 rounded"
+              >
+                + Add 10 rows
+              </button>
             </div>
           </div>
         </div>
@@ -1535,6 +1821,7 @@ export function MainInputTab() {
               defaultSaleableArea={inputs.preliminary.projectGFA}
               defaultState={inputs.landPurchase.stampDutyState as BenchmarkState}
               currentTotalGRV={inputs.grvItems.reduce((s, i) => s + i.currentSalePrice, 0)}
+              propertyAddress={inputs.preliminary.propertyAddress ?? ''}
             />
             <GRVTable items={inputs.grvItems}
               onChange={items => setInputs({ grvItems: items })} />
