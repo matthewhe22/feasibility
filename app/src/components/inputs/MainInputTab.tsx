@@ -1395,11 +1395,25 @@ export function MainInputTab() {
     // ship with the model (Registration Fees ≈ $1.13M baked-in from the $124M
     // demo project) carry over to small-land projects and look absurd next to
     // a $2M land value. Stamp duty has its own engine so we skip 'sd' here.
+    //
+    // Edge cases:
+    //  - landPrice === 0: zero out the non-stamp acquisition costs (a zero
+    //    land buy implies zero registration/PEXA — leaving them at the demo
+    //    defaults would create an inconsistent project state).
+    //  - oldPrice === 0 with new landPrice > 0: leave acquisition costs as
+    //    they are (no meaningful ratio; user is starting from a zeroed state).
     const oldPrice = inputs.landPurchase.landPurchasePrice;
-    const ratio = oldPrice > 0 && landPrice > 0 ? landPrice / oldPrice : 1;
+    const scaleMode: 'none' | 'ratio' | 'zero' =
+      landPrice === 0 ? 'zero' : (oldPrice > 0 ? 'ratio' : 'none');
+    const ratio = scaleMode === 'ratio' ? landPrice / oldPrice : 1;
+    const applyScale = (amount: number): number => {
+      if (scaleMode === 'zero') return 0;
+      if (scaleMode === 'ratio') return amount * ratio;
+      return amount;
+    };
     if (inputs.landPurchase.stampDutyManual) {
       const scaledAcq = inputs.landPurchase.acquisitionCosts.map(a =>
-        a.id === 'sd' || ratio === 1 ? a : { ...a, amount: a.amount * ratio }
+        a.id === 'sd' ? a : { ...a, amount: applyScale(a.amount) }
       );
       setInputs({
         landPurchase: {
@@ -1414,7 +1428,7 @@ export function MainInputTab() {
     const concession = inputs.landPurchase.stampDutyConcession ?? 'none';
     const autoSD = calculateStampDuty(landPrice, state, concession);
     const updatedAcq = inputs.landPurchase.acquisitionCosts.map(a =>
-      a.id === 'sd' ? { ...a, amount: autoSD } : (ratio === 1 ? a : { ...a, amount: a.amount * ratio })
+      a.id === 'sd' ? { ...a, amount: autoSD } : { ...a, amount: applyScale(a.amount) }
     );
     setInputs({
       landPurchase: {
@@ -1533,7 +1547,7 @@ export function MainInputTab() {
               onClick={() => {
                 if (!confirm('Clear all General inputs?')) return;
                 setInputs({
-                  preliminary: { ...inputs.preliminary, projectLots: 0, projectGFA: 0, siteArea: 0, projectStartMonth: 0, projectSpanMonths: 0 },
+                  preliminary: { ...inputs.preliminary, propertyAddress: '', projectLots: 0, projectGFA: 0, siteArea: 0, projectStartMonth: 0, projectSpanMonths: 0 },
                   // Bug 4 (Kew UAT): Clear All now resets gstRate to the Australian default (10%) rather than 0% so new projects don't silently miss GST output/ITC recognition.
                   landPurchase: { ...inputs.landPurchase, gstRate: 0.10 },
                 });
