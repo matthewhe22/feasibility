@@ -60,6 +60,21 @@ assert(lookupSuburb(undefined) === null, 'undefined returns null');
 // Unknown suburb returns null.
 assert(lookupSuburb('Nowhereville XYZ 9999') === null, 'unknown suburb returns null');
 
+// Regression: a leading 4-digit street number must NOT be treated as the
+// postcode when a state token is present. Previously "2026 Bondi Road,
+// Bondi NSW" collapsed the locality boundary to index 0 and returned null.
+const leadingNumber = lookupSuburb('2026 Bondi Road, Bondi NSW');
+assert(leadingNumber?.suburb === 'bondi', `leading 4-digit street number does not break match (got ${leadingNumber?.suburb})`);
+assert(leadingNumber?.state === 'NSW', `leading 4-digit street number still resolves NSW (got ${leadingNumber?.state})`);
+
+// Same but with the matching postcode genuinely at the end.
+const numberAndPostcode = lookupSuburb('2026 Bondi Road, Bondi NSW 2026');
+assert(numberAndPostcode?.suburb === 'bondi', `leading 4-digit AND trailing postcode: still matches bondi`);
+
+// Subunit / Lot-style 4-digit prefix shouldn't bias either.
+const unitPrefix = lookupSuburb('5/2026 Bondi Road, Bondi NSW');
+assert(unitPrefix?.suburb === 'bondi', `unit-prefixed 4-digit street number does not break match (got ${unitPrefix?.suburb})`);
+
 console.log(`\nSUBURB-LOOKUP TESTS: ${passed} passed, ${failed} failed (${passed + failed} total)`);
 if (failed > 0) {
   for (const f of failures) console.log('  x', f);

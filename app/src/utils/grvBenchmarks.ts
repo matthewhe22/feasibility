@@ -313,6 +313,17 @@ export interface GRVBenchmarkInputs {
   totalSaleableArea?: number | undefined;
   /** Optional: override annual escalation rate (decimal). */
   customEscalation?: number | undefined;
+  /**
+   * Optional: suburb name (from the project address). Used as a refinement
+   * label only — it is surfaced in the calculation breakdown and forwarded
+   * to live AI research so prompts ground prices to the specific suburb
+   * rather than the state × locationGrade average. The static benchmark
+   * math does NOT apply a hard-coded per-suburb factor (that would require
+   * curating 100+ values without a strong data source); instead the
+   * locationGrade is the static lever and the suburb adds precision to the
+   * AI lookup.
+   */
+  suburb?: string | undefined;
 }
 
 export interface GRVBenchmarkResult {
@@ -336,6 +347,8 @@ export interface GRVBenchmarkResult {
     stateFactor: number;
     locationFactor: number;
     qualityFactor: number;
+    /** Optional: suburb name used to refine the AI research lookup (precision label only). */
+    suburb?: string | undefined;
   };
   source: string;
   basisNote: string;
@@ -408,6 +421,7 @@ export function computeGRVBenchmark(inputs: GRVBenchmarkInputs): GRVBenchmarkRes
       stateFactor: sf,
       locationFactor: lf,
       qualityFactor: qf,
+      suburb: inputs.suburb,
     },
     source: base.source,
     basisNote: base.basisNote,

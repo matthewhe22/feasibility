@@ -126,9 +126,10 @@ export function GRVReferenceCard({
       units: units || undefined,
       totalSaleableArea: totalArea || undefined,
       customEscalation: customEscalation ?? undefined,
+      suburb: addressMatch?.suburb,
     };
     return computeGRVBenchmark(inputs);
-  }, [assetType, state, location, quality, targetYear, unitArea, units, totalArea, customEscalation]);
+  }, [assetType, state, location, quality, targetYear, unitArea, units, totalArea, customEscalation, addressMatch?.suburb]);
 
   const variancePct = useMemo(() => {
     if (!benchmark || !benchmark.totalMid || !currentTotalGRV) return null;
@@ -152,6 +153,10 @@ export function GRVReferenceCard({
         totalSaleableArea: totalArea || undefined,
         unitArea: unitArea || undefined,
         propertyAddress: propertyAddress || undefined,
+        // Suburb (from address) lets the AI ground prices to the specific
+        // sub-market rather than the state × grade average — much more
+        // precise on the "comparable sales" side.
+        suburb: addressMatch?.suburb || undefined,
       };
       const r = await fetch('/api/benchmarks/research', {
         method: 'POST',
@@ -194,8 +199,13 @@ export function GRVReferenceCard({
               <span className="text-emerald-900">{propertyAddress}</span>
               {addressMatch ? (
                 <span className="text-emerald-700 ml-2">
-                  → auto-seeded <strong>{addressMatch.state}</strong> / <strong>{addressMatch.locationGrade}</strong>
-                  {userTouchedRef.current && ' (manually overridden below)'}
+                  → suburb <strong className="capitalize">{addressMatch.suburb}</strong>,{' '}
+                  auto-seeded <strong>{addressMatch.state}</strong> / <strong>{addressMatch.locationGrade}</strong>
+                  {userTouchedRef.current && ' (manually overridden below)'}.
+                  <span className="block text-[10px] text-emerald-600 italic mt-0.5">
+                    Live AI research will ground prices to <strong className="capitalize">{addressMatch.suburb}</strong>{' '}
+                    specifically — much more precise than the state × grade average.
+                  </span>
                 </span>
               ) : (
                 <span className="text-amber-700 ml-2 italic">
@@ -363,6 +373,15 @@ export function GRVReferenceCard({
                   <p>State factor: ×{benchmark.factors.stateFactor.toFixed(2)} ({state})</p>
                   <p>Location factor: ×{benchmark.factors.locationFactor.toFixed(2)} ({location})</p>
                   <p>Quality factor: ×{benchmark.factors.qualityFactor.toFixed(2)} ({quality})</p>
+                  {benchmark.factors.suburb && (
+                    <p>
+                      Suburb refinement: <strong className="capitalize">{benchmark.factors.suburb}</strong>{' '}
+                      <span className="text-gray-500 italic">
+                        — used in live AI research to ground prices to this sub-market; not applied to the static math
+                        (locationGrade is the static lever).
+                      </span>
+                    </p>
+                  )}
                   <p>
                     Escalation: ×{benchmark.factors.escalationFactor.toFixed(3)} (
                     {(benchmark.factors.annualEscalation * 100).toFixed(1)}% p.a. ×{' '}
