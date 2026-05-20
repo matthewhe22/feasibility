@@ -42,6 +42,13 @@ interface ResearchRequest {
   targetYear?: number;
   totalSaleableArea?: number;
   unitArea?: number;
+  /** Property address (free text). Optional context for AI grounding. */
+  propertyAddress?: string;
+  /** Suburb extracted from propertyAddress. Drives sub-market precision in
+   *  the GRV research prompt — when present the AI is asked to ground the
+   *  comparable-sales lookup to this specific suburb instead of the
+   *  state × locationGrade average. */
+  suburb?: string;
 }
 
 interface ResearchResult {
@@ -214,15 +221,21 @@ function buildGRVPrompt(req: ResearchRequest): string {
     `Quality / finish grade: ${req.quality ?? '(not specified)'}`,
     `Target valuation year: ${req.targetYear ?? new Date().getFullYear()} (apply trend / escalation if not current)`,
   ];
+  if (req.suburb)            lines.push(`Suburb (PRIMARY MARKET CONTEXT): ${req.suburb}`);
+  if (req.propertyAddress)   lines.push(`Property address (context only): ${req.propertyAddress}`);
   if (req.units)             lines.push(`Number of units / lots / keys: ${req.units}`);
   if (req.totalSaleableArea) lines.push(`Total saleable area: ${req.totalSaleableArea.toLocaleString('en-AU')} m²`);
   if (req.unitArea)          lines.push(`Average unit area: ${req.unitArea.toLocaleString('en-AU')} m² per unit`);
   lines.push(``);
+  if (req.suburb) {
+    lines.push(`PRIORITY: Anchor the comparable-sales lookup to the SPECIFIC SUBURB "${req.suburb}" (${req.state}). Look up CoreLogic / Domain / PropTrack / realestate.com.au suburb pages for "${req.suburb}" directly — return suburb-level median/$ per m² where available, not the city-wide average. The state × location-grade context is a fallback ONLY when suburb-level data is genuinely unavailable; in that case say so explicitly in the summary.`);
+    lines.push(``);
+  }
   lines.push(`Look up current (or projected to ${req.targetYear ?? new Date().getFullYear()}) sale-price ranges for this asset class in this Australian sub-market. Use CoreLogic / Domain / PropTrack / ABS / Knight Frank / JLL / Colliers / Cushman & Wakefield / CBRE / Savills / Charter Keck Cramer / Urbis / HVS / STR. State explicitly in summary the pricing basis (e.g. "AUD per m² of saleable internal area, GST-incl. margin scheme") and the GST treatment used.`);
   lines.push(``);
   lines.push(`If the target year is in the future or past, apply published trend / annual-growth rates (from the same sources) to project the price linearly. Note in summary the annual growth rate used and the source.`);
   lines.push(``);
-  lines.push(`Cite at least 2 distinct sources with URLs.`);
+  lines.push(`Cite at least 2 distinct sources with URLs.${req.suburb ? ` PREFER suburb-specific pages (e.g. realestate.com.au/neighbourhoods/${req.suburb.toLowerCase().replace(/\s+/g, '-')}, domain.com.au/suburb-profile/${req.suburb.toLowerCase().replace(/\s+/g, '-')}) over city-wide reports where they exist.` : ''}`);
   lines.push(``);
   lines.push(`Return JSON only, matching this schema:`);
   lines.push(`{`);

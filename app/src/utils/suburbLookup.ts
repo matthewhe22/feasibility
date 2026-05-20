@@ -270,9 +270,18 @@ function extractLocality(norm: string): { locality: string; state: State | null;
       break;
     }
   }
+  // Postcode search — Australian postcodes ALWAYS come after the state
+  // token ("Kew VIC 3101"). If we found a state token, restrict the search
+  // to indices after it; otherwise scan the whole address from the end and
+  // take the last 4-digit token (handles postcode-only inputs like
+  // "Paddington 4064"). This prevents a LEADING 4-digit street number
+  // (e.g. "2026 Bondi Road, Bondi NSW") from being mis-read as the
+  // postcode, which would collapse the locality slice to empty and miss
+  // the otherwise-valid suburb match.
   let postcode: string | null = null;
   let postcodeIdx = -1;
-  for (let i = tokens.length - 1; i >= 0; i--) {
+  const postcodeMinIdx = stateIdx >= 0 ? stateIdx + 1 : 0;
+  for (let i = tokens.length - 1; i >= postcodeMinIdx; i--) {
     const tok = tokens[i];
     if (tok && /^\d{4}$/.test(tok)) { postcode = tok; postcodeIdx = i; break; }
   }
