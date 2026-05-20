@@ -186,13 +186,18 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
   // `units` into `feeRatePercent` *only* when `units` is in (0, 1) — a
   // plausible rate range. Outside that range we default to 0.02 (2%) and
   // emit a calculation warning so the user can correct it explicitly.
+  //
+  // Bug (Kew UAT v2 follow-up): typing 0% in the UI used to silently fall back
+  // to the 2% default because the guard required `rawRate > 0`. We now treat
+  // an explicit, finite, in-range value (including 0) as user intent. Only
+  // missing / NaN / out-of-range values trigger the fallback.
   const rawRate = inputs.pmFees[0]?.feeRatePercent;
   let pmFeeRate = 0.02;
-  if (typeof rawRate === 'number' && Number.isFinite(rawRate) && rawRate > 0 && rawRate < 1) {
+  if (typeof rawRate === 'number' && Number.isFinite(rawRate) && rawRate >= 0 && rawRate < 1) {
     pmFeeRate = rawRate;
-  } else if (typeof rawRate === 'number' && rawRate !== 0) {
+  } else if (typeof rawRate === 'number') {
     localWarnings.push(
-      `PM Fee rate ${rawRate} out of plausible range (0,1) — using 0.02 (2%) instead.`,
+      `PM Fee rate ${rawRate} out of plausible range [0,1) — using 0.02 (2%) instead.`,
     );
   }
   let dynamicPMFeeTotal = pmFeeRate * totalCostsExcPM;
