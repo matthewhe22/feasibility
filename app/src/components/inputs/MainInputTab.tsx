@@ -16,7 +16,7 @@ import {
   applyActualsToInputs,
 } from '../../utils/actualsExcel';
 import { downloadSCurveTemplate, parseSCurveFile } from '../../utils/sCurveExcel';
-import type { CostLineItem, RevenueLineItem, DebtFacility, SellingCostConfig, AcquisitionCostItem } from '../../types';
+import type { CostLineItem, RevenueLineItem, DebtFacility, SellingCostConfig, AcquisitionCostItem, LandPaymentStage } from '../../types';
 import { lookupSuburb } from '../../utils/suburbLookup';
 
 // ── Manual S-Curve Editor ─────────────────────────────────────────────────────
@@ -545,6 +545,163 @@ function CostLineTable({ items, onChange, defaultCostType }: {
           className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 border border-blue-300 px-2 py-1 rounded"
         >
           + Add 10 rows
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Land payment stages editor. Each stage carries either `percentOfLand`
+// (scales with the headline land price — preferred) or `amount` (fixed
+// dollars). The engine resolves percent-of-land first, falling back to
+// amount when percent is 0. Surfaced because before this editor existed
+// the default 4-stage schedule (settlement at month 30 with 90% of land)
+// was invisible — projects with a smaller land value still saw their cost
+// land at month 30.
+function LandPaymentStagesTable({ items, onChange }: {
+  items: LandPaymentStage[];
+  onChange: (items: LandPaymentStage[]) => void;
+}) {
+  const updateItem = (idx: number, field: keyof LandPaymentStage, value: unknown) => {
+    const updated = [...items];
+    const orig = updated[idx];
+    if (!orig) return;
+    updated[idx] = { ...orig, [field]: value };
+    onChange(updated);
+  };
+  const deleteItem = (idx: number) => onChange(items.filter((_, i) => i !== idx));
+  const addRow = () => {
+    const newId = `pay${Date.now().toString(36)}`;
+    const newRow: LandPaymentStage = {
+      id: newId, description: '', percentOfLand: 0, amount: 0, lumpSum: 0,
+      monthStart: 1, monthSpan: 1,
+    };
+    onChange([...items, newRow]);
+  };
+  const collapseToSinglePayment = (month: number) => {
+    onChange([{
+      id: 'settle',
+      description: 'Settlement (single payment)',
+      percentOfLand: 1, // 100% of land price
+      amount: 0,
+      lumpSum: 0,
+      monthStart: month,
+      monthSpan: 1,
+    }]);
+  };
+
+  const percentTotal = items.reduce((s, i) => s + (i.percentOfLand || 0), 0);
+
+  return (
+    <div className="mt-4">
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-xs font-semibold text-gray-700">Land Payment Stages</div>
+        <div className="flex items-center gap-2">
+          <label className="text-[10px] text-gray-600">Collapse to single payment at month:</label>
+          <input
+            type="number" min={1} defaultValue={1}
+            id="collapse-land-month"
+            className="w-14 text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              const el = document.getElementById('collapse-land-month') as HTMLInputElement | null;
+              const m = el && parseInt(el.value, 10) > 0 ? parseInt(el.value, 10) : 1;
+              if (confirm(`Replace all stages with a single 100% payment at month ${m}?`)) {
+                collapseToSinglePayment(m);
+              }
+            }}
+            className="text-[10px] bg-amber-600 hover:bg-amber-700 text-white px-2 py-0.5 rounded"
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+      <p className="text-[10px] text-gray-500 italic mb-2">
+        Stages scale with the Land Purchase Price via "% of Land" (preferred). Use "Amount" only for
+        fixed-dollar stages. Percentages should sum to 100%.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="bg-gray-600 text-white">
+              <th className="px-2 py-1 text-left">Description</th>
+              <th className="px-2 py-1 text-right w-24">% of Land</th>
+              <th className="px-2 py-1 text-right w-32">Amount ($)</th>
+              <th className="px-2 py-1 text-right w-20">Month</th>
+              <th className="px-2 py-1 text-right w-20">Span</th>
+              <th className="px-2 py-1 text-center w-10"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item, idx) => (
+              <tr key={item.id} className={`border-b border-gray-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                <td className="px-2 py-0.5">
+                  <input
+                    type="text" value={item.description}
+                    onChange={e => updateItem(idx, 'description', e.target.value)}
+                    className="w-full bg-transparent text-xs border-0 p-0 focus:ring-0"
+                  />
+                </td>
+                <td className="px-1 py-0.5">
+                  <input
+                    type="text"
+                    value={((item.percentOfLand ?? 0) * 100).toFixed(2)}
+                    onChange={e => updateItem(idx, 'percentOfLand', parseFloat(e.target.value) / 100 || 0)}
+                    className="w-full text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
+                  />
+                </td>
+                <td className="px-1 py-0.5">
+                  <input
+                    type="text"
+                    value={(item.amount ?? 0).toLocaleString('en-AU', { maximumFractionDigits: 2 })}
+                    onChange={e => updateItem(idx, 'amount', parseFloat(e.target.value.replace(/[^0-9.-]/g, '')) || 0)}
+                    className="w-full text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
+                  />
+                </td>
+                <td className="px-1 py-0.5">
+                  <input type="number" value={item.monthStart}
+                    onChange={e => updateItem(idx, 'monthStart', parseInt(e.target.value) || 0)}
+                    className="w-full text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
+                  />
+                </td>
+                <td className="px-1 py-0.5">
+                  <input type="number" value={item.monthSpan}
+                    onChange={e => updateItem(idx, 'monthSpan', parseInt(e.target.value) || 0)}
+                    className="w-full text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
+                  />
+                </td>
+                <td className="px-1 py-0.5 text-center">
+                  <button
+                    type="button"
+                    onClick={() => deleteItem(idx)}
+                    title="Delete this row"
+                    className="text-[10px] text-gray-400 hover:text-red-600 hover:bg-red-50 px-1.5 py-0.5 rounded"
+                  >×</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className={`bg-gray-100 font-bold border-t-2 ${Math.abs(percentTotal - 1) < 0.001 ? 'border-gray-400' : 'border-amber-500'}`}>
+              <td className="px-2 py-1">Total % of Land</td>
+              <td className={`px-2 py-1 text-right font-mono ${Math.abs(percentTotal - 1) < 0.001 ? 'text-gray-800' : 'text-amber-700'}`}>
+                {(percentTotal * 100).toFixed(2)}%
+                {Math.abs(percentTotal - 1) >= 0.001 && <span className="text-[10px] ml-1 italic">(should be 100%)</span>}
+              </td>
+              <td colSpan={4}></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div className="mt-2">
+        <button
+          type="button"
+          onClick={addRow}
+          className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded"
+        >
+          + Add row
         </button>
       </div>
     </div>
@@ -1526,6 +1683,11 @@ export function MainInputTab() {
             <AcquisitionCostsTable
               items={inputs.landPurchase.acquisitionCosts}
               onChange={items => setInputs({ landPurchase: { ...inputs.landPurchase, acquisitionCosts: items } })}
+            />
+
+            <LandPaymentStagesTable
+              items={inputs.landPurchase.paymentStages}
+              onChange={items => setInputs({ landPurchase: { ...inputs.landPurchase, paymentStages: items } })}
             />
           </div>
         </div>

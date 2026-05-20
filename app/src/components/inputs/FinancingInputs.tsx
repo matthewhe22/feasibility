@@ -110,14 +110,52 @@ function DebtSection({ title, facility, isLandLoan = false, isResidualStock = fa
     onChange({ ...facility, [field]: value });
   };
 
+  const disabled = (facility.facilityLimit ?? 0) <= 0;
+  const handleDisable = () => {
+    if (!confirm(`Zero out "${title}"? Facility limit, fees, rates and start/maturity all reset to 0.`)) return;
+    onChange({
+      ...facility,
+      facilityLimit: 0,
+      startMonth: 0,
+      maturityMonth: 0,
+      interestRate: 0,
+      bbsy: 0,
+      margin: 0,
+      establishmentFeePercent: 0,
+      lineFeePercent: 0,
+      ltcTarget: 0,
+      lvrTarget: 0,
+      isCapitalised: false,
+    });
+  };
+
   return (
     <div className="border border-gray-200 rounded mb-3">
-      <div className="bg-orange-50 px-3 py-1.5 border-b border-gray-200">
-        <span className="text-xs font-bold text-orange-800">{title}</span>
+      <div className="bg-orange-50 px-3 py-1.5 border-b border-gray-200 flex items-center justify-between">
+        <span className="text-xs font-bold text-orange-800">
+          {title}
+          {disabled && <span className="ml-2 text-[10px] font-normal text-gray-500 italic">(disabled — limit = 0)</span>}
+        </span>
+        <button
+          type="button"
+          onClick={handleDisable}
+          className="text-[10px] bg-red-100 hover:bg-red-200 text-red-700 border border-red-300 px-2 py-0.5 rounded"
+          title="Set facility limit, fees and rates to 0 so this facility produces no draws, interest or fees."
+        >
+          Zero out / disable
+        </button>
       </div>
       <div className="p-3 space-y-1.5">
         <CurrencyInput label="Facility Limit" value={facility.facilityLimit} onChange={v => update('facilityLimit', v)} />
         <FacilityLimitHint facility={facility} isResidualStock={isResidualStock} />
+        {!disabled && (facility.isCapitalised || (facility.establishmentFeePercent ?? 0) > 0 || (facility.lineFeePercent ?? 0) > 0) && (
+          <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+            <strong>Heads up:</strong> with a non-zero facility limit + non-zero fees or capitalised interest, this
+            facility will record drawdowns even if construction needs nothing from it — establishment fees,
+            line fees and accrued interest are drawn from the facility itself. Click <em>Zero out / disable</em>
+            above to suppress all activity.
+          </p>
+        )}
         <NumberInput label="Start Month" value={facility.startMonth} onChange={v => update('startMonth', v)} />
         <NumberInput label="Maturity (months from start)" value={facility.maturityMonth} onChange={v => update('maturityMonth', v)} />
         <div className="border-t border-gray-100 pt-1.5 mt-1.5">
