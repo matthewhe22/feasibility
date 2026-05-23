@@ -32,7 +32,7 @@ const PROVIDERS: Record<AIProvider, ProviderInfo> = {
     apiKeyUrl: 'https://platform.deepseek.com/api_keys',
     apiKeyLabel: 'platform.deepseek.com/api_keys',
     envVar: 'DEEPSEEK_API_KEY',
-    description: 'Very low cost (~$0.27/M input, $1.10/M output for deepseek-chat). Pay-as-you-go — no free tier. No built-in web search.',
+    description: 'Very low cost. V4 Flash ~$0.14/M in · $0.28/M out (recommended). V4 Pro ~$1.74/M in · $3.48/M out (flagship). Pay-as-you-go — no free tier. 1M context, dual-mode (thinking + non-thinking). No built-in web search. Legacy V3 (deepseek-chat / deepseek-reasoner) retires 2026-07-24.',
     keyPlaceholder: 'sk-...',
   },
 };
