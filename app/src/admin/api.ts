@@ -121,7 +121,10 @@ export type AIModelId =
   | 'gemini-2-0-flash'
   | 'gemini-1-5-pro'
   | 'gemini-1-5-flash'
-  // DeepSeek
+  // DeepSeek V4 (current — released 2026-04-24)
+  | 'deepseek-v4-pro'
+  | 'deepseek-v4-flash'
+  // DeepSeek legacy (retiring 2026-07-24)
   | 'deepseek-chat'
   | 'deepseek-reasoner';
 

@@ -22,7 +22,10 @@ export type AIModelId =
   | 'gemini-2-0-flash'
   | 'gemini-1-5-pro'
   | 'gemini-1-5-flash'
-  // DeepSeek
+  // DeepSeek V4 (current, released 2026-04-24)
+  | 'deepseek-v4-pro'
+  | 'deepseek-v4-flash'
+  // DeepSeek legacy (deprecated — retiring 2026-07-24)
   | 'deepseek-chat'
   | 'deepseek-reasoner';
 
@@ -43,7 +46,8 @@ export function toGeminiApiModel(id: AIModelId): string {
 
 /** DeepSeek API expects model names verbatim. */
 export function toDeepSeekApiModel(id: AIModelId): string {
-  return id; // 'deepseek-chat' | 'deepseek-reasoner'
+  // 'deepseek-v4-pro' | 'deepseek-v4-flash' | 'deepseek-chat' | 'deepseek-reasoner'
+  return id;
 }
 
 /** Derive which provider a given model belongs to. */
@@ -103,28 +107,51 @@ export const ALLOWED_MODELS: AIModelOption[] = [
     supportsWebSearch: true,
     recommendedFor: 'Fast and cheaper alternative to Pro (paid tier).',
   },
-  // ── DeepSeek (very cheap; no built-in web search) ─────────────────────
+  // ── DeepSeek V4 (current — released 2026-04-24; 1M context, dual-mode) ──
+  {
+    id: 'deepseek-v4-flash',
+    label: 'DeepSeek V4 Flash — cheapest, fast (recommended)',
+    provider: 'deepseek',
+    tier: 'flash',
+    contextWindow: '1M',
+    inputPricePerMillion: 0.14,
+    outputPricePerMillion: 0.28,
+    supportsWebSearch: false,
+    recommendedFor: 'Successor to deepseek-chat. 284B total / 13B active params. Cheapest DeepSeek option (~$0.14/M in, $0.28/M out). 1M context. Dual-mode (thinking + non-thinking). No live web search.',
+  },
+  {
+    id: 'deepseek-v4-pro',
+    label: 'DeepSeek V4 Pro — top quality (paid)',
+    provider: 'deepseek',
+    tier: 'pro',
+    contextWindow: '1M',
+    inputPricePerMillion: 1.74,
+    outputPricePerMillion: 3.48,
+    supportsWebSearch: false,
+    recommendedFor: '1.6T total / 49B active params — DeepSeek\'s flagship. Rivals top closed-source models on benchmarks. 1M context, dual-mode. Higher cost than V4 Flash but still well below Gemini 1.5 Pro. No live web search.',
+  },
+  // ── DeepSeek legacy (retiring 2026-07-24) ────────────────────────────
   {
     id: 'deepseek-chat',
-    label: 'DeepSeek Chat (V3) — cheapest',
+    label: 'DeepSeek Chat (V3) — DEPRECATED, retires 2026-07-24',
     provider: 'deepseek',
     tier: 'chat',
     contextWindow: '64K',
     inputPricePerMillion: 0.27,
     outputPricePerMillion: 1.10,
     supportsWebSearch: false,
-    recommendedFor: 'Very low cost (~$1/M tokens). General-purpose. No live web search — answers from training data.',
+    recommendedFor: 'Legacy V3. Retiring 2026-07-24 — use deepseek-v4-flash instead (now corresponds to V4 Flash non-thinking mode).',
   },
   {
     id: 'deepseek-reasoner',
-    label: 'DeepSeek Reasoner (R1) — chain-of-thought',
+    label: 'DeepSeek Reasoner (R1) — DEPRECATED, retires 2026-07-24',
     provider: 'deepseek',
     tier: 'reasoner',
     contextWindow: '64K',
     inputPricePerMillion: 0.55,
     outputPricePerMillion: 2.19,
     supportsWebSearch: false,
-    recommendedFor: 'Best reasoning quality from DeepSeek; slower. No live web search.',
+    recommendedFor: 'Legacy R1. Retiring 2026-07-24 — use deepseek-v4-flash (thinking mode) or deepseek-v4-pro instead.',
   },
 ];
 
@@ -235,7 +262,7 @@ export async function resolveActiveSettings(
     const envModel = process.env.DEEPSEEK_MODEL?.trim() as AIModelId | undefined;
     const model = ALLOWED_MODELS.some(m => m.id === envModel && m.provider === 'deepseek')
       ? (envModel as AIModelId)
-      : 'deepseek-chat';
+      : 'deepseek-v4-flash';
     return { apiKey: deepseekKey, model, provider: 'deepseek', source: 'env' };
   }
   return null;
