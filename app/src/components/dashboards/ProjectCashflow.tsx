@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { formatCurrency } from '../../utils';
 import type { MonthlyCashflow } from '../../types';
@@ -131,6 +132,7 @@ const SECTIONS: { header: string; headerBg: string; rows: RowDef[] }[] = [
 
 export function ProjectCashflow() {
   const { dashboardData: data } = useStore();
+  const [startPeriod, setStartPeriod] = useState<number>(1);
 
   if (!data) {
     return <div className="text-center py-12 text-gray-400 text-sm">Run calculations to see the Project Cashflow</div>;
@@ -142,7 +144,8 @@ export function ProjectCashflow() {
   // balance release (engine flushes at i === n-1).
   const MAX_DISPLAY_PERIODS = 240;
   const lastPeriodNumber = Math.min(data.cashflows.length, MAX_DISPLAY_PERIODS);
-  const cf = data.cashflows.filter(c => c.period.periodNumber >= 1 && c.period.periodNumber <= lastPeriodNumber);
+  const clampedStart = Math.max(1, Math.min(startPeriod || 1, lastPeriodNumber));
+  const cf = data.cashflows.filter(c => c.period.periodNumber >= clampedStart && c.period.periodNumber <= lastPeriodNumber);
 
   const fmtVal = (v: number, textColor?: string) => {
     if (v == null || isNaN(v) || v === 0) return '';
@@ -172,6 +175,24 @@ export function ProjectCashflow() {
       <div className="text-center mb-4">
         <h2 className="text-lg font-bold text-gray-800">Project Cashflow</h2>
         <p className="text-xs text-gray-500">Monthly cashflow detail across all periods</p>
+      </div>
+
+      <div className="flex items-center justify-end gap-2 mb-2">
+        <label className="text-xs text-gray-600" htmlFor="cashflow-start-period">
+          Display from period
+        </label>
+        <input
+          id="cashflow-start-period"
+          type="number"
+          min={1}
+          max={lastPeriodNumber}
+          value={startPeriod}
+          onChange={e => setStartPeriod(parseInt(e.target.value, 10) || 1)}
+          className="w-20 text-xs text-right bg-yellow-50 border border-gray-300 rounded px-1.5 py-0.5"
+        />
+        <span className="text-[10px] text-gray-400">
+          (1 – {lastPeriodNumber}; totals are computed over the visible window)
+        </span>
       </div>
 
       <div className="overflow-auto border border-gray-200 rounded max-h-[75vh]">
