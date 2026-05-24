@@ -1222,5 +1222,9 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     // Checks tab and any other consumer see the SAME numbers the [FUNDING]
     // warning emitted from. Cap=0 means uncapped (severity='pass', no warning).
     equityCapCheck: funding.equityCapCheck,
+    // Snapshot of the project span used for this calculation. UI charts read
+    // this so the x-axis stays consistent with `cashflows` even when the user
+    // edits `inputs.preliminary.projectSpanMonths` before the next recalc.
+    projectSpanMonths: inputs.preliminary.projectSpanMonths,
   };
 }

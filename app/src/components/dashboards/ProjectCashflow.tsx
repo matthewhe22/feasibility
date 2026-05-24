@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { formatCurrency } from '../../utils';
 import type { MonthlyCashflow } from '../../types';
@@ -134,6 +134,16 @@ export function ProjectCashflow() {
   const { dashboardData: data } = useStore();
   const [startPeriod, setStartPeriod] = useState<number>(1);
 
+  // Reset the display-start filter whenever the underlying cashflow series
+  // changes length (project load, recalc with new span). Without this a
+  // stale high value (e.g. 180 from a long project) would silently collapse
+  // a freshly-loaded shorter project to its final month and compute totals
+  // over that truncated window.
+  const cashflowLength = data?.cashflows.length ?? 0;
+  useEffect(() => {
+    setStartPeriod(prev => (prev > cashflowLength ? 1 : prev));
+  }, [cashflowLength]);
+
   if (!data) {
     return <div className="text-center py-12 text-gray-400 text-sm">Run calculations to see the Project Cashflow</div>;
   }
@@ -145,6 +155,7 @@ export function ProjectCashflow() {
   const MAX_DISPLAY_PERIODS = 240;
   const lastPeriodNumber = Math.min(data.cashflows.length, MAX_DISPLAY_PERIODS);
   const clampedStart = Math.max(1, Math.min(startPeriod || 1, lastPeriodNumber));
+  const wasClamped = (startPeriod || 1) > lastPeriodNumber;
   const cf = data.cashflows.filter(c => c.period.periodNumber >= clampedStart && c.period.periodNumber <= lastPeriodNumber);
 
   const fmtVal = (v: number, textColor?: string) => {
@@ -193,6 +204,11 @@ export function ProjectCashflow() {
         <span className="text-[10px] text-gray-400">
           (1 – {lastPeriodNumber}; totals are computed over the visible window)
         </span>
+        {wasClamped && (
+          <span className="text-[10px] text-amber-700 ml-2">
+            value exceeds project length — clamped to {clampedStart}
+          </span>
+        )}
       </div>
 
       <div className="overflow-auto border border-gray-200 rounded max-h-[75vh]">
