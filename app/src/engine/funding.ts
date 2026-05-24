@@ -2537,6 +2537,54 @@ function runFundingWaterfall(
       }
     }
 
+    // ── 10c. Senior maturity balloon repayment ──────────────────────────────
+    // At maturity the facility is hard-closed (matches the seniorDrawActive
+    // gating above). If the revenue sweep above didn't fully clear the balance,
+    // pull whatever's left from the project bank account; if the bank is short,
+    // force an equity backstop draw to cover the residual. This makes the
+    // facility actually go to $0 on its maturity month instead of accruing
+    // interest indefinitely. For lender-facing models with planned residual-stock
+    // refinance, set the senior `maturityMonth` to the refinance month and size
+    // the residual stock facility accordingly — the equity backstop only fires
+    // when neither revenue nor a takeover facility cleared the balance in time.
+    const closeOutAtMaturity = (
+      isMaturityPeriod: boolean,
+      runningBalance: number,
+      applyRepay: (amt: number) => void,
+    ) => {
+      if (!isMaturityPeriod || runningBalance <= 1) return;
+      let toRepay = runningBalance;
+      const fromBank = Math.min(Math.max(0, bankBalance), toRepay);
+      if (fromBank > 0) {
+        bankBalance -= fromBank;
+        toRepay     -= fromBank;
+        applyRepay(fromBank);
+      }
+      if (toRepay > 1) {
+        // Equity-of-last-resort backstop. Track against the developer cap so the
+        // [FUNDING] equity-cap-overshoot warning still fires when the maturity
+        // shortfall pushes the converged draw past the user-set ceiling.
+        const developerUsed = cumulativeEquity - jvCumulative;
+        const developerRemaining = Math.max(0, developerCap - developerUsed);
+        if (toRepay > developerRemaining + 1) {
+          recordEquityBackstopOvershoot(i + 1, toRepay, developerRemaining);
+        }
+        eqInjections[i]  += toRepay;
+        cumulativeEquity += toRepay;
+        applyRepay(toRepay);
+      }
+    };
+    closeOutAtMaturity(hasSenior && i === snrEndIdx, snrRunningBalance, (amt) => {
+      snrRepayments[i]  += amt;
+      snrRunningBalance -= amt;
+      rawSnrBalance     -= amt;
+    });
+    closeOutAtMaturity(hasSenior2 && i === snr2EndIdx, snr2RunningBalance, (amt) => {
+      snr2Repayments[i]  += amt;
+      snr2RunningBalance -= amt;
+      rawSnr2Balance     -= amt;
+    });
+
     // ── 10b. Final-period equity clawback (M2). ─────────────────────────────
     // At project end, if any debt remains AND any equity has been repatriated,
     // claw back the equity to fully repay the debt. Cap-int residual on debt
