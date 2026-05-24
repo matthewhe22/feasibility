@@ -732,6 +732,11 @@ export interface DashboardData {
   developmentCovenants?: DevelopmentCovenants;
   gstCompliance?: GSTCompliance;
   cashflows: MonthlyCashflow[];
+  /** Snapshot of `inputs.preliminary.projectSpanMonths` at calc time. UI consumers
+   *  (Charts, etc.) should read this rather than the live store value — otherwise
+   *  editing inputs before re-running calcs causes the chart x-axis to shift while
+   *  `cashflows` is still from the prior run. */
+  projectSpanMonths: number;
   /** Plain-string warnings (legacy — kept for backward compat with existing UI). */
   warnings: string[];
   /** Structured warnings with severity + category — new UI uses this for filtering / grouping. */

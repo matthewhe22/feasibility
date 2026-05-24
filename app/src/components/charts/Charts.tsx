@@ -35,12 +35,13 @@ export function ChartsTab() {
     return <div className="text-center py-12 text-gray-400 text-sm">Run calculations to see charts</div>;
   }
 
-  // Bound charts to the configured project span — anything beyond projectSpanMonths
-  // is timeline padding (events configured past the span, see engine/timeline.ts) and
-  // should not appear in visualisations. Falls back to the cashflow length for legacy
-  // projects with no span configured.
-  const { inputs: storeInputs } = useStore.getState();
-  const projectSpan = storeInputs.preliminary?.projectSpanMonths ?? data.cashflows.length;
+  // Bound charts to the project span captured AT CALC TIME (snapshot stored on
+  // DashboardData). Reading from `data.projectSpanMonths` rather than live store
+  // input avoids stale-data mismatch — editing the span before re-running calcs
+  // no longer shifts the chart x-axis while `cashflows` is still from the prior
+  // run. Anything beyond the snapshot span is timeline padding (events configured
+  // past the span, see engine/timeline.ts) and should not appear in visualisations.
+  const projectSpan = data.projectSpanMonths ?? data.cashflows.length;
   const lastPeriod = Math.max(1, Math.min(projectSpan, data.cashflows.length));
   const cf = data.cashflows.filter(c => {
     const idx = c.period.periodNumber;
