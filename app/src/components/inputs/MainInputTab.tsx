@@ -1572,29 +1572,33 @@ export function MainInputTab() {
             <div className="flex items-center gap-2">
               <span
                 className="text-xs font-medium text-gray-600 w-40 shrink-0"
-                title="Calendar date of period 1 — drives every month label, the actuals/forecast boundary and the cashflow timeline. Stored internally as an Excel serial; this picker round-trips through dateToExcelSerial."
+                title="Calendar month of period 1 — every period label (Apr-23, May-23, …) is derived from this anchor. Changing it shifts every monthly label and the actuals/forecast boundary; all input month numbers (monthStart, monthSpan, settlementMonth, etc.) are RELATIVE to period 1 and stay unchanged. Stored internally as an Excel serial set to the first day of the picked month."
               >
-                Model Start Date (period 1)
+                Model Start Month (period 1)
               </span>
               <input
-                type="date"
+                type="month"
                 value={(() => {
                   const d = excelDateToDate(inputs.preliminary.dateOfFirstPeriod);
-                  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+                  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
                 })()}
                 onChange={e => {
-                  const [yStr, mStr, dStr] = (e.target.value || '').split('-');
-                  if (!yStr || !mStr || !dStr) return;
+                  const [yStr, mStr] = (e.target.value || '').split('-');
+                  if (!yStr || !mStr) return;
                   const y = parseInt(yStr, 10);
                   const m = parseInt(mStr, 10);
-                  const day = parseInt(dStr, 10);
-                  if (!y || !m || !day) return;
-                  const serial = dateToExcelSerial(new Date(Date.UTC(y, m - 1, day)));
+                  if (!y || !m) return;
+                  const serial = dateToExcelSerial(new Date(Date.UTC(y, m - 1, 1)));
                   setInputs({ preliminary: { ...inputs.preliminary, dateOfFirstPeriod: serial } });
                 }}
                 className="text-xs bg-yellow-50 border border-gray-200 rounded px-1.5 py-0.5"
               />
-              <span className="text-[10px] text-gray-400">e.g. 2023-04-01 for Apr-23</span>
+              <span className="text-[10px] text-gray-400">
+                period 1 = {(() => {
+                  const d = excelDateToDate(inputs.preliminary.dateOfFirstPeriod);
+                  return d.toLocaleString('en-AU', { month: 'short', year: '2-digit', timeZone: 'UTC' }).replace(' ', '-');
+                })()}
+              </span>
             </div>
             <NumberInput label="Project Start Month" value={inputs.preliminary.projectStartMonth}
               onChange={v => setInputs({ preliminary: { ...inputs.preliminary, projectStartMonth: v } })} />
