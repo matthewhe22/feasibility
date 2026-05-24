@@ -203,6 +203,30 @@ function DebtSection({ title, facility, isLandLoan = false, isResidualStock = fa
           </div>
         </div>
         <div className="border-t border-gray-100 pt-1.5 mt-1.5">
+          <p className="text-[10px] font-semibold text-gray-500 mb-1">Interest & Fee Treatment</p>
+          <div className="flex items-center gap-2 mt-1">
+            <span
+              className="text-xs text-gray-600 w-56 shrink-0"
+              title="Capitalised: interest and line fees compound into the loan balance — no cash outflow during the holding period; cleared via the revenue/equity sweep when the facility is repaid. Cash-pay: interest and fees are paid out of the project bank account every period (funded by equity / revenue / further drawdowns)."
+            >
+              Interest & Line Fee Treatment
+            </span>
+            <select
+              value={facility.isCapitalised ? 'capitalised' : 'cash-pay'}
+              onChange={e => update('isCapitalised', e.target.value === 'capitalised')}
+              className="text-xs bg-yellow-50 border border-gray-300 rounded px-2 py-0.5"
+            >
+              <option value="cash-pay">Cash-pay (paid each period)</option>
+              <option value="capitalised">Capitalised (compounds into balance)</option>
+            </select>
+          </div>
+          <p className="text-[10px] text-gray-500 mt-1">
+            {facility.isCapitalised
+              ? 'Capitalised: accrued interest and line fees roll into the loan balance and are cleared from sales revenue (or equity backstop) when the facility is repaid.'
+              : 'Cash-pay: interest and line fees are drawn from the project bank every period — equity backstops any shortfall not covered by revenue or available drawdowns.'}
+          </p>
+        </div>
+        <div className="border-t border-gray-100 pt-1.5 mt-1.5">
           <p className="text-[10px] font-semibold text-gray-500 mb-1">Constraints</p>
           <PercentInput label="Target LTC" value={facility.ltcTarget} onChange={v => update('ltcTarget', v)} />
           <PercentInput label="Target LVR" value={facility.lvrTarget} onChange={v => update('lvrTarget', v)} />
