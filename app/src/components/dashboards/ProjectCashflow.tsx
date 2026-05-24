@@ -136,7 +136,13 @@ export function ProjectCashflow() {
     return <div className="text-center py-12 text-gray-400 text-sm">Run calculations to see the Project Cashflow</div>;
   }
 
-  const cf = data.cashflows.filter(c => c.period.periodNumber >= 1 && c.period.periodNumber <= 84);
+  // Display every period in the project up to a safety ceiling (240 months) so
+  // the final-period equity repatriation + profit distribution are visible. The
+  // previous hard-cap of 84 truncated longer projects and hid the held bank
+  // balance release (engine flushes at i === n-1).
+  const MAX_DISPLAY_PERIODS = 240;
+  const lastPeriodNumber = Math.min(data.cashflows.length, MAX_DISPLAY_PERIODS);
+  const cf = data.cashflows.filter(c => c.period.periodNumber >= 1 && c.period.periodNumber <= lastPeriodNumber);
 
   const fmtVal = (v: number, textColor?: string) => {
     if (v == null || isNaN(v) || v === 0) return '';
