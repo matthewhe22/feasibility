@@ -1831,10 +1831,20 @@ function runFundingWaterfall(
     // project end whenever maturityMonth < projectSpanMonths — opposite of the
     // user's expectation. To opt back into extension semantics, set maturityMonth
     // = projectSpanMonths explicitly.
+    //
+    // constructionPhaseActive: tracks whether the project has reached senior-1's
+    // startMonth, independent of senior-1's maturity. Used as the gate for the
+    // gap-fill MODE branches (pro-rata / senior-first) so they continue to apply
+    // after senior-1 matures — otherwise post-maturity periods silently fall
+    // through to equity-first ordering even when senior-2 or mezz are still
+    // drawable, contradicting the user's selected mode and changing funding
+    // results materially. Per-facility draw gating still uses seniorDrawActive /
+    // senior2DrawActive inside each branch.
     const seniorActive      = hasSenior  && i >= snrStartIdx  && i <= snrEndIdx;
     const senior2Active     = hasSenior2 && i >= snr2StartIdx && i <= snr2EndIdx;
     const seniorDrawActive  = hasSenior  && i >= snrStartIdx  && i <= snrEndIdx;
     const senior2DrawActive = hasSenior2 && i >= snr2StartIdx && i <= snr2EndIdx;
+    const constructionPhaseActive = hasSenior && i >= snrStartIdx;
 
     // ── 1. Opening balances ────────────────────────────────────────────────────
     const llOpenBalance   = llRunningBalance;
@@ -2278,12 +2288,15 @@ function runFundingWaterfall(
 
     // ── 9. Gap fill ────────────────────────────────────────────────────────────
     if (bankBalance < 0) {
-      if (equityDrawdownMode === 'pro-rata' && seniorDrawActive) {
+      if (equityDrawdownMode === 'pro-rata' && constructionPhaseActive) {
         // Pro-rata: split the gap proportionally between Developer equity and senior each period.
         // M4 — Auto-size senior up to the covenant cap (not the requested limit).
         const gap = -bankBalance;
         const eqAvail  = Math.max(0, developerCap - (cumulativeEquity - jvCumulative));
-        const snrAvail = Math.max(0, seniorAutoSizeCap - snrRunningBalance);
+        // Senior contribution to the pro-rata split is gated by maturity — after
+        // senior-1 matures, only equity (and any post-pro-rata facilities below)
+        // can fill the gap.
+        const snrAvail = seniorDrawActive ? Math.max(0, seniorAutoSizeCap - snrRunningBalance) : 0;
         const totalAvail = eqAvail + snrAvail;
         if (totalAvail > 0) {
           const eqDraw  = Math.min(gap * (eqAvail  / totalAvail), eqAvail);
@@ -2313,7 +2326,7 @@ function runFundingWaterfall(
             }
           }
         }
-      } else if (equityDrawdownMode === 'senior-first' && seniorDrawActive) {
+      } else if (equityDrawdownMode === 'senior-first' && constructionPhaseActive) {
         // Senior-first (recommended for standard Australian dev finance): once
         // construction has started, debt facilities absorb the gap BEFORE equity.
         // Equity only steps in when all debt is at LTC/LVR/facility cap. Pre-
