@@ -316,7 +316,12 @@ export const defaultSeniorFacility: DebtFacility = {
   facilityType: 'development',
   facilityLimit: 767034632,
   startMonth: 33,
-  maturityMonth: 65,
+  // Set equal to default projectSpanMonths (74). Maturity now hard-gates
+  // drawdowns (engine/funding.ts seniorDrawActive change), so this must reach
+  // project end to keep the historical baseline reconciliation intact.
+  // Override per-project if the senior is repaid earlier via residual-stock
+  // refinance.
+  maturityMonth: 74,
   interestRate: 0.0215,
   bbsy: 0.0196,
   margin: 0.0215,
