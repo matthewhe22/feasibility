@@ -156,8 +156,11 @@ function DebtSection({ title, facility, isLandLoan = false, isResidualStock = fa
             above to suppress all activity.
           </p>
         )}
-        <NumberInput label="Start Month" value={facility.startMonth} onChange={v => update('startMonth', v)} />
-        <NumberInput label="Maturity (months from start)" value={facility.maturityMonth} onChange={v => update('maturityMonth', v)} />
+        <NumberInput label="Start Month (period #)" value={facility.startMonth} onChange={v => update('startMonth', v)} />
+        <NumberInput label="Maturity Month (period #)" value={facility.maturityMonth} onChange={v => update('maturityMonth', v)} />
+        <p className="text-[10px] text-gray-500 -mt-1 ml-[14.5rem]">
+          Absolute period numbers (1 = period 1). Facility is active for periods Start … Maturity inclusive; after Maturity no further drawdowns, interest or line fees are recorded.
+        </p>
         <div className="border-t border-gray-100 pt-1.5 mt-1.5">
           <p className="text-[10px] font-semibold text-gray-500 mb-1">Interest Rates</p>
           <PercentInput label="Margin Rate" value={facility.margin} onChange={v => update('margin', v)} />

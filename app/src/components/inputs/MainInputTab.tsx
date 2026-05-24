@@ -4,7 +4,7 @@ import { CurrencyInput, PercentInput, NumberInput, SectionHeader } from '../comm
 import { FinancingInputs } from './FinancingInputs';
 import { CostReferenceCard } from './CostReferenceCard';
 import { GRVReferenceCard } from './GRVReferenceCard';
-import { formatCurrency, excelDateToDate, addMonths, endOfMonth } from '../../utils';
+import { formatCurrency, excelDateToDate, addMonths, endOfMonth, dateToExcelSerial } from '../../utils';
 import { calculateStampDuty, STAMP_DUTY_STATES, type StampDutyState } from '../../utils/stampDuty';
 import type { State as BenchmarkState } from '../../utils/costBenchmarks';
 import {
@@ -1569,6 +1569,33 @@ export function MainInputTab() {
               onChange={v => setInputs({ preliminary: { ...inputs.preliminary, projectGFA: v } })} />
             <NumberInput label="Site Area SqM" value={inputs.preliminary.siteArea}
               onChange={v => setInputs({ preliminary: { ...inputs.preliminary, siteArea: v } })} />
+            <div className="flex items-center gap-2">
+              <span
+                className="text-xs font-medium text-gray-600 w-40 shrink-0"
+                title="Calendar date of period 1 — drives every month label, the actuals/forecast boundary and the cashflow timeline. Stored internally as an Excel serial; this picker round-trips through dateToExcelSerial."
+              >
+                Model Start Date (period 1)
+              </span>
+              <input
+                type="date"
+                value={(() => {
+                  const d = excelDateToDate(inputs.preliminary.dateOfFirstPeriod);
+                  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+                })()}
+                onChange={e => {
+                  const [yStr, mStr, dStr] = (e.target.value || '').split('-');
+                  if (!yStr || !mStr || !dStr) return;
+                  const y = parseInt(yStr, 10);
+                  const m = parseInt(mStr, 10);
+                  const day = parseInt(dStr, 10);
+                  if (!y || !m || !day) return;
+                  const serial = dateToExcelSerial(new Date(Date.UTC(y, m - 1, day)));
+                  setInputs({ preliminary: { ...inputs.preliminary, dateOfFirstPeriod: serial } });
+                }}
+                className="text-xs bg-yellow-50 border border-gray-200 rounded px-1.5 py-0.5"
+              />
+              <span className="text-[10px] text-gray-400">e.g. 2023-04-01 for Apr-23</span>
+            </div>
             <NumberInput label="Project Start Month" value={inputs.preliminary.projectStartMonth}
               onChange={v => setInputs({ preliminary: { ...inputs.preliminary, projectStartMonth: v } })} />
             <NumberInput label="Project Duration (months)" value={inputs.preliminary.projectSpanMonths}
