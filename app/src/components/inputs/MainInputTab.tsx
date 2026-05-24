@@ -1573,6 +1573,40 @@ export function MainInputTab() {
               onChange={v => setInputs({ preliminary: { ...inputs.preliminary, projectStartMonth: v } })} />
             <NumberInput label="Project Duration (months)" value={inputs.preliminary.projectSpanMonths}
               onChange={v => setInputs({ preliminary: { ...inputs.preliminary, projectSpanMonths: v } })} />
+            <div className="flex items-center gap-2">
+              <span
+                className="text-xs font-medium text-gray-600 w-40 shrink-0"
+                title="First period in which surplus project cash can be released to equity (repatriation + profit distribution). Cash collected before this month is held in the project bank and flushed at this month (or at the final period). Set to 1 to let surplus flow as revenue arrives; set to the construction-completion / settlement month to defer until the project starts settling sales."
+              >
+                Equity Distribution Start Month
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={inputs.preliminary.projectSpanMonths || 240}
+                value={inputs.preliminary.equityDistStartMonth}
+                onChange={e => setInputs({ preliminary: { ...inputs.preliminary, equityDistStartMonth: parseInt(e.target.value, 10) || 1 } })}
+                className="w-20 text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
+              />
+              <span className="text-[10px] text-gray-400">
+                surplus cash held until this month
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className="text-xs font-medium text-gray-600 w-40 shrink-0"
+                title="Number of periods over which the distribution window stays open. Informational — once the gate at Equity Distribution Start Month opens, surplus cash sweeps through every subsequent period until project end."
+              >
+                Equity Distribution Span (months)
+              </span>
+              <input
+                type="number"
+                min={1}
+                value={inputs.preliminary.equityDistSpanMonths}
+                onChange={e => setInputs({ preliminary: { ...inputs.preliminary, equityDistSpanMonths: parseInt(e.target.value, 10) || 1 } })}
+                className="w-20 text-xs text-right bg-yellow-50 border border-gray-200 rounded px-1 py-0.5"
+              />
+            </div>
             <PercentInput label="GST Rate" value={inputs.landPurchase.gstRate}
               onChange={v => setInputs({ landPurchase: { ...inputs.landPurchase, gstRate: v } })} />
             <div className="flex items-center gap-2">
