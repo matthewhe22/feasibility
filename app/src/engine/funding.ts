@@ -1823,11 +1823,18 @@ function runFundingWaterfall(
   for (let i = 0; i < n; i++) {
     const days         = periods[i]?.daysInPeriod ?? 0;
     // seniorActive: facility is within its committed term → line fees charged + drawdowns allowed.
-    // seniorDrawActive: drawdowns allowed beyond maturity (extension period) but no more line fees.
+    // seniorDrawActive: drawdowns gated by maturity (industry convention — after
+    // maturity the facility is closed; remaining balance accrues interest until
+    // repaid via revenue sweep / refinance / residual stock takeout, but no NEW
+    // principal can be drawn). Historically this was open-ended ("extension
+    // period") which produced senior facilities silently extending draws to
+    // project end whenever maturityMonth < projectSpanMonths — opposite of the
+    // user's expectation. To opt back into extension semantics, set maturityMonth
+    // = projectSpanMonths explicitly.
     const seniorActive      = hasSenior  && i >= snrStartIdx  && i <= snrEndIdx;
     const senior2Active     = hasSenior2 && i >= snr2StartIdx && i <= snr2EndIdx;
-    const seniorDrawActive  = hasSenior  && i >= snrStartIdx;
-    const senior2DrawActive = hasSenior2 && i >= snr2StartIdx;
+    const seniorDrawActive  = hasSenior  && i >= snrStartIdx  && i <= snrEndIdx;
+    const senior2DrawActive = hasSenior2 && i >= snr2StartIdx && i <= snr2EndIdx;
 
     // ── 1. Opening balances ────────────────────────────────────────────────────
     const llOpenBalance   = llRunningBalance;
