@@ -1834,12 +1834,17 @@ function runFundingWaterfall(
     //
     // constructionPhaseActive: tracks whether the project has reached senior-1's
     // startMonth, independent of senior-1's maturity. Used as the gate for the
-    // gap-fill MODE branches (pro-rata / senior-first) so they continue to apply
-    // after senior-1 matures — otherwise post-maturity periods silently fall
-    // through to equity-first ordering even when senior-2 or mezz are still
-    // drawable, contradicting the user's selected mode and changing funding
-    // results materially. Per-facility draw gating still uses seniorDrawActive /
-    // senior2DrawActive inside each branch.
+    // senior-first gap-fill MODE branch — senior-first iterates senior →
+    // senior-2 → mezz → equity via per-facility flags, so the mode should keep
+    // applying after senior-1 matures (otherwise the user's selected ordering
+    // silently flips to equity-first and equity is drawn ahead of still-active
+    // senior-2 / mezz).
+    //
+    // The pro-rata MODE stays gated on seniorDrawActive because pro-rata's
+    // semantic is "split each period's gap between developer equity and
+    // senior-1" — when senior-1 is mature, no split is possible, and falling
+    // through to the equity-first else branch correctly exercises senior-2 /
+    // mezz / JV / developer in standard priority order.
     const seniorActive      = hasSenior  && i >= snrStartIdx  && i <= snrEndIdx;
     const senior2Active     = hasSenior2 && i >= snr2StartIdx && i <= snr2EndIdx;
     const seniorDrawActive  = hasSenior  && i >= snrStartIdx  && i <= snrEndIdx;
@@ -2288,15 +2293,20 @@ function runFundingWaterfall(
 
     // ── 9. Gap fill ────────────────────────────────────────────────────────────
     if (bankBalance < 0) {
-      if (equityDrawdownMode === 'pro-rata' && constructionPhaseActive) {
+      if (equityDrawdownMode === 'pro-rata' && seniorDrawActive) {
         // Pro-rata: split the gap proportionally between Developer equity and senior each period.
         // M4 — Auto-size senior up to the covenant cap (not the requested limit).
+        //
+        // Gate uses `seniorDrawActive` (NOT `constructionPhaseActive`) because
+        // pro-rata's semantic is specifically "split this period's gap between
+        // developer equity and senior-1". When senior-1 is mature, no split is
+        // possible — falling through to the equity-first else branch below lets
+        // senior-2 / mezz / JV / developer all be exercised via the standard
+        // priority loop, instead of being silently skipped by the pro-rata
+        // branch's inner loop (which only handles JV).
         const gap = -bankBalance;
         const eqAvail  = Math.max(0, developerCap - (cumulativeEquity - jvCumulative));
-        // Senior contribution to the pro-rata split is gated by maturity — after
-        // senior-1 matures, only equity (and any post-pro-rata facilities below)
-        // can fill the gap.
-        const snrAvail = seniorDrawActive ? Math.max(0, seniorAutoSizeCap - snrRunningBalance) : 0;
+        const snrAvail = Math.max(0, seniorAutoSizeCap - snrRunningBalance);
         const totalAvail = eqAvail + snrAvail;
         if (totalAvail > 0) {
           const eqDraw  = Math.min(gap * (eqAvail  / totalAvail), eqAvail);
