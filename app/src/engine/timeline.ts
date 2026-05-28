@@ -27,16 +27,33 @@ function lastConfiguredEventMonth(inputs: MainInputs): number {
     const span = Math.max(1, (g as { settlementSpan?: number }).settlementSpan ?? 1);
     m = Math.max(m, g.settlementMonth + span - 1);
   }
-  // Land payment stages
-  for (const s of inputs.landPurchase?.paymentStages ?? []) {
-    if (typeof s.monthStart !== 'number' || s.monthStart <= 0) continue;
-    const span = Math.max(1, s.monthSpan ?? 1);
-    m = Math.max(m, s.monthStart + span - 1);
+  // Land payment stages + acquisition costs (both spread by spreadLandPayments)
+  const landStageGroups = [
+    inputs.landPurchase?.paymentStages,
+    inputs.landPurchase?.acquisitionCosts,
+  ];
+  for (const grp of landStageGroups) {
+    for (const s of grp ?? []) {
+      if (typeof s.monthStart !== 'number' || s.monthStart <= 0) continue;
+      const span = Math.max(1, s.monthSpan ?? 1);
+      m = Math.max(m, s.monthStart + span - 1);
+    }
   }
-  // Construction / development / marketing / other costs / PM fees / selling
+  // Rental / other income streams (spread by spreadIncome over monthStart+span).
+  // Omitting these truncated income configured past the cost/settlement horizon,
+  // silently dropping its tail from the cashflow — the same class of bug the v3
+  // settlement fix addressed.
+  for (const grp of [inputs.rentalIncome, inputs.otherIncome]) {
+    for (const r of grp ?? []) {
+      if (typeof r.monthStart !== 'number' || r.monthStart <= 0) continue;
+      const span = Math.max(1, r.monthSpan ?? 1);
+      m = Math.max(m, r.monthStart + span - 1);
+    }
+  }
+  // Construction / development / marketing / other costs / PM fees / financing
   const costGroups = [
     inputs.constructionCosts, inputs.developmentCosts, inputs.marketingCosts,
-    inputs.otherStandardCosts, inputs.pmFees,
+    inputs.otherStandardCosts, inputs.pmFees, inputs.otherFinancingCosts,
   ];
   for (const grp of costGroups) {
     for (const c of grp ?? []) {

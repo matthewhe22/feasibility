@@ -80,12 +80,21 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     periods,
   );
 
-  // PRSV Uplift
-  const prsvPayments = new Array(n).fill(0);
-  if (inputs.landPurchase.prsvUplift > 0 && inputs.landPurchase.prsvMonth > 0) {
-    const idx = inputs.landPurchase.prsvMonth - 1;
-    if (idx < n) prsvPayments[idx] = inputs.landPurchase.prsvUplift;
-  }
+  // PRSV Uplift — spread across prsvSpan (default 1 month) using the same
+  // tail-clipping land-payment spreader, so the span the user configures (and
+  // which generateTimeline already reserves horizon for) is actually honoured.
+  // Previously the entire uplift was dropped into a single period regardless of
+  // prsvSpan, leaving the spreading and the timeline horizon inconsistent.
+  const prsvPayments = (inputs.landPurchase.prsvUplift > 0 && inputs.landPurchase.prsvMonth > 0)
+    ? spreadLandPayments(
+        [{
+          amount: inputs.landPurchase.prsvUplift,
+          monthStart: inputs.landPurchase.prsvMonth,
+          monthSpan: Math.max(1, inputs.landPurchase.prsvSpan ?? 1),
+        }],
+        periods,
+      )
+    : new Array(n).fill(0);
 
   const acquisitionCosts = spreadLandPayments(
     inputs.landPurchase.acquisitionCosts.map(a => ({
@@ -117,11 +126,18 @@ export function runCalculations(admin: AdminConfig, inputs: MainInputs): Dashboa
     if (presaleItems.length > 0) {
       const firstPresale = Math.min(...presaleItems.map(g => g.preSaleExchangeMonth));
       const lastPresale = Math.max(...presaleItems.map(g => g.preSaleExchangeMonth + g.preSaleSpan));
-      const span = lastPresale - firstPresale;
-      if (span > 0) {
-        const perMonth = commissions.frontEnd / span;
-        for (let i = firstPresale - 1; i < lastPresale - 1 && i < n; i++) {
-          frontEndCommByPeriod[i] = perMonth;
+      const startIdx = firstPresale - 1;
+      const rawSpan = lastPresale - firstPresale;
+      // Clip to in-window slots so the full front-end commission is divided by
+      // the periods that actually receive it. Previously perMonth divided by
+      // the full span while the loop stopped at the timeline edge, dropping the
+      // commission tail from the cashflow while commissions.frontEnd (and hence
+      // totalCost) still counted it in full — a feasibility-vs-waterfall wedge.
+      const effectiveSpan = Math.min(rawSpan, Math.max(0, n - startIdx));
+      if (effectiveSpan > 0) {
+        const perMonth = commissions.frontEnd / effectiveSpan;
+        for (let i = 0; i < effectiveSpan; i++) {
+          frontEndCommByPeriod[startIdx + i] = perMonth;
         }
       }
     }

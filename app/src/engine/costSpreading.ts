@@ -215,9 +215,17 @@ export function spreadLandPayments(
     if (!Number.isFinite(stage.monthSpan) || stage.monthSpan <= 0) continue;
     if (!Number.isFinite(stage.monthStart) || stage.monthStart <= 0) continue;
     const startIdx = stage.monthStart - 1;
-    const span = Math.min(stage.monthSpan, periods.length);
-    const perMonth = stage.amount / span;
-    for (let i = 0; i < span; i++) {
+    // Clip the span to the slots actually remaining from startIdx so perMonth
+    // is divided by the number of periods that will RECEIVE money — not a
+    // larger nominal span. Without this, a stage starting late (or spanning
+    // past the timeline) wrote fewer slots than `span` while still dividing by
+    // the full span, silently dropping the tail of the payment from the
+    // cashflow even though feasibility totals (summed from inputs) still count
+    // the full amount — a feasibility-vs-cashflow wedge.
+    const effectiveSpan = Math.min(stage.monthSpan, Math.max(0, periods.length - startIdx));
+    if (effectiveSpan <= 0) continue;
+    const perMonth = stage.amount / effectiveSpan;
+    for (let i = 0; i < effectiveSpan; i++) {
       const idx = startIdx + i;
       if (idx >= 0 && idx < periods.length) {
         result[idx] += perMonth;
