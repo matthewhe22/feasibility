@@ -111,6 +111,24 @@ function assert(cond: boolean, msg: string): void {
   assert(((out1 as { b: { c: number } }).b.c) === 2, 'DM.10c — null-override path also deep-clones');
 }
 
+// ── 11. Prototype pollution is rejected ─────────────────────────────────────
+// A tampered DB record carrying a literal `__proto__` key (own-enumerable
+// after JSON.parse) must NOT mutate Object.prototype or the output's chain.
+{
+  const malicious = JSON.parse('{"a": 1, "__proto__": {"polluted": true}}');
+  const out = deepMerge({ a: 0 } as Record<string, unknown>, malicious);
+  assert(out.a === 1, 'DM.11a — benign key still merged alongside rejected __proto__');
+  assert(({} as Record<string, unknown>).polluted === undefined,
+    'DM.11b — Object.prototype not polluted');
+  assert((out as Record<string, unknown>).polluted === undefined,
+    'DM.11c — output prototype not polluted');
+  // `constructor` / `prototype` override keys are likewise dropped.
+  const out2 = deepMerge({ a: 0 } as Record<string, unknown>,
+    JSON.parse('{"constructor": {"x": 1}, "prototype": {"y": 2}, "a": 5}'));
+  assert(out2.a === 5 && out2.constructor === Object.prototype.constructor,
+    'DM.11d — constructor/prototype override keys dropped');
+}
+
 console.log(`\n${'═'.repeat(72)}`);
 console.log(`deepMerge TESTS: ${passed} passed, ${failed} failed (${passed + failed} total)`);
 console.log(`${'═'.repeat(72)}`);

@@ -3,6 +3,7 @@ import { Analytics } from '@vercel/analytics/react';
 
 declare const __BUILD_TIME__: string;
 import { useStore } from './store/useStore';
+import { normalizeLoadedProject } from './store/normalizeProject';
 import { runCalculations } from './engine';
 import { createProject, saveProject, listProjects, loadBrandingSettings, loadProjectList } from './db/projectDb';
 import { projectTestAdmin, projectTestInputs } from './utils/createTestProject';
@@ -91,7 +92,7 @@ function App() {
   // typeof binding and extracting the type via store typing isn't worth the
   // refactor for one warning.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { activeTab, setActiveTab, admin, inputs, setAdmin, setInputs, setDashboardData, dashboardData, isCalculating, setIsCalculating, currentProjectId, setCurrentProjectId, setProjectList } = useStore();
+  const { activeTab, setActiveTab, admin, inputs, setAdmin, replaceAdmin, replaceInputs, setDashboardData, dashboardData, isCalculating, setIsCalculating, currentProjectId, setCurrentProjectId, setProjectList } = useStore();
   const [showProjectManager, setShowProjectManager] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
   const [dismissedWarnings, setDismissedWarnings] = useState(false);
@@ -163,13 +164,20 @@ function App() {
         const projects = await listProjects();
         const demo = projects.find(p => p.name === 'Project Demo 2');
         if (!cancelled && demo?.id != null) {
-          setAdmin(demo.admin);
-          setInputs(demo.inputs);
+          // Route the Demo record through the SAME migrate + defaults-backfill
+          // pipeline as ProjectManager.handleLoad. Previously this fed raw
+          // demo.admin/demo.inputs straight into setAdmin/setInputs (partial
+          // merge) and the engine — a legacy-shaped demo record could supply
+          // wrong values or crash an engine iterator on an undefined array.
+          const { admin: demoAdmin, inputs: demoInputs } =
+            normalizeLoadedProject(demo.admin, demo.inputs);
+          replaceAdmin(demoAdmin);
+          replaceInputs(demoInputs);
           setCurrentProjectId(demo.id);
           setIsCalculating(true);
           setCalcError(null);
           try {
-            const result = runCalculations(demo.admin, demo.inputs);
+            const result = runCalculations(demoAdmin, demoInputs);
             if (!cancelled) setDashboardData(result);
           } catch (e) {
             if (!cancelled) setCalcError(e instanceof Error ? e.message : String(e));
@@ -330,19 +338,25 @@ function App() {
       )}
 
       {/* Pencil tab row */}
-      <nav className="bg-white border-b border-[#CFC7B5] sticky top-0 z-10 shadow-sm">
-        <div className="flex px-6">
-          {TABS.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as Parameters<typeof setActiveTab>[0])}
-              className={`pencil-tab px-5 py-3 border-b-2 border-transparent transition-colors ${
-                activeTab === tab.id ? 'pencil-tab-active' : ''
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+      <nav className="bg-white border-b border-[#CFC7B5] sticky top-0 z-10 shadow-sm" aria-label="Primary">
+        <div className="flex px-6" role="tablist">
+          {TABS.map(tab => {
+            const selected = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                role="tab"
+                aria-selected={selected}
+                aria-current={selected ? 'page' : undefined}
+                onClick={() => setActiveTab(tab.id as Parameters<typeof setActiveTab>[0])}
+                className={`pencil-tab px-5 py-3 border-b-2 border-transparent transition-colors ${
+                  selected ? 'pencil-tab-active' : ''
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
       </nav>
 

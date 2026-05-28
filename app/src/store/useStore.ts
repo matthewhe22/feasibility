@@ -243,6 +243,13 @@ function createDebouncedLocalStorage(delayMs: number): StateStorage {
  * already-migrated v11 data produces no change (the existence checks
  * short-circuit).
  */
+/**
+ * Current persisted-schema version. Single source of truth shared by the
+ * Zustand persist config (localStorage) and the DB record stamping in
+ * projectDb (so DB-loaded records know which migrations they still need).
+ */
+export const CURRENT_SCHEMA_VERSION = 11;
+
 export function migratePersistedState(persisted: unknown, version: number): unknown {
   const p = persisted as Record<string, unknown> | null;
   if (!p || typeof p !== 'object') return p;
@@ -468,7 +475,7 @@ export const useStore = create<AppState>()(
       //      when missing/undefined. PR-D (PR #31) added it as a configurable
       //      field but no migration step — v4 users hit the engine with
       //      undefined and the funding solver branches on this value.
-      version: 11,
+      version: CURRENT_SCHEMA_VERSION,
       migrate: migratePersistedState,
       // Debounce localStorage writes to coalesce rapid keystrokes into a single
       // serialization+write. 250 ms is imperceptible to users but eliminates

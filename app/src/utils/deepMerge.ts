@@ -22,6 +22,16 @@
  * replace(normalized).
  */
 
+// Keys that must never be copied from an (untrusted) override into the output —
+// assigning them would mutate the prototype chain (prototype pollution). Loaded
+// records can originate from a shared, world-writable DB table, so a tampered
+// row carrying `{"__proto__": {...}}` (a real own-enumerable key after
+// JSON.parse) must be dropped rather than assigned.
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+function isUnsafeKey(key: string): boolean {
+  return UNSAFE_KEYS.has(key);
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   if (v === null || typeof v !== 'object') return false;
   if (Array.isArray(v)) return false;
@@ -62,6 +72,7 @@ export function deepMerge<T extends object>(
   const out: Record<string, unknown> = {};
   // Walk keys from `base` first — fill defaults for fields the loaded record is missing.
   for (const [key, baseVal] of Object.entries(base as Record<string, unknown>)) {
+    if (isUnsafeKey(key)) continue;
     if (!Object.prototype.hasOwnProperty.call(override, key)) {
       out[key] = deepCloneLeaf(baseVal);
       continue;
@@ -81,6 +92,7 @@ export function deepMerge<T extends object>(
   // record may carry fields from a future schema version; passing them through
   // is safer than silently dropping them.
   for (const key of Object.keys(override as Record<string, unknown>)) {
+    if (isUnsafeKey(key)) continue;
     if (!Object.prototype.hasOwnProperty.call(base, key)) {
       out[key] = (override as Record<string, unknown>)[key];
     }

@@ -197,6 +197,19 @@ Charged on the **opening drawn balance** each period using a daily-rate formula:
 
 **Line Fee note**: default is `peak-drawn` (matches legacy baseline). For lenders that charge on the committed facility limit, change `DebtFacility.lineFeeBasis` to `'committed-limit'` via the Financing Inputs UI.
 
+> **Update (code-review fix — land-loan takeout double-count):** the table above
+> predates recent engine changes and no longer matches `npx tsx src/run-test.ts`
+> ("Project Test", which carries the $120M default land loan). A senior-takeout
+> double-count was fixed in `engine/funding.ts` (the legacy refi block re-applied
+> `llRepayments[i]` on top of the LL2 balance-sheet swap, inflating the senior
+> balance and injecting a phantom bank credit). Effect on the default project:
+> Senior Interest $30.5M → **$29.5M** (Excel $29.9M, now slightly under),
+> Total Profit $165.8M → **$167.0M** (Excel $170.1M). Both moved *toward* Excel.
+> The remaining headline gap is Senior Fees ≈$43.2M vs Excel $29.5M, which is the
+> known `lineFeeBasis: 'peak-drawn'` overcount documented above — switch to
+> `'committed-limit'` to close it. Regression locked in by
+> `engine/__tests__/landLoanSeniorTakeoutNoDoubleCount.test.ts`.
+
 **Main profit variance drivers** (app vs Excel, $170.1M target, post-fixes):
 1. Senior fees: +$5.1M over (peak-debt line fee — configurable) → profit -$5.1M
 2. PM fees: -$2.1M under (two-pass iteration partially closes prior gap) → profit +$2.1M

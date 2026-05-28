@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "test": "tsx scripts/run-tests.ts",
     "regression": "tsx ../regression-pack/regression-runner.ts"
   },
   "dependencies": {

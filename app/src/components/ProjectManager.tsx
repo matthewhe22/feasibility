@@ -17,8 +17,8 @@ import {
 } from '../db/projectDb';
 import { validateProjectName } from '../admin/projectSetupValidator';
 import { exportToExcel } from '../utils/exportToExcel';
-import { useStore, migratePersistedState, defaultAdmin, defaultInputs } from '../store/useStore';
-import { deepMerge } from '../utils/deepMerge';
+import { useStore } from '../store/useStore';
+import { normalizeLoadedProject } from '../store/normalizeProject';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -173,17 +173,14 @@ export function ProjectManager({ onClose, onLoad }: Props) {
       //      as the original Layer A: stop legacy iterators from crashing
       //      on undefined arrays).
       //
-      // Migration is run from version `rec.version ?? 0` up to current. The
-      // ladder is idempotent on already-migrated data, so doing this on a
-      // modern record is a no-op. If a `version` field is added to
-      // ProjectRecord later, it'll be picked up here.
-      const recVersion = (rec as { version?: number }).version ?? 0;
-      const migrated = migratePersistedState(
-        { admin: rec.admin, inputs: rec.inputs },
-        recVersion,
-      ) as { admin: typeof rec.admin; inputs: typeof rec.inputs };
-      const normalisedAdmin = deepMerge(defaultAdmin, migrated.admin);
-      const normalisedInputs = deepMerge(defaultInputs, migrated.inputs);
+      // Migration runs from the schema version stamped on the record's admin
+      // blob (0 for legacy records saved before stamping existed) up to current.
+      // The ladder is idempotent on already-migrated data; stamping lets modern
+      // records skip it entirely so heuristic steps can't re-fire. Shared with
+      // the App startup Demo-load path via normalizeLoadedProject — both MUST
+      // use the same pipeline (divergence was the v2-UAT state-drift root cause).
+      const { admin: normalisedAdmin, inputs: normalisedInputs } =
+        normalizeLoadedProject(rec.admin, rec.inputs);
       rec.admin = normalisedAdmin;
       rec.inputs = normalisedInputs;
       // Wholesale replace — never partial-merge over the previous project's inputs.

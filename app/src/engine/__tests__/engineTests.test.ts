@@ -182,18 +182,33 @@ function makePeriods(n: number): Period[] {
 //  Commission calculation
 // ═══════════════════════════════════════════════════════════════════════════
 {
+  // With a presale window, preCommissionPercent splits the commission 50/50
+  // between front-end (at exchange) and back-end (at settlement).
   const items: RevenueLineItem[] = [
     { code: '', description: '', revenueType: 'Residential', units: 0, totalArea: 0,
-      currentSalePrice: 1000000, preSaleExchangeMonth: 0, preSaleSpan: 0,
-      settlementMonth: 1, settlementSpan: 1, gstIncluded: true },
+      currentSalePrice: 1000000, preSaleExchangeMonth: 3, preSaleSpan: 2,
+      settlementMonth: 12, settlementSpan: 1, gstIncluded: true },
   ];
   const scs: SellingCostConfig[] = [
     { code: '', description: '', salesCommission: 0.04, preCommissionPercent: 0.5, depositPercent: 0.1, sCurve: 'Evenly Split', addGST: true },
   ];
   const r = calculateSellingCommissions(items, scs);
   assertClose(r.total, 40000, 0.01, 'calculateSellingCommissions: 4% × $1M = $40k total');
-  assertClose(r.frontEnd, 20000, 0.01, 'calculateSellingCommissions: 50% front-end');
-  assertClose(r.backEnd, 20000, 0.01, 'calculateSellingCommissions: 50% back-end');
+  assertClose(r.frontEnd, 20000, 0.01, 'calculateSellingCommissions: 50% front-end (presale window present)');
+  assertClose(r.backEnd, 20000, 0.01, 'calculateSellingCommissions: 50% back-end (presale window present)');
+
+  // M2 — no presale window (preSaleExchangeMonth=0): the entire commission is
+  // paid at settlement (100% back-end). There is no exchange event to attribute
+  // the front-end portion against, so preCommissionPercent is ignored.
+  const noPresale: RevenueLineItem[] = [
+    { code: '', description: '', revenueType: 'Residential', units: 0, totalArea: 0,
+      currentSalePrice: 1000000, preSaleExchangeMonth: 0, preSaleSpan: 0,
+      settlementMonth: 1, settlementSpan: 1, gstIncluded: true },
+  ];
+  const r2 = calculateSellingCommissions(noPresale, scs);
+  assertClose(r2.total, 40000, 0.01, 'calculateSellingCommissions (no presale): $40k total');
+  assertClose(r2.frontEnd, 0, 0.01, 'calculateSellingCommissions (no presale): 0 front-end');
+  assertClose(r2.backEnd, 40000, 0.01, 'calculateSellingCommissions (no presale): 100% back-end');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

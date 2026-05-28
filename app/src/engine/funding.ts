@@ -2257,15 +2257,14 @@ function runFundingWaterfall(
       }
     }
 
-    // ── 7. Senior 1 initialisation: land loan refi + excess equity repatriation ─
+    // ── 7. Senior 1 initialisation: excess equity repatriation ────────────────
+    // NOTE: the senior takeout of the land loan is performed in full by step 4
+    // above (the LL2 balance-sheet swap). The earlier PR #31 refi block that
+    // re-applied `llRepayments[i]` here has been removed — it double-counted the
+    // takeout (inflating senior drawdown/balance by the takeout amount and
+    // injecting a phantom bank credit), since `llRepayments[i]` is only ever
+    // set by step 4. See regression: landLoanSeniorTakeoutNoDoubleCount.test.ts.
     if (hasSenior && i === snrStartIdx) {
-      if (llRepayments[i] > 0) {
-        snrDrawdowns[i]   += llRepayments[i];
-        snrRunningBalance += llRepayments[i];
-        rawSnrBalance     += llRepayments[i];
-        rawPeakSnrBalance = Math.max(rawPeakSnrBalance, rawSnrBalance);
-        bankBalance       += llRepayments[i];
-      }
       if (cumulativeEquity > totalEquityCap) {
         const excess   = cumulativeEquity - totalEquityCap;
         const snrAvail = Math.max(0, seniorLimit - snrRunningBalance);

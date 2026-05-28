@@ -1,6 +1,6 @@
 import React from 'react';
 import { useStore } from '../../store/useStore';
-import { formatCurrency, formatPercent } from '../../utils';
+import { formatCurrency, formatPercent, formatIRR } from '../../utils';
 
 // B12 — hoisted from inside ExternalDashboard so React doesn't recreate the
 // component types on every render (react-hooks/static-components). Pure
@@ -72,7 +72,10 @@ export function ExternalDashboard() {
               <Row label="Total Cash on Cash Return" value={k.totalCashOnCash.toFixed(4)} />
               <Row label="Annual Cash on Cash Return" value={k.annualCashOnCash.toFixed(4)} />
               <Row label="Return on Investment" value={formatPercent(k.roi)} />
-              <Row label="Project IRR" value={formatPercent(k.irr)} />
+              {/* Use formatIRR (not raw formatPercent) so a loss-making project
+                  shows "N/M (loss)" / "N/A" consistently with the Internal
+                  dashboard, rather than a misleading diverged IRR. */}
+              <Row label="Project IRR" value={formatIRR(k.irr, f.totalProfit)} />
             </div>
           </Box>
 
@@ -93,7 +96,7 @@ export function ExternalDashboard() {
                   <tr className="bg-green-50 font-semibold"><td colSpan={4} className="px-2 py-0.5">EQUITY IN</td></tr>
                   <tr className="border-b"><td className="px-2 py-0.5">Funding Contribution %</td><td className="px-2 py-0.5 text-right">{formatPercent(1)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.jvPartner.fundingContribPercent)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.developer.fundingContribPercent)}</td></tr>
                   <tr className="border-b"><td className="px-2 py-0.5">Equity Contributed</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.total.totalEquityContributed)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.jvPartner.totalEquityContributed)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.developer.totalEquityContributed)}</td></tr>
-                  <tr className="border-b"><td className="px-2 py-0.5">IRR</td><td className="px-2 py-0.5 text-right">{formatPercent(er.total.irr)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.jvPartner.irr)}</td><td className="px-2 py-0.5 text-right">{formatPercent(er.developer.irr)}</td></tr>
+                  <tr className="border-b"><td className="px-2 py-0.5">IRR</td><td className="px-2 py-0.5 text-right">{formatIRR(er.total.irr, f.totalProfit)}</td><td className="px-2 py-0.5 text-right">{formatIRR(er.jvPartner.irr, f.totalProfit)}</td><td className="px-2 py-0.5 text-right">{formatIRR(er.developer.irr, f.totalProfit)}</td></tr>
                   <tr className="bg-green-50 font-semibold"><td colSpan={4} className="px-2 py-0.5">EQUITY OUT</td></tr>
                   <tr className="border-b"><td className="px-2 py-0.5">Total Equity Repatriation</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.total.totalEquityRepatriation)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.jvPartner.totalEquityRepatriation)}</td><td className="px-2 py-0.5 text-right font-mono">{formatCurrency(er.developer.totalEquityRepatriation)}</td></tr>
                   <tr className="bg-green-100 font-bold"><td className="px-2 py-1">Total Profit Share</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.total.totalProfitShare)}</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.jvPartner.totalProfitShare)}</td><td className="px-2 py-1 text-right font-mono">{formatCurrency(er.developer.totalProfitShare)}</td></tr>

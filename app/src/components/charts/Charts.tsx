@@ -9,11 +9,14 @@ import { formatCurrency } from '../../utils';
 
 const COLORS = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#db2777', '#0891b2'];
 
-function ChartBox({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartBox({ title, summary, children }: { title: string; summary?: string; children: React.ReactNode }) {
   return (
     <div className="border border-gray-200 rounded bg-white mb-4">
       <div className="bg-gray-700 text-white text-sm font-bold px-3 py-2 rounded-t">{title}</div>
-      <div className="p-4">{children}</div>
+      {/* The Recharts SVG carries no accessible text, so expose the chart as a
+          single labelled image to screen readers (WCAG 1.1.1). `summary` adds a
+          one-line description of what the chart shows when supplied. */}
+      <div className="p-4" role="img" aria-label={summary ? `${title}. ${summary}` : title}>{children}</div>
     </div>
   );
 }

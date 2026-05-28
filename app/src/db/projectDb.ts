@@ -14,6 +14,7 @@
 import Dexie, { type Table } from 'dexie';
 import type { AdminConfig, MainInputs, DashboardData } from '../types';
 import { supabase } from './supabaseClient';
+import { stampSchemaVersion } from '../store/normalizeProject';
 
 // ── Shared record type ──────────────────────────────────────────────────────
 
@@ -98,17 +99,21 @@ export async function createProject(
   inputs: MainInputs,
   dashboardData: DashboardData | null = null,
 ): Promise<number> {
+  // Stamp the current schema version so future loads know which migrations
+  // (if any) still apply — avoids re-running the full idempotent ladder, and
+  // its heuristic steps, on data this app just wrote.
+  const stampedAdmin = stampSchemaVersion(admin);
   if (supabase) {
     const { data, error } = await supabase
       .from('projects')
-      .insert({ name, description, admin, inputs, dashboard_data: dashboardData })
+      .insert({ name, description, admin: stampedAdmin, inputs, dashboard_data: dashboardData })
       .select('id')
       .single();
     if (error) throw new Error(error.message);
     return data.id as number;
   }
   const now = new Date();
-  return db.projects.add({ name, description, createdAt: now, updatedAt: now, admin, inputs, dashboardData });
+  return db.projects.add({ name, description, createdAt: now, updatedAt: now, admin: stampedAdmin, inputs, dashboardData });
 }
 
 /** Overwrite an existing project's inputs and (optionally) its outputs. */
@@ -118,15 +123,16 @@ export async function saveProject(
   inputs: MainInputs,
   dashboardData: DashboardData | null = null,
 ): Promise<void> {
+  const stampedAdmin = stampSchemaVersion(admin);
   if (supabase) {
     const { error } = await supabase
       .from('projects')
-      .update({ admin, inputs, dashboard_data: dashboardData, updated_at: new Date().toISOString() })
+      .update({ admin: stampedAdmin, inputs, dashboard_data: dashboardData, updated_at: new Date().toISOString() })
       .eq('id', id);
     if (error) throw new Error(error.message);
     return;
   }
-  await db.projects.update(id, { admin, inputs, dashboardData, updatedAt: new Date() });
+  await db.projects.update(id, { admin: stampedAdmin, inputs, dashboardData, updatedAt: new Date() });
 }
 
 /** Rename / re-describe a project without touching inputs or outputs. */
@@ -150,7 +156,14 @@ export async function loadProject(id: number): Promise<ProjectRecord | undefined
       .select('*')
       .eq('id', id)
       .single();
-    if (error) return undefined;
+    if (error) {
+      // PGRST116 = "no rows returned" → a genuine not-found (undefined).
+      // Any other error (network, permission, timeout) must NOT be disguised
+      // as a missing project — surface it so the caller shows a real failure
+      // rather than a misleading "Project not found." on a transient outage.
+      if ((error as { code?: string }).code === 'PGRST116') return undefined;
+      throw new Error(error.message);
+    }
     return rowToRecord(data as SupabaseRow);
   }
   return db.projects.get(id);

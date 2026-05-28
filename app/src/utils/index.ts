@@ -152,7 +152,18 @@ export function calculateIRR(cashflows: number[], guess = 0.1, maxIter = 1000, t
   const hasNegative = cashflows.some(cf => cf < 0);
   if (!hasPositive || !hasNegative) return 0;
 
+  // Monthly NPV at a given monthly rate. Defined for rate > -1.
+  const npvAt = (r: number): number => {
+    let npv = 0;
+    for (let t = 0; t < cashflows.length; t++) {
+      npv += (cashflows[t] ?? 0) / Math.pow(1 + r, t);
+    }
+    return npv;
+  };
+
+  // ── Fast path: Newton-Raphson ──────────────────────────────────────────────
   let rate = guess;
+  let converged = false;
   for (let i = 0; i < maxIter; i++) {
     let npv = 0;
     let dnpv = 0;
@@ -163,29 +174,53 @@ export function calculateIRR(cashflows: number[], guess = 0.1, maxIter = 1000, t
       dnpv -= (t * cft) / (factor * (1 + rate));
     }
 
-    if (Math.abs(npv) < tolerance) break;
+    if (Math.abs(npv) < tolerance) { converged = true; break; }
 
-    // Guard: derivative is zero or not finite
-    if (dnpv === 0 || !isFinite(dnpv)) return 0;
-
+    // Derivative unusable, or step would leave the valid domain (rate > -1):
+    // abandon Newton and fall through to the robust bisection below rather
+    // than reflecting the iterate (the old `-rate/2` recovery flipped negative
+    // iterates positive, making genuine NEGATIVE IRRs unreachable — a
+    // loss-making project would silently report 0%).
+    if (dnpv === 0 || !isFinite(dnpv)) break;
     const newRate = rate - npv / dnpv;
+    if (!isFinite(newRate) || newRate <= -1) break;
 
-    // Guard: result is not finite or rate collapsed below -100%
-    if (!isFinite(newRate) || newRate <= -1) {
-      // Bisect toward 0 to recover
-      rate = rate > 0 ? rate / 2 : -rate / 2;
-      continue;
-    }
-
-    if (Math.abs(newRate - rate) < tolerance) {
-      rate = newRate;
-      break;
-    }
+    if (Math.abs(newRate - rate) < tolerance) { rate = newRate; converged = true; break; }
     rate = newRate;
   }
 
-  if (!isFinite(rate) || rate <= -1) return 0;
+  if (converged && isFinite(rate) && rate > -1) {
+    return Math.pow(1 + rate, 12) - 1; // monthly → annual
+  }
 
-  // Convert monthly to annual
-  return Math.pow(1 + rate, 12) - 1;
+  // ── Fallback: bracketed bisection over (-1, ∞) ──────────────────────────────
+  // Newton failed or strayed out of domain. Bracket a sign change of NPV
+  // starting just above -100%/month and expanding the upper bound, then bisect.
+  // This converges to negative roots that Newton's reflection couldn't reach.
+  const lo = -1 + 1e-6;
+  const fLo = npvAt(lo);
+  if (Math.abs(fLo) < tolerance) return Math.pow(1 + lo, 12) - 1;
+
+  let hi = 0;
+  let fHi = npvAt(hi);
+  let bound = 1;
+  while ((fLo < 0) === (fHi < 0) && bound <= 1e9) {
+    hi = bound;
+    fHi = npvAt(hi);
+    if (!isFinite(fHi)) { bound *= 2; continue; }
+    bound *= 2;
+  }
+  // No sign change bracketed → no real IRR in range.
+  if ((fLo < 0) === (fHi < 0)) return 0;
+
+  let a = lo, b = hi, fa = fLo;
+  for (let k = 0; k < 200; k++) {
+    const mid = (a + b) / 2;
+    const fm = npvAt(mid);
+    if (Math.abs(fm) < tolerance || (b - a) / 2 < tolerance) { a = mid; break; }
+    if ((fa < 0) === (fm < 0)) { a = mid; fa = fm; } else { b = mid; }
+  }
+  const root = (a + b) / 2;
+  if (!isFinite(root) || root <= -1) return 0;
+  return Math.pow(1 + root, 12) - 1; // monthly → annual
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { formatCurrency } from '../../utils';
 import type { MonthlyCashflow } from '../../types';
@@ -139,10 +139,17 @@ export function ProjectCashflow() {
   // stale high value (e.g. 180 from a long project) would silently collapse
   // a freshly-loaded shorter project to its final month and compute totals
   // over that truncated window.
+  //
+  // Done via the React-recommended "adjust state during render" idiom rather
+  // than a useEffect: comparing the current length against a tracked previous
+  // value and resetting in the same render avoids a redundant commit+re-render
+  // (and the `react-hooks/set-state-in-effect` lint error the effect tripped).
   const cashflowLength = data?.cashflows.length ?? 0;
-  useEffect(() => {
-    setStartPeriod(prev => (prev > cashflowLength ? 1 : prev));
-  }, [cashflowLength]);
+  const [prevLength, setPrevLength] = useState<number>(cashflowLength);
+  if (cashflowLength !== prevLength) {
+    setPrevLength(cashflowLength);
+    if (startPeriod > cashflowLength) setStartPeriod(1);
+  }
 
   if (!data) {
     return <div className="text-center py-12 text-gray-400 text-sm">Run calculations to see the Project Cashflow</div>;
