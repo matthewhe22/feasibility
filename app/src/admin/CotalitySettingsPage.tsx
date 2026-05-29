@@ -216,8 +216,10 @@ export function CotalitySettingsPage() {
                 className="w-full text-sm bg-gray-700 border border-gray-600 text-white rounded px-3 py-2 font-mono focus:outline-none focus:border-blue-500" />
             </Field>
             <p className="text-[10px] text-gray-500">
-              Defaults: token <code className="font-mono">{settings.defaults.tokenUrl}</code>, base <code className="font-mono">{settings.defaults.apiBaseUrl}</code>.
-              Use the UAT host (<code className="font-mono">api-uat.corelogic.asia</code>) while testing.
+              Defaults: token <code className="font-mono">{settings.defaults.tokenUrl}</code> (PingFederate auth host),
+              API base <code className="font-mono">{settings.defaults.apiBaseUrl}</code> (production).
+              For a <strong className="text-gray-400">Sandbox</strong> client, set the API base to{' '}
+              <code className="font-mono">https://api-sbox.corelogic.asia</code> (the token URL is the same for sandbox and prod).
             </p>
           </div>
         </Card>
@@ -234,13 +236,15 @@ export function CotalitySettingsPage() {
             type="text"
             value={propertyDataPath}
             onChange={e => setPropertyDataPath(e.target.value)}
-            placeholder="/property/au/v1/statistics?locality={suburb}&state={state}"
+            placeholder="/search/au/property/address?q={suburb}%20{state}"
             spellCheck={false}
             className="w-full text-sm bg-gray-700 border border-gray-600 text-white rounded px-3 py-2 font-mono focus:outline-none focus:border-blue-500"
           />
           <p className="text-[10px] text-gray-500 mt-2">
-            The exact path depends on the Cotality products in your subscription — copy it from your{' '}
-            <a className="text-blue-400 underline" target="_blank" rel="noopener" href="https://developer.corelogic.asia/">API documentation</a>.
+            The exact path depends on the Cotality products your client is entitled to — copy it from the{' '}
+            <a className="text-blue-400 underline" target="_blank" rel="noopener" href="https://developer.corelogic.asia/">API reference</a>{' '}
+            for your client. A "Property Search" client typically exposes address search / suggest and property-detail endpoints
+            (e.g. <code className="font-mono">/search/au/property/address</code>); sales-statistics / AVM endpoints require those products.
             The path is appended to the API base URL and called with the bearer token. Failures fall back to web research automatically.
           </p>
         </Card>

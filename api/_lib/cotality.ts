@@ -25,10 +25,11 @@ export const COTALITY_SETTINGS_SENTINEL = '__cotality_settings__';
 
 export type CotalityRegion = 'au' | 'nz';
 
-/** Documented defaults (Australia, production). All overridable in the UI. */
+/** Documented defaults (Australia). All overridable in the UI. */
 export const COTALITY_DEFAULTS = {
   apiBaseUrl: 'https://api.corelogic.asia',
-  tokenUrl: 'https://api.corelogic.asia/access/oauth/token',
+  // Cotality auth is a dedicated PingFederate host, separate from the API host.
+  tokenUrl: 'https://auth.corelogic.asia/as/token.oauth2',
   region: 'au' as CotalityRegion,
 };
 
@@ -187,22 +188,34 @@ export async function getCotalityToken(
     return _tokenCache.token;
   }
 
-  const body = new URLSearchParams({
-    grant_type: 'client_credentials',
-    client_id: s.clientId,
-    client_secret: s.clientSecret,
-  });
+  // Cotality's PingFederate token endpoint authenticates the client with HTTP
+  // Basic auth (client_secret_basic). Some client configs instead expect the
+  // credentials in the body (client_secret_post), so try Basic first and fall
+  // back to body-param auth on a 400/401 before giving up.
+  const basic = Buffer.from(`${s.clientId}:${s.clientSecret}`).toString('base64');
+
+  const post = async (mode: 'basic' | 'body'): Promise<Response> => {
+    const params = new URLSearchParams({ grant_type: 'client_credentials' });
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    };
+    if (mode === 'basic') {
+      headers.Authorization = `Basic ${basic}`;
+    } else {
+      params.set('client_id', s.clientId);
+      params.set('client_secret', s.clientSecret);
+    }
+    return fetch(s.tokenUrl, { method: 'POST', headers, body: params.toString() });
+  };
 
   let resp: Response;
   try {
-    resp = await fetch(s.tokenUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json',
-      },
-      body: body.toString(),
-    });
+    resp = await post('basic');
+    if (resp.status === 400 || resp.status === 401) {
+      // Client may be configured for client_secret_post — retry that way.
+      resp = await post('body');
+    }
   } catch (e) {
     throw new CotalityError(
       `Could not reach the Cotality token endpoint (${s.tokenUrl}): ${e instanceof Error ? e.message : 'network error'}`,
@@ -213,7 +226,7 @@ export async function getCotalityToken(
     const txt = await resp.text().catch(() => '');
     if (resp.status === 401 || resp.status === 400) {
       throw new CotalityError(
-        `Cotality rejected the credentials (HTTP ${resp.status}). Check the Client ID / Secret and token URL in Admin → Cotality Data.`,
+        `Cotality rejected the credentials (HTTP ${resp.status}). Check the Client ID / Secret and token URL in Admin → Cotality Data. ${txt.slice(0, 200)}`,
         resp.status,
       );
     }
