@@ -1,5 +1,19 @@
 // FormFields.tsx
-import { useId, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
+
+/**
+ * Editable-number field helper. While the field is focused we hold the raw
+ * keystrokes in a `draft` string so the displayed text is NOT reformatted from
+ * the parent's number on every render — the old behaviour jumped the caret,
+ * injected thousands separators mid-type, and forced trailing-zero precision
+ * (e.g. "2.1500"), making the cost/GRV tables painful to edit. Edits still
+ * commit to the model live (so dependent calcs update); on blur the draft is
+ * cleared and the field reverts to the canonical formatted value.
+ */
+function useNumericDraft() {
+  const [draft, setDraft] = useState<string | null>(null);
+  return { draft, setDraft };
+}
 
 interface CurrencyInputProps {
   label: string;
@@ -15,6 +29,8 @@ interface CurrencyInputProps {
 export function CurrencyInput({ label, value, onChange, disabled, className = '', id }: CurrencyInputProps) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
+  const { draft, setDraft } = useNumericDraft();
+  const display = draft ?? (value ?? 0).toLocaleString('en-AU');
   return (
     <div className={`flex items-center gap-2 ${className}`}>
       <label htmlFor={inputId} className="text-xs text-gray-600 w-56 shrink-0">{label}</label>
@@ -24,11 +40,14 @@ export function CurrencyInput({ label, value, onChange, disabled, className = ''
           id={inputId}
           type="text"
           inputMode="decimal"
-          value={(value ?? 0).toLocaleString('en-AU')}
+          value={display}
+          onFocus={() => setDraft(String(value ?? 0))}
           onChange={(e) => {
+            setDraft(e.target.value);
             const num = parseFloat(e.target.value.replace(/[^0-9.-]/g, ''));
             if (!isNaN(num)) onChange(num);
           }}
+          onBlur={() => setDraft(null)}
           disabled={disabled}
           aria-label={label}
           className="w-40 pl-5 pr-2 py-1 text-xs text-right border border-gray-300 rounded bg-yellow-50 focus:ring-1 focus:ring-blue-400 focus:border-blue-400 disabled:bg-gray-100"
@@ -50,6 +69,10 @@ interface PercentInputProps {
 export function PercentInput({ label, value, onChange, disabled, className = '', id }: PercentInputProps) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
+  const { draft, setDraft } = useNumericDraft();
+  // Format to ≤4 dp but drop trailing zeros ("2.15" not "2.1500") via Number().
+  const formatted = String(Number(((value ?? 0) * 100).toFixed(4)));
+  const display = draft ?? formatted;
   return (
     <div className={`flex items-center gap-2 ${className}`}>
       <label htmlFor={inputId} className="text-xs text-gray-600 w-56 shrink-0">{label}</label>
@@ -58,11 +81,14 @@ export function PercentInput({ label, value, onChange, disabled, className = '',
           id={inputId}
           type="text"
           inputMode="decimal"
-          value={((value ?? 0) * 100).toFixed(4)}
+          value={display}
+          onFocus={() => setDraft(formatted)}
           onChange={(e) => {
+            setDraft(e.target.value);
             const num = parseFloat(e.target.value);
             if (!isNaN(num)) onChange(num / 100);
           }}
+          onBlur={() => setDraft(null)}
           disabled={disabled}
           aria-label={label}
           className="w-28 pr-6 pl-2 py-1 text-xs text-right border border-gray-300 rounded bg-yellow-50 focus:ring-1 focus:ring-blue-400 focus:border-blue-400 disabled:bg-gray-100"
@@ -86,6 +112,11 @@ interface NumberInputProps {
 export function NumberInput({ label, value, onChange, disabled, className = '', suffix, id }: NumberInputProps) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
+  const { draft, setDraft } = useNumericDraft();
+  // While focused, show the raw draft (allowing a transiently-empty field so the
+  // user can clear and retype) instead of the forced `value ?? 0` that pinned a
+  // literal 0 you had to select-all to overwrite.
+  const display = draft ?? String(value ?? 0);
   return (
     <div className={`flex items-center gap-2 ${className}`}>
       <label htmlFor={inputId} className="text-xs text-gray-600 w-56 shrink-0">{label}</label>
@@ -93,8 +124,13 @@ export function NumberInput({ label, value, onChange, disabled, className = '', 
         <input
           id={inputId}
           type="number"
-          value={value ?? 0}
-          onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+          value={display}
+          onFocus={() => setDraft(String(value ?? 0))}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            onChange(parseFloat(e.target.value) || 0);
+          }}
+          onBlur={() => setDraft(null)}
           disabled={disabled}
           aria-label={label}
           className="w-28 px-2 py-1 text-xs text-right border border-gray-300 rounded bg-yellow-50 focus:ring-1 focus:ring-blue-400 focus:border-blue-400 disabled:bg-gray-100"

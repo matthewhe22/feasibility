@@ -90,6 +90,12 @@ function calculateStampDutyBase(landPrice: number, state: StampDutyState): numbe
       // $25,001–$130,000:$350 + 2.4% over $25,000
       // $130,001–$960,000:$2,870 + 6.0% over $130,000
       // Over $960,000:   5.5% of dutiable value (no concession)
+      //
+      // NOTE: the >$960k bracket is a FLAT 5.5% on the FULL dutiable value, not
+      // a marginal rate — this is the genuine Victorian rule (Duties Act 2000),
+      // which deliberately produces a small step up at the $960k threshold
+      // (≈$52,670 just under vs ≈$52,800 just over). Do not "smooth" this into a
+      // marginal bracket; that would understate VIC duty.
       if (landPrice <= 25000) return landPrice * 0.014;
       if (landPrice <= 130000) return 350 + (landPrice - 25000) * 0.024;
       if (landPrice <= 960000) return 2870 + (landPrice - 130000) * 0.06;

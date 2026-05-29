@@ -304,17 +304,6 @@ export function resolveIncomeSupplyType(item: RentalIncomeItem): GSTSupplyType {
   return 'input-taxed';
 }
 
-// Calculate GST on residential sales (margin scheme)
-export function calculateGSTOnSales(items: RevenueLineItem[], gstRate: number): number {
-  let gst = 0;
-  for (const item of items) {
-    if (item.gstIncluded && item.currentSalePrice > 0) {
-      gst += item.currentSalePrice * gstRate / (1 + gstRate);
-    }
-  }
-  return gst;
-}
-
 // Get net revenue (exc GST) for each item
 export function getNetRevenue(item: RevenueLineItem, gstRate: number): number {
   if (item.gstIncluded) {
