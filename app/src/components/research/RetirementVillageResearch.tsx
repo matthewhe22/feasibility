@@ -34,6 +34,7 @@ interface SuburbsResult {
   summary: string;
   sources: ResearchSource[];
   model?: string;
+  provider?: string;
   timestamp?: string;
   cotality?: CotalityNote;
   groundingUsed?: boolean;
@@ -62,6 +63,7 @@ interface CompetitorsResult {
   summary: string;
   sources: ResearchSource[];
   model?: string;
+  provider?: string;
   timestamp?: string;
   cotality?: CotalityNote;
   groundingUsed?: boolean;
@@ -139,6 +141,10 @@ export function RetirementVillageResearch() {
           Combines the configured AI model (Admin → AI Settings) with Cotality property data (Admin → Cotality Data)
           to research surrounding-suburb pricing and nearby retirement-village competitors. Figures are indicative —
           verify against the linked sources before relying on them.
+        </p>
+        <p className="text-[11px] text-amber-700 mt-1">
+          Tip: live results (current villages.com.au / downsizing.com.au listings) need a <strong>Gemini</strong> model
+          with web search — DeepSeek has no live search and answers from training data only. Set this in Admin → AI Settings.
         </p>
       </div>
 
@@ -352,21 +358,37 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Meta({ result }: { result: { model?: string; cotality?: CotalityNote; groundingUsed?: boolean } }) {
+function Meta({ result }: { result: { model?: string; provider?: string; cotality?: CotalityNote; groundingUsed?: boolean } }) {
+  // groundingUsed is explicitly false when the active model has no live web
+  // search (DeepSeek) OR when Gemini's grounding fell back (quota/permission).
+  // Without live search the model relies on training data — it can't pull
+  // current villages.com.au / downsizing.com.au listings — so warn the user.
+  const noWebSearch = result.groundingUsed === false;
   return (
-    <div className="flex items-center gap-2 flex-wrap mb-2">
-      {result.cotality?.used && (
-        <span className="text-[10px] inline-flex items-center gap-1 bg-blue-100 border border-blue-300 text-blue-900 rounded px-1.5 py-0.5">
-          ◆ Grounded in Cotality data
-          {result.cotality.url && <a href={result.cotality.url} target="_blank" rel="noopener" className="underline ml-1">(source)</a>}
-        </span>
-      )}
-      {result.groundingUsed && (
-        <span className="text-[10px] bg-purple-50 border border-purple-200 text-purple-700 rounded px-1.5 py-0.5">Live web search</span>
-      )}
-      {result.model && <span className="text-[10px] text-gray-400">model: {result.model}</span>}
-      {result.cotality && !result.cotality.used && result.cotality.reason && (
-        <span className="text-[10px] text-amber-700">{result.cotality.reason}</span>
+    <div className="mb-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        {result.cotality?.used && (
+          <span className="text-[10px] inline-flex items-center gap-1 bg-blue-100 border border-blue-300 text-blue-900 rounded px-1.5 py-0.5">
+            ◆ Grounded in Cotality data
+            {result.cotality.url && <a href={result.cotality.url} target="_blank" rel="noopener" className="underline ml-1">(source)</a>}
+          </span>
+        )}
+        {result.groundingUsed
+          ? <span className="text-[10px] bg-purple-50 border border-purple-200 text-purple-700 rounded px-1.5 py-0.5">Live web search</span>
+          : <span className="text-[10px] bg-amber-50 border border-amber-300 text-amber-800 rounded px-1.5 py-0.5">No live web search</span>}
+        {result.model && <span className="text-[10px] text-gray-400">model: {result.model}</span>}
+        {result.cotality && !result.cotality.used && result.cotality.reason && (
+          <span className="text-[10px] text-amber-700">{result.cotality.reason}</span>
+        )}
+      </div>
+      {noWebSearch && (
+        <div className="mt-1.5 text-[10px] bg-amber-50 border border-amber-300 text-amber-800 rounded px-2 py-1">
+          ⚠ The active model{result.provider ? ` (${result.provider})` : ''} ran <strong>without live web search</strong>, so these
+          figures come from the model's training data — they may be stale and won't reflect current
+          villages.com.au / downsizing.com.au listings. For live, sourced results switch to a
+          <strong> Gemini</strong> model in <span className="font-mono">Admin → AI Settings</span>
+          {result.provider === 'gemini' ? ' (Gemini grounding fell back — likely a quota/permission limit; wait and retry or enable billing).' : '.'}
+        </div>
       )}
     </div>
   );
