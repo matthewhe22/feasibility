@@ -31,7 +31,7 @@ import {
 } from './defaults';
 import { cloneStandardBuildSCurves } from '../engine/sCurves';
 
-export type TabId = 'admin' | 'input' | 'timeDist' | 'actuals' | 'internalDash' | 'externalDash' | 'cashflow' | 'summary' | 'charts' | 'checks' | 'docs';
+export type TabId = 'admin' | 'input' | 'timeDist' | 'actuals' | 'internalDash' | 'externalDash' | 'cashflow' | 'summary' | 'charts' | 'checks' | 'docs' | 'rvResearch';
 
 interface AppState {
   activeTab: TabId;

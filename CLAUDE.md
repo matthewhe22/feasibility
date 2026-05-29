@@ -278,3 +278,21 @@ Cotality subscription is configured.
 
 Cotality data is property *value* data, so grounding applies to **GRV** research;
 construction/professional **cost** benchmarks remain QS/AI-sourced (no suburb key).
+
+## Retirement Village Property Research (RV Research tab)
+A standalone research page (`app/src/components/research/RetirementVillageResearch.tsx`,
+main-app tab id `rvResearch`) that combines the AI model + Cotality to research a
+named retirement village. Two independent tools:
+1. **Surrounding-suburb pricing** — resolves the village location, finds related
+   suburbs (≈5–8 km), and returns median house price (MHP), median unit price
+   (MUP) and median $/m² per suburb, plus the indicative averages.
+2. **Competitor villages** — lists recently sold / listed units of competing
+   villages within a proximity radius (default 5 km) with price, sold/listing
+   flag, date, beds, baths, study, unit type where available.
+
+Backend: `POST /api/research/retirement-village` (`mode: 'suburbs' | 'competitors'`),
+sharing `api/_lib/aiClient.ts` (the reusable Gemini-grounded / DeepSeek JSON caller)
+and the same Cotality grounding + `cotality:{used,url?,reason?}` response field as
+the benchmark research endpoint. Optional `suburb`/`postcode` inputs improve both AI
+accuracy and Cotality grounding. All figures are indicative (RV units often transact
+under licence / DMF arrangements) — the UI surfaces sources and a verification note.
