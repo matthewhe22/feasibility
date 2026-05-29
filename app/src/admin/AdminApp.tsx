@@ -5,9 +5,10 @@ import { ProjectsPage } from './ProjectsPage';
 import { ProjectSetupPage } from './ProjectSetupPage';
 import { BrandingPage } from './BrandingPage';
 import { AISettingsPage } from './AISettingsPage';
+import { CotalitySettingsPage } from './CotalitySettingsPage';
 import { clearToken, isLoggedIn } from './api';
 
-type AdminTab = 'overview' | 'projects' | 'projectSetup' | 'branding' | 'aiSettings';
+type AdminTab = 'overview' | 'projects' | 'projectSetup' | 'branding' | 'aiSettings' | 'cotality';
 
 function NavItem({
   label, active, onClick,
@@ -51,6 +52,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
           <NavItem label="Project Setup" active={tab === 'projectSetup'} onClick={() => setTab('projectSetup')} />
           <NavItem label="Branding" active={tab === 'branding'} onClick={() => setTab('branding')} />
           <NavItem label="AI Settings" active={tab === 'aiSettings'} onClick={() => setTab('aiSettings')} />
+          <NavItem label="Cotality Data" active={tab === 'cotality'} onClick={() => setTab('cotality')} />
         </nav>
 
         {/* Footer links */}
@@ -84,6 +86,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
         {tab === 'projectSetup' && <ProjectSetupPage />}
         {tab === 'branding' && <BrandingPage />}
         {tab === 'aiSettings' && <AISettingsPage />}
+        {tab === 'cotality' && <CotalitySettingsPage />}
         {/* Pass children through if we need extra content injection later */}
         {children}
       </main>

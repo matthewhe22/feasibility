@@ -59,6 +59,8 @@ interface GRVResearch {
   sources: ResearchSource[];
   model: string;
   timestamp: string;
+  /** Set when the result was grounded in (or attempted against) Cotality data. */
+  cotality?: { used: boolean; url?: string; reason?: string };
 }
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -561,6 +563,19 @@ function LiveResearchPanel({
 
       {result && (
         <div className="border border-purple-300 bg-purple-50 rounded p-2">
+          {result.cotality?.used && (
+            <div className="mb-2 text-[10px] inline-flex items-center gap-1 bg-blue-100 border border-blue-300 text-blue-900 rounded px-1.5 py-0.5">
+              <span aria-hidden="true">◆</span> Grounded in Cotality property data
+              {result.cotality.url && (
+                <a href={result.cotality.url} target="_blank" rel="noopener" className="underline ml-1">(source)</a>
+              )}
+            </div>
+          )}
+          {result.cotality && !result.cotality.used && result.cotality.reason && (
+            <div className="mb-2 text-[10px] bg-amber-50 border border-amber-200 text-amber-800 rounded px-1.5 py-0.5">
+              {result.cotality.reason}
+            </div>
+          )}
           <p className="text-[11px] text-gray-800 mb-2">{result.summary}</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
             <ResultBox

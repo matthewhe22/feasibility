@@ -242,3 +242,39 @@ After multi-agent review (financier, GST specialist, investor, dev manager, code
 - **Peak interest** metric now includes land loan + additional loans
 - **Deposit percent** — uses `sellingCosts[].depositPercent` instead of hardcoded 10%
 - **ITC recovery** — documented as already wired through waterfall via `totalMonthlyRevenue`
+
+## Cotality (CoreLogic) Property-Data Integration
+Live AI benchmark research (the "Research benchmarks" buttons on the GRV/cost
+reference cards) can be **grounded in real Cotality property data** when a
+Cotality subscription is configured.
+
+**Architecture** (mirrors the AI-settings pattern):
+- `api/_lib/cotality.ts` — credential storage (sentinel row `__cotality_settings__`
+  in `projects.admin` JSONB, server-only — secret never sent to the browser),
+  OAuth2 **client-credentials** token exchange (cached in-memory until ~5 min
+  before expiry), and an optional best-effort property-data fetch.
+- `api/admin/cotality-settings.ts` — admin GET/POST/DELETE + a `{test:true}`
+  action that verifies credentials via a live token exchange.
+- `api/benchmarks/research.ts` — before calling the AI model, resolves Cotality
+  settings and (for requests carrying a suburb/postcode) fetches the configured
+  data path, injecting the result into the prompt as the **authoritative primary
+  source**. The response carries `cotality: { used, url?, reason? }`. Every
+  Cotality call is best-effort — any failure degrades silently to web-search-only.
+- Admin UI: `app/src/admin/CotalitySettingsPage.tsx` (nav: **Cotality Data**).
+  GRV reference card shows a "Grounded in Cotality property data" badge when used.
+
+**Configuration** (Admin → Cotality Data, or env-var fallback):
+- Client ID + Client Secret (OAuth2 consumer key/secret from
+  https://developer.corelogic.asia/).
+- Token URL (default `https://api.corelogic.asia/access/oauth/token`) and API
+  base URL (default `https://api.corelogic.asia`) — switch to the UAT host
+  (`api-uat.corelogic.asia`) while testing. Region: AU / NZ.
+- **Property data path** (optional): a path template with `{suburb}` `{state}`
+  `{postcode}` placeholders, copied from your subscription's API docs (the exact
+  endpoint depends on the Cotality products you license). Blank ⇒ credentials are
+  used for connection verification only and research runs on web search alone.
+- Env-var fallback: `COTALITY_CLIENT_ID`, `COTALITY_CLIENT_SECRET`,
+  `COTALITY_TOKEN_URL`, `COTALITY_API_BASE_URL`, `COTALITY_REGION`, `COTALITY_DATA_PATH`.
+
+Cotality data is property *value* data, so grounding applies to **GRV** research;
+construction/professional **cost** benchmarks remain QS/AI-sourced (no suburb key).

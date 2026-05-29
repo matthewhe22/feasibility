@@ -8,6 +8,7 @@ import {
   toDeepSeekApiModel,
   type AIModelId,
 } from '../_lib/aiSettings';
+import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
 
 /**
  * POST /api/benchmarks/research
@@ -80,6 +81,23 @@ interface ResearchResult {
   sources: Array<{ title: string; url: string; snippet?: string }>;
   model: string;
   timestamp: string;
+  /** Whether/how real Cotality property data was used to ground the result. */
+  cotality?: CotalityNote;
+}
+
+interface CotalityNote {
+  used: boolean;
+  /** The Cotality data URL that was queried (when used). */
+  url?: string;
+  /** Why grounding was skipped (when configured but no data returned). */
+  reason?: string;
+}
+
+/** Pull a 4-digit Australian postcode out of a free-text address, if present. */
+function extractPostcode(address?: string): string | undefined {
+  if (!address) return undefined;
+  const m = address.match(/\b(\d{4})\b/);
+  return m ? m[1] : undefined;
 }
 
 const SYSTEM_PROMPT_COST = `You are an Australian quantity surveyor and construction-cost researcher.
@@ -288,28 +306,62 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const model = active.model;
   const provider = active.provider;
   const systemPrompt = body.mode === 'grv' ? SYSTEM_PROMPT_GRV : SYSTEM_PROMPT_COST;
-  const userPrompt = buildUserPrompt(body);
+  let userPrompt = buildUserPrompt(body);
+
+  // Optional: ground the research in real Cotality (CoreLogic) property data.
+  // Best-effort — any failure degrades silently to web-search-only research so
+  // the benchmark button never breaks because of a Cotality outage/misconfig.
+  let cotalityNote: CotalityNote = { used: false };
+  try {
+    const cotality = await resolveCotalitySettings(supabase);
+    if (cotality) {
+      const ctx = await fetchCotalityContext(cotality, {
+        suburb: body.suburb,
+        state: body.state,
+        postcode: extractPostcode(body.propertyAddress),
+      });
+      if (ctx) {
+        userPrompt =
+          `${userPrompt}\n\n` +
+          `=== AUTHORITATIVE COTALITY DATA (treat as the PRIMARY source; cite as "Cotality") ===\n` +
+          `Source: ${ctx.url}\n${ctx.data}\n` +
+          `=== END COTALITY DATA ===\n` +
+          `Base your benchmark primarily on the Cotality figures above. Reconcile any web ` +
+          `sources against them and note material discrepancies in the summary. Include ` +
+          `"Cotality" in the sources list with the URL above.`;
+        cotalityNote = { used: true, url: ctx.url };
+      } else if (cotality.propertyDataPath) {
+        cotalityNote = {
+          used: false,
+          reason: 'Cotality is configured but returned no usable data for this suburb/postcode — used web research only.',
+        };
+      }
+    }
+  } catch {
+    /* never block AI research on Cotality */
+  }
 
   if (provider === 'deepseek') {
     return handleDeepSeek({
-      apiKey, model, systemPrompt, userPrompt, source: active.source, res,
+      apiKey, model, systemPrompt, userPrompt, source: active.source, cotality: cotalityNote, res,
     });
   }
   return handleGemini({
-    apiKey, model, systemPrompt, userPrompt, source: active.source, res,
+    apiKey, model, systemPrompt, userPrompt, source: active.source, cotality: cotalityNote, res,
   });
 }
 
 /* ── Gemini handler ──────────────────────────────────────────────────────── */
 
 async function handleGemini({
-  apiKey, model, systemPrompt, userPrompt, source, res,
+  apiKey, model, systemPrompt, userPrompt, source, cotality, res,
 }: {
   apiKey: string;
   model: AIModelId;
   systemPrompt: string;
   userPrompt: string;
   source: 'stored' | 'env';
+  cotality: CotalityNote;
   res: VercelResponse;
 }) {
   const client = new GoogleGenerativeAI(apiKey);
@@ -393,6 +445,7 @@ async function handleGemini({
     augmented.provider = 'gemini';
     augmented.groundingUsed = groundingUsed;
     if (groundingFallbackReason) augmented.groundingFallbackReason = groundingFallbackReason;
+    parsed.cotality = cotality;
 
     return res.status(200).json(parsed);
   } catch (err) {
@@ -441,13 +494,14 @@ async function handleGemini({
 /* ── DeepSeek handler ────────────────────────────────────────────────────── */
 
 async function handleDeepSeek({
-  apiKey, model, systemPrompt, userPrompt, source, res,
+  apiKey, model, systemPrompt, userPrompt, source, cotality, res,
 }: {
   apiKey: string;
   model: AIModelId;
   systemPrompt: string;
   userPrompt: string;
   source: 'stored' | 'env';
+  cotality: CotalityNote;
   res: VercelResponse;
 }) {
   const apiModelName = toDeepSeekApiModel(model);
@@ -530,6 +584,7 @@ async function handleDeepSeek({
     augmented.provider = 'deepseek';
     augmented.groundingUsed = false;
     augmented.webSearchSupported = false; // DeepSeek has no built-in web search
+    parsed.cotality = cotality;
 
     return res.status(200).json(parsed);
   } catch (err) {

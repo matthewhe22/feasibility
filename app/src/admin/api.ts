@@ -166,3 +166,52 @@ export async function updateAISettings(patch: {
 export async function deleteStoredAIKey(): Promise<void> {
   await apiFetch('/ai-settings', { method: 'DELETE' });
 }
+
+// ── Cotality (CoreLogic) Data Settings ────────────────────────────────────────
+
+export type CotalityRegion = 'au' | 'nz';
+
+export interface CotalitySettings {
+  hasCredentials: boolean;
+  hasStoredCredentials: boolean;
+  hasEnvFallback: boolean;
+  source: 'stored' | 'env' | 'none';
+  clientIdPreview: string;
+  tokenUrl: string;
+  apiBaseUrl: string;
+  region: CotalityRegion;
+  propertyDataPath: string;
+  enabled: boolean;
+  defaults: { apiBaseUrl: string; tokenUrl: string; region: CotalityRegion };
+}
+
+export interface CotalitySettingsPatch {
+  clientId?: string;
+  clientSecret?: string;
+  tokenUrl?: string;
+  apiBaseUrl?: string;
+  region?: CotalityRegion;
+  propertyDataPath?: string;
+  enabled?: boolean;
+}
+
+export async function fetchCotalitySettings(): Promise<CotalitySettings> {
+  return apiFetch<CotalitySettings>('/cotality-settings');
+}
+
+export async function updateCotalitySettings(
+  patch: CotalitySettingsPatch,
+): Promise<{ ok: true; hasCredentials: boolean; clientIdPreview: string; tokenUrl: string; apiBaseUrl: string; region: CotalityRegion; propertyDataPath: string; enabled: boolean }> {
+  return apiFetch('/cotality-settings', { method: 'POST', body: JSON.stringify(patch) });
+}
+
+/** Verify the credentials by performing an OAuth2 token exchange. */
+export async function testCotalityConnection(
+  patch: CotalitySettingsPatch,
+): Promise<{ ok: true; message: string }> {
+  return apiFetch('/cotality-settings', { method: 'POST', body: JSON.stringify({ ...patch, test: true }) });
+}
+
+export async function deleteCotalityCredentials(): Promise<void> {
+  await apiFetch('/cotality-settings', { method: 'DELETE' });
+}
