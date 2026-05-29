@@ -52,14 +52,33 @@ const SYSTEM_COMPETITORS = `You are an Australian retirement-living market analy
 Given a retirement village and a proximity radius, you identify COMPETING
 retirement villages within that radius and list their unit sale / listing evidence.
 
+Trusted sources you should search DIRECTLY and prefer (in roughly this order):
+  Third-party retirement-living aggregators / listing portals
+   - villages.com.au (DCM Media retirement village directory + listings)
+   - downsizing.com.au (retirement & over-50s listings)
+   - seniorshousingonline.com.au
+   - agedcareguide.com.au / agedcareonline.com.au (village directories)
+   - oversixtyfive / retirement living directories
+  General real-estate portals (filter to retirement / over-55s / lifestyle)
+   - realestate.com.au (incl. sold-price history)
+   - domain.com.au
+   - property.com.au (Cotality consumer) / onthehouse.com.au
+  Operator / village websites (current "for sale" pages)
+   - Keyton (ex-Lendlease Retirement), Aveo, Stockland, Australian Unity,
+     Levande, RetireAustralia, IRT, Ryman Healthcare, Anglicare, Bolton Clarke,
+     and other local operators
+  Data providers
+   - CoreLogic / Cotality where available
+
 You MUST:
-  1. Use your web search capability to find CURRENT data — prefer village operator
-     websites, realestate.com.au / Domain retirement-living listings, downsizing.com.au,
-     villages.com.au, and CoreLogic / Cotality where available.
+  1. Use your web search capability to find CURRENT data, searching the third-party
+     sites above by name (especially villages.com.au and downsizing.com.au) — these
+     aggregators are often the best source for retirement-unit listing prices.
   2. For each unit return: village name, price, whether it is a SOLD price or a current
      LISTING price, the date (sold date or listing date, ISO yyyy-mm-dd or yyyy-mm if only
-     month known), bedrooms, bathrooms, study (true/false), unit type, and address/suburb
-     where available. Use null for any field you cannot substantiate — never invent.
+     month known), bedrooms, bathrooms, study (true/false), unit type, address/suburb,
+     and the specific source/listing URL it came from. Use null for any field you cannot
+     substantiate — never invent.
   3. Sort units by date descending (most recent first).
   4. Note that retirement-village units are often sold under licence / loan-lease /
      DMF arrangements — capture the headline ingoing/listing price and note the tenure in
@@ -112,9 +131,10 @@ function buildCompetitorsPrompt(req: RVRequest): string {
     `    { "villageName": "...", "address": "<or null>", "suburb": "<or null>", "distanceKm": <number|null>,`,
     `      "priceType": "sold" | "listing", "price": <number|null>, "date": "<yyyy-mm-dd|yyyy-mm|null>",`,
     `      "bedrooms": <number|null>, "bathrooms": <number|null>, "study": <true|false|null>,`,
-    `      "unitType": "<e.g. ILU villa / apartment / serviced apartment | null>", "note": "<tenure/DMF note | null>" }`,
+    `      "unitType": "<e.g. ILU villa / apartment / serviced apartment | null>", "note": "<tenure/DMF note | null>",`,
+    `      "source": "<site name e.g. villages.com.au | null>", "sourceUrl": "<the specific listing/source URL | null>" }`,
     `  ],`,
-    `  "summary": "2-4 sentences incl. how many villages/units found, date range, and source names",`,
+    `  "summary": "2-4 sentences incl. how many villages/units found, date range, and source names (e.g. villages.com.au, downsizing.com.au)",`,
     `  "sources": [ { "title": "...", "url": "...", "snippet": "..." } ]`,
     `}`,
   ].join('\n');

@@ -52,6 +52,8 @@ interface UnitRow {
   study?: boolean | null;
   unitType?: string | null;
   note?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
 }
 interface CompetitorsResult {
   subject?: { name?: string; suburb?: string; state?: string; postcode?: string };
@@ -219,7 +221,7 @@ export function RetirementVillageResearch() {
       {/* Section 2 — Competitor villages */}
       <Section
         title="2. Competitor retirement villages"
-        subtitle="Recently sold / listed units within the proximity radius, with price, date, beds, baths and study where available."
+        subtitle="Recently sold / listed units within the proximity radius (price, date, beds, baths, study), sourced from villages.com.au, downsizing.com.au, operator sites & portals."
         onRun={runCompetitors}
         running={compLoading}
         runLabel="Research competitors"
@@ -244,7 +246,7 @@ export function RetirementVillageResearch() {
                   <tr className="bg-gray-100 text-left">
                     <Th>Village</Th><Th>Type</Th><Th className="text-right">Beds</Th>
                     <Th className="text-right">Baths</Th><Th className="text-center">Study</Th>
-                    <Th className="text-right">Price</Th><Th>Sold / Listing</Th><Th>Date</Th><Th className="text-right">Dist</Th>
+                    <Th className="text-right">Price</Th><Th>Sold / Listing</Th><Th>Date</Th><Th className="text-right">Dist</Th><Th>Source</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -262,6 +264,11 @@ export function RetirementVillageResearch() {
                       <Td>{u.priceType ? <Badge type={u.priceType} /> : '—'}</Td>
                       <Td className="text-gray-600">{u.date ?? '—'}</Td>
                       <Td className="text-right">{num(u.distanceKm)}</Td>
+                      <Td>
+                        {u.sourceUrl
+                          ? <a href={u.sourceUrl} target="_blank" rel="noopener" className="text-blue-600 underline">{u.source || 'link'}</a>
+                          : (u.source ?? '—')}
+                      </Td>
                     </tr>
                   )) : (
                     <tr><Td className="text-gray-500 italic">No competitor units returned.</Td></tr>
