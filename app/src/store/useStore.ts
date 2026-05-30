@@ -99,6 +99,13 @@ export const defaultAdmin: AdminConfig = {
 };
 
 /**
+ * Default project finish period. The equity-distribution start month defaults
+ * to this same value so distributions begin at project finish unless the user
+ * overrides it; keeping a single constant prevents the two from drifting apart.
+ */
+const DEFAULT_PROJECT_FINISH_MONTH = 74;
+
+/**
  * Default MainInputs used to seed a fresh session and to backfill missing
  * fields when a legacy project record is loaded (see ProjectManager.handleLoad
  * → deepMerge). Exported so the load path can reach it without having to
@@ -112,9 +119,9 @@ export const defaultInputs: MainInputs = {
     projectGFA: 32133,
     siteArea: 1650,
     projectStartMonth: 1,
-    projectSpanMonths: 74,
-    projectEndMonth: 74,
-    equityDistStartMonth: 74,
+    projectSpanMonths: DEFAULT_PROJECT_FINISH_MONTH,
+    projectEndMonth: DEFAULT_PROJECT_FINISH_MONTH,
+    equityDistStartMonth: DEFAULT_PROJECT_FINISH_MONTH,
     equityDistSpanMonths: 1,
   },
   landPurchase: {
