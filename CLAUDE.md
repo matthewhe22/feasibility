@@ -243,6 +243,28 @@ After multi-agent review (financier, GST specialist, investor, dev manager, code
 - **Deposit percent** — uses `sellingCosts[].depositPercent` instead of hardcoded 10%
 - **ITC recovery** — documented as already wired through waterfall via `totalMonthlyRevenue`
 
+## AI Provider Settings (multi-provider)
+The live research features (benchmark "Research" buttons + RV Research) are
+powered by a configurable AI provider, managed in Admin → AI Settings.
+
+- **Providers:** Google Gemini (free tier, live Google-Search grounding),
+  DeepSeek (low cost, no web search), and **OpenRouter** (one key → hundreds of
+  models incl. many free; most free models have no web search).
+- **Per-provider keys:** keys are stored per provider in the `__ai_settings__`
+  sentinel row (`admin.aiSettings.keys.{gemini|deepseek|openrouter}`), so all
+  keys persist and the active provider/model can be switched without re-entering
+  anything. Back-compat: the legacy single `apiKey` shape is normalised into the
+  keys map on read (`api/_lib/aiSettings.ts:normalizeStored`).
+- **OpenRouter free models** are dynamic: `POST /api/admin/openrouter-models`
+  fetches OpenRouter's public catalogue, filters to free models (price 0 or
+  `:free` id), caches the list in the sentinel, and the Admin "Update models"
+  button populates the model dropdown.
+- **Resolution:** `resolveActiveSettings` returns the selected provider's key
+  (stored, else env: `GEMINI_API_KEY` / `DEEPSEEK_API_KEY` / `OPENROUTER_API_KEY`),
+  falling back to any provider that has a key. Both research endpoints + the
+  shared `api/_lib/aiClient.ts` dispatch Gemini / DeepSeek / OpenRouter
+  (OpenAI-compatible) accordingly.
+
 ## Cotality (CoreLogic) Property-Data Integration
 Live AI benchmark research (the "Research benchmarks" buttons on the GRV/cost
 reference cards) can be **grounded in real Cotality property data** when a

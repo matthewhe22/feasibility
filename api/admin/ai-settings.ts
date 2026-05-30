@@ -7,108 +7,137 @@ import {
   saveAISettings,
   deleteAISettings,
   ALLOWED_MODELS,
-  type AIModelId,
+  maskKey,
+  type AIProvider,
+  type StoredAISettings,
 } from '../_lib/aiSettings';
 
 /**
- * GET    /api/admin/ai-settings  → { hasKey, keyPreview, model, enabled, source }
- * POST   /api/admin/ai-settings  → body: { apiKey?, model?, enabled? }
- * DELETE /api/admin/ai-settings  → removes the stored key (env-var fallback may still apply)
+ * GET    /api/admin/ai-settings  → per-provider key status + active provider/model + catalogs
+ * POST   /api/admin/ai-settings  → body: { provider?, model?, enabled?, keys?: {gemini?,deepseek?,openrouter?} }
+ * DELETE /api/admin/ai-settings  → body { provider? }: remove one provider key, or all stored settings
  *
- * The API key is NEVER returned to the client. GET only returns a masked
- * preview (e.g. "sk-ant-***WXyZ") and a hasKey flag.
- *
- * `source` indicates where the active settings come from:
- *   "stored" — settings persisted in Supabase via this endpoint (admin-managed)
- *   "env"    — server env var ANTHROPIC_API_KEY (fallback)
- *   "none"   — no key available
+ * Keys are stored per provider and NEVER returned to the client (masked preview only).
  */
+const PROVIDERS: AIProvider[] = ['gemini', 'deepseek', 'openrouter'];
+const ENV_KEY: Record<AIProvider, string> = {
+  gemini: 'GEMINI_API_KEY', deepseek: 'DEEPSEEK_API_KEY', openrouter: 'OPENROUTER_API_KEY',
+};
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!requireAdmin(req, res)) return;
 
   if (!isSupabaseConfigured()) {
     return res.status(503).json({
-      error: 'Supabase is not configured. AI settings cannot be persisted without VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. The fallback ANTHROPIC_API_KEY env var (if set) will still be used by /api/benchmarks/research.',
+      error: 'Supabase is not configured. AI settings cannot be persisted without VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Provider env-var keys (if set) will still be used by /api/benchmarks/research.',
     });
   }
-
   const supabase = getAdminSupabase();
 
   if (req.method === 'GET') {
     const stored = await loadAISettings(supabase);
-    const envKey = process.env.ANTHROPIC_API_KEY?.trim();
-    const envModel = (process.env.ANTHROPIC_MODEL?.trim() as AIModelId | undefined) ?? null;
 
-    const hasStored = Boolean(stored?.apiKey);
-    const hasEnv    = Boolean(envKey);
-    const activeKey = stored?.apiKey ?? envKey ?? '';
-    const source: 'stored' | 'env' | 'none' = hasStored ? 'stored' : (hasEnv ? 'env' : 'none');
+    const providers = PROVIDERS.map(p => {
+      const storedKey = stored?.keys?.[p];
+      const envKey = process.env[ENV_KEY[p]]?.trim();
+      const activeKey = storedKey || envKey || '';
+      const source: 'stored' | 'env' | 'none' = storedKey ? 'stored' : envKey ? 'env' : 'none';
+      return { provider: p, hasKey: Boolean(activeKey), hasStoredKey: Boolean(storedKey), hasEnvFallback: Boolean(envKey), source, keyPreview: activeKey ? maskKey(activeKey) : '' };
+    });
+
+    const activeProvider = stored?.provider ?? 'gemini';
+    const activeHasKey = providers.find(p => p.provider === activeProvider)?.hasKey ?? false;
+    const anyKey = providers.some(p => p.hasKey);
 
     return res.status(200).json({
-      hasKey: source !== 'none',
-      keyPreview: activeKey ? maskKey(activeKey) : '',
-      model: stored?.model ?? envModel ?? 'claude-opus-4-7',
+      provider: activeProvider,
+      model: stored?.model ?? 'gemini-2-0-flash',
       enabled: stored?.enabled ?? true,
-      source,
-      hasEnvFallback: hasEnv,
-      hasStoredKey: hasStored,
+      hasKey: activeHasKey,
+      anyKey,
+      providers,
       allowedModels: ALLOWED_MODELS,
+      openrouterModels: stored?.openrouterModels ?? [],
+      openrouterModelsUpdatedAt: stored?.openrouterModelsUpdatedAt ?? null,
     });
   }
 
   if (req.method === 'POST') {
-    let body: { apiKey?: string; model?: string; enabled?: boolean };
+    let body: {
+      provider?: string; model?: string; enabled?: boolean;
+      keys?: Partial<Record<AIProvider, string>>;
+    };
     try {
       body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body) ?? {};
     } catch {
       return res.status(400).json({ error: 'Invalid JSON body' });
     }
 
-    // Validate model
-    if (body.model !== undefined && !ALLOWED_MODELS.some(m => m.id === body.model)) {
-      return res.status(400).json({
-        error: `Invalid model. Allowed: ${ALLOWED_MODELS.map(m => m.id).join(', ')}`,
-      });
+    if (body.provider !== undefined && !PROVIDERS.includes(body.provider as AIProvider)) {
+      return res.status(400).json({ error: `Invalid provider. Allowed: ${PROVIDERS.join(', ')}` });
     }
-
-    // Validate apiKey shape (don't log the value)
-    // Gemini API keys are alphanumeric strings (no specific prefix required)
-    if (body.apiKey !== undefined && body.apiKey !== '' && body.apiKey.length < 20) {
-      return res.status(400).json({
-        error: 'API key appears too short. Get a free Gemini API key from https://aistudio.google.com/apikey',
-      });
+    // Validate model only for static providers; OpenRouter models are dynamic.
+    if (body.model !== undefined && (body.provider === 'gemini' || body.provider === 'deepseek')) {
+      if (!ALLOWED_MODELS.some(m => m.id === body.model && m.provider === body.provider)) {
+        return res.status(400).json({ error: `Invalid ${body.provider} model "${body.model}".` });
+      }
+    }
+    // Validate any provided key lengths (don't log values).
+    for (const p of PROVIDERS) {
+      const k = body.keys?.[p];
+      if (k !== undefined && k !== '' && k.length < 20) {
+        return res.status(400).json({ error: `${p} API key appears too short.` });
+      }
     }
 
     const existing = await loadAISettings(supabase);
-    const next = {
-      apiKey:  body.apiKey ?? existing?.apiKey ?? '',
-      model:   (body.model as AIModelId) ?? existing?.model ?? 'gemini-2-0-flash',
-      enabled: body.enabled ?? existing?.enabled ?? true,
-    };
+    const keys: Partial<Record<AIProvider, string>> = { ...(existing?.keys ?? {}) };
+    for (const p of PROVIDERS) {
+      const k = body.keys?.[p];
+      if (typeof k === 'string' && k.trim()) keys[p] = k.trim(); // blank = keep current
+    }
 
+    const next: StoredAISettings = {
+      provider: (body.provider as AIProvider) ?? existing?.provider ?? 'gemini',
+      model: body.model ?? existing?.model ?? 'gemini-2-0-flash',
+      enabled: body.enabled ?? existing?.enabled ?? true,
+      keys,
+      openrouterModels: existing?.openrouterModels,
+      openrouterModelsUpdatedAt: existing?.openrouterModelsUpdatedAt,
+    };
     await saveAISettings(supabase, next);
 
     return res.status(200).json({
       ok: true,
-      hasKey: Boolean(next.apiKey),
-      keyPreview: next.apiKey ? maskKey(next.apiKey) : '',
+      provider: next.provider,
       model: next.model,
       enabled: next.enabled,
+      providers: PROVIDERS.map(p => ({ provider: p, hasStoredKey: Boolean(keys[p]), keyPreview: keys[p] ? maskKey(keys[p]!) : '' })),
     });
   }
 
   if (req.method === 'DELETE') {
+    let provider: string | undefined;
+    try {
+      const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body) ?? {};
+      provider = body.provider;
+    } catch { /* no body → delete all */ }
+
+    if (provider && PROVIDERS.includes(provider as AIProvider)) {
+      const existing = await loadAISettings(supabase);
+      if (existing) {
+        const keys = { ...existing.keys };
+        delete keys[provider as AIProvider];
+        await saveAISettings(supabase, { ...existing, keys });
+      }
+      return res.status(200).json({ ok: true, message: `${provider} key removed.` });
+    }
+
     await deleteAISettings(supabase);
-    return res.status(200).json({ ok: true, message: 'Stored AI key removed.' });
+    return res.status(200).json({ ok: true, message: 'All stored AI settings removed.' });
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
-}
-
-/** Mask a key like "sk-ant-abc...xyz1234" → "sk-ant-***1234" */
-function maskKey(key: string): string {
-  if (key.length <= 11) return 'sk-ant-***';
-  return `${key.slice(0, 7)}***${key.slice(-4)}`;
 }
 
 export { AI_SETTINGS_SENTINEL };

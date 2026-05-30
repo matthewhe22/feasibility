@@ -114,25 +114,13 @@ export async function deleteProject(id: number): Promise<void> {
 
 // ── AI Settings ──────────────────────────────────────────────────────────────
 
-export type AIProvider = 'gemini' | 'deepseek';
-
-export type AIModelId =
-  // Gemini
-  | 'gemini-2-0-flash'
-  | 'gemini-1-5-pro'
-  | 'gemini-1-5-flash'
-  // DeepSeek V4 (current — released 2026-04-24)
-  | 'deepseek-v4-pro'
-  | 'deepseek-v4-flash'
-  // DeepSeek legacy (retiring 2026-07-24)
-  | 'deepseek-chat'
-  | 'deepseek-reasoner';
+export type AIProvider = 'gemini' | 'deepseek' | 'openrouter';
 
 export interface AIModelOption {
-  id: AIModelId;
+  id: string;
   label: string;
   provider: AIProvider;
-  tier: 'flash' | 'pro' | 'chat' | 'reasoner';
+  tier: 'flash' | 'pro' | 'chat' | 'reasoner' | 'free' | 'paid';
   contextWindow: string;
   inputPricePerMillion: number;
   outputPricePerMillion: number;
@@ -140,31 +128,63 @@ export interface AIModelOption {
   recommendedFor: string;
 }
 
-export interface AISettings {
+/** Dynamic OpenRouter free-model entry. */
+export interface OpenRouterModel {
+  id: string;
+  label: string;
+  contextLength?: number;
+  free: boolean;
+}
+
+export interface ProviderKeyStatus {
+  provider: AIProvider;
   hasKey: boolean;
-  keyPreview: string;
-  model: AIModelId;
-  enabled: boolean;
-  source: 'stored' | 'env' | 'none';
-  hasEnvFallback: boolean;
   hasStoredKey: boolean;
-  allowedModels: AIModelOption[];
+  hasEnvFallback: boolean;
+  source: 'stored' | 'env' | 'none';
+  keyPreview: string;
+}
+
+export interface AISettings {
+  provider: AIProvider;
+  model: string;
+  enabled: boolean;
+  hasKey: boolean;            // active provider has a usable key
+  anyKey: boolean;           // any provider has a usable key
+  providers: ProviderKeyStatus[];
+  allowedModels: AIModelOption[];        // static Gemini + DeepSeek
+  openrouterModels: OpenRouterModel[];   // cached free list
+  openrouterModelsUpdatedAt: string | null;
+}
+
+export interface AISettingsPatch {
+  provider?: AIProvider;
+  model?: string;
+  enabled?: boolean;
+  keys?: Partial<Record<AIProvider, string>>;
 }
 
 export async function fetchAISettings(): Promise<AISettings> {
   return apiFetch<AISettings>('/ai-settings');
 }
 
-export async function updateAISettings(patch: {
-  apiKey?: string;
-  model?: AIModelId;
-  enabled?: boolean;
-}): Promise<{ ok: true; hasKey: boolean; keyPreview: string; model: AIModelId; enabled: boolean }> {
+export async function updateAISettings(
+  patch: AISettingsPatch,
+): Promise<{ ok: true; provider: AIProvider; model: string; enabled: boolean; providers: { provider: AIProvider; hasStoredKey: boolean; keyPreview: string }[] }> {
   return apiFetch('/ai-settings', { method: 'POST', body: JSON.stringify(patch) });
 }
 
-export async function deleteStoredAIKey(): Promise<void> {
-  await apiFetch('/ai-settings', { method: 'DELETE' });
+/** Remove one provider's stored key, or (no arg) all stored AI settings. */
+export async function deleteStoredAIKey(provider?: AIProvider): Promise<void> {
+  await apiFetch('/ai-settings', {
+    method: 'DELETE',
+    ...(provider ? { body: JSON.stringify({ provider }) } : {}),
+  });
+}
+
+/** Refresh OpenRouter's free-model list (persisted server-side). */
+export async function refreshOpenRouterModels(): Promise<{ ok: true; count: number; models: OpenRouterModel[]; updatedAt: string }> {
+  return apiFetch('/openrouter-models', { method: 'POST' });
 }
 
 // ── Cotality (CoreLogic) Data Settings ────────────────────────────────────────

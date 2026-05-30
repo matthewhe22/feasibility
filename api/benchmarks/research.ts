@@ -6,7 +6,7 @@ import {
   resolveActiveSettings,
   toGeminiApiModel,
   toDeepSeekApiModel,
-  type AIModelId,
+  toOpenRouterApiModel,
 } from '../_lib/aiSettings';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
 
@@ -346,6 +346,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       apiKey, model, systemPrompt, userPrompt, source: active.source, cotality: cotalityNote, res,
     });
   }
+  if (provider === 'openrouter') {
+    return handleOpenRouter({
+      apiKey, model, systemPrompt, userPrompt, source: active.source, cotality: cotalityNote, res,
+    });
+  }
   return handleGemini({
     apiKey, model, systemPrompt, userPrompt, source: active.source, cotality: cotalityNote, res,
   });
@@ -357,7 +362,7 @@ async function handleGemini({
   apiKey, model, systemPrompt, userPrompt, source, cotality, res,
 }: {
   apiKey: string;
-  model: AIModelId;
+  model: string;
   systemPrompt: string;
   userPrompt: string;
   source: 'stored' | 'env';
@@ -497,7 +502,7 @@ async function handleDeepSeek({
   apiKey, model, systemPrompt, userPrompt, source, cotality, res,
 }: {
   apiKey: string;
-  model: AIModelId;
+  model: string;
   systemPrompt: string;
   userPrompt: string;
   source: 'stored' | 'env';
@@ -593,6 +598,82 @@ async function handleDeepSeek({
       error: `DeepSeek live benchmark research failed: ${msg}`,
       debug: { message: msg },
     });
+  }
+}
+
+/* ── OpenRouter handler (OpenAI-compatible; most free models lack web search) ─ */
+
+async function handleOpenRouter({
+  apiKey, model, systemPrompt, userPrompt, source, cotality, res,
+}: {
+  apiKey: string;
+  model: string;
+  systemPrompt: string;
+  userPrompt: string;
+  source: 'stored' | 'env';
+  cotality: CotalityNote;
+  res: VercelResponse;
+}) {
+  const apiModelName = toOpenRouterApiModel(model);
+  try {
+    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://feasibility.app',
+        'X-Title': 'Feasibility Model',
+      },
+      body: JSON.stringify({
+        model: apiModelName,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.2,
+        stream: false,
+      }),
+    });
+
+    if (!r.ok) {
+      const errText = await r.text().catch(() => '');
+      const debug = { status: r.status, body: errText.slice(0, 1000) };
+      if (r.status === 401) {
+        return res.status(500).json({ error: `OpenRouter API key is invalid (source: ${source}). Update it in Admin → AI Settings. Get a key at https://openrouter.ai/keys`, debug });
+      }
+      if (r.status === 402) {
+        return res.status(402).json({ error: 'OpenRouter: insufficient credits for this model. Pick a free model (Admin → AI Settings → Update models) or top up.', debug });
+      }
+      if (r.status === 429) {
+        return res.status(429).json({ error: 'OpenRouter rate limit reached. Wait a minute, or pick a different free model.', debug });
+      }
+      if (r.status === 404) {
+        return res.status(502).json({ error: `OpenRouter model "${apiModelName}" not found. Refresh the free-model list in Admin → AI Settings.`, debug });
+      }
+      return res.status(502).json({ error: `OpenRouter API error ${r.status}: ${errText || r.statusText}`, debug });
+    }
+
+    const data = await r.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const text = data.choices?.[0]?.message?.content ?? '';
+    const parsed = parseJsonResponse(text);
+    if (!parsed) {
+      return res.status(502).json({ error: 'OpenRouter response did not contain valid JSON. Some free models ignore JSON mode — try another model.', raw: text });
+    }
+    parsed.model = model;
+    parsed.timestamp = new Date().toISOString();
+    const augmented = parsed as ResearchResult & {
+      configSource?: string; provider?: string; groundingUsed?: boolean; webSearchSupported?: boolean;
+    };
+    augmented.configSource = source;
+    augmented.provider = 'openrouter';
+    augmented.groundingUsed = false;
+    augmented.webSearchSupported = false;
+    parsed.cotality = cotality;
+    return res.status(200).json(parsed);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    return res.status(500).json({ error: `OpenRouter live benchmark research failed: ${msg}`, debug: { message: msg } });
   }
 }
 

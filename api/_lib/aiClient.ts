@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import {
   toGeminiApiModel,
   toDeepSeekApiModel,
-  type AIModelId,
+  toOpenRouterApiModel,
   type AIProvider,
 } from './aiSettings';
 
@@ -28,7 +28,7 @@ export interface AIResearchResult {
   groundingSources: AIResearchSource[];
   groundingUsed: boolean;
   provider: AIProvider;
-  model: AIModelId;
+  model: string;
 }
 
 export class AIResearchError extends Error {
@@ -42,14 +42,16 @@ export class AIResearchError extends Error {
 
 export interface RunAIResearchInput {
   provider: AIProvider;
-  model: AIModelId;
+  model: string;
   apiKey: string;
   systemPrompt: string;
   userPrompt: string;
 }
 
 export async function runAIResearch(input: RunAIResearchInput): Promise<AIResearchResult> {
-  return input.provider === 'deepseek' ? runDeepSeek(input) : runGemini(input);
+  if (input.provider === 'deepseek') return runDeepSeek(input);
+  if (input.provider === 'openrouter') return runOpenRouter(input);
+  return runGemini(input);
 }
 
 /* ── Gemini (with Google Search grounding + quota fallback) ─────────────────── */
@@ -158,6 +160,52 @@ async function runDeepSeek({ apiKey, model, systemPrompt, userPrompt }: RunAIRes
   const json = parseJsonResponse(data.choices?.[0]?.message?.content ?? '');
   if (!json) throw new AIResearchError('DeepSeek response did not contain valid JSON.', 502);
   return { json, groundingSources: [], groundingUsed: false, provider: 'deepseek', model };
+}
+
+/* ── OpenRouter (OpenAI-compatible; most free models have no web search) ────── */
+
+async function runOpenRouter({ apiKey, model, systemPrompt, userPrompt }: RunAIResearchInput): Promise<AIResearchResult> {
+  const apiModelName = toOpenRouterApiModel(model);
+  let r: Response;
+  try {
+    r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        // Optional attribution headers used by OpenRouter for app ranking.
+        'HTTP-Referer': 'https://feasibility.app',
+        'X-Title': 'Feasibility Model',
+      },
+      body: JSON.stringify({
+        model: apiModelName,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        // Many (not all) models honour JSON mode; parseJsonResponse covers the rest.
+        response_format: { type: 'json_object' },
+        temperature: 0.2,
+        stream: false,
+      }),
+    });
+  } catch (e) {
+    throw new AIResearchError(`OpenRouter request failed: ${e instanceof Error ? e.message : 'network error'}`, 502);
+  }
+
+  if (!r.ok) {
+    const t = await r.text().catch(() => '');
+    if (r.status === 401) throw new AIResearchError('OpenRouter API key is invalid. Update it in Admin → AI Settings.', 500);
+    if (r.status === 402) throw new AIResearchError('OpenRouter: insufficient credits for this model. Pick a free model or top up.', 402);
+    if (r.status === 429) throw new AIResearchError('OpenRouter rate limit reached. Wait a minute, or pick a different free model.', 429);
+    if (r.status === 404) throw new AIResearchError(`OpenRouter model "${apiModelName}" not found. Refresh the free-model list in Admin → AI Settings.`, 502);
+    throw new AIResearchError(`OpenRouter API error ${r.status}: ${t.slice(0, 200)}`, 502);
+  }
+
+  const data = (await r.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const json = parseJsonResponse(data.choices?.[0]?.message?.content ?? '');
+  if (!json) throw new AIResearchError('OpenRouter response did not contain valid JSON. Some free models ignore JSON mode — try another.', 502);
+  return { json, groundingSources: [], groundingUsed: false, provider: 'openrouter', model };
 }
 
 /* ── Helpers ───────────────────────────────────────────────────────────────── */
