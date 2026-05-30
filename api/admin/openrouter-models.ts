@@ -34,7 +34,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Persist the cache when we have a place to store it.
   if (supabase) {
-    const base = stored ?? { provider: 'openrouter' as const, model: 'openrouter/auto', enabled: true, keys: {} };
+    const base = stored ?? { provider: 'openrouter' as const, model: 'openrouter/auto', enabled: true, useGrounding: true, autoFailover: true, keys: {} };
     try {
       await saveAISettings(supabase, { ...base, openrouterModels: models, openrouterModelsUpdatedAt: updatedAt });
     } catch { /* non-fatal — still return the freshly fetched list */ }

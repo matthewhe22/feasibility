@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { setCors } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
-import { resolveActiveSettings } from '../_lib/aiSettings';
+import { resolveProviderChain } from '../_lib/aiSettings';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
 import { runAIResearch, mergeSources, AIResearchError, type AIResearchSource } from '../_lib/aiClient';
 
@@ -146,8 +146,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const supabase = isSupabaseConfigured() ? getAdminSupabase() : null;
-  const active = await resolveActiveSettings(supabase);
-  if (!active) {
+  const resolved = await resolveProviderChain(supabase);
+  if (!resolved) {
     return res.status(503).json({
       error: 'AI research is not configured. An admin can set the API key and model in Admin → AI Settings, or set GEMINI_API_KEY.',
     });
@@ -190,29 +190,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   } catch { /* never block AI research on Cotality */ }
 
-  try {
-    const result = await runAIResearch({
-      provider: active.provider,
-      model: active.model,
-      apiKey: active.apiKey,
-      systemPrompt,
-      userPrompt,
-    });
+  // Run with auto-failover across configured providers (active first); on a
+  // quota 429 fall through to the next provider when enabled.
+  const errors: string[] = [];
+  for (let i = 0; i < resolved.chain.length; i++) {
+    const p = resolved.chain[i];
+    try {
+      const result = await runAIResearch({
+        provider: p.provider,
+        model: p.model,
+        apiKey: p.apiKey,
+        systemPrompt,
+        userPrompt,
+        useGrounding: resolved.useGrounding,
+      });
 
-    const declared = (result.json.sources as AIResearchSource[] | undefined);
-    const payload = {
-      ...result.json,
-      sources: mergeSources(result.groundingSources, declared),
-      model: active.model,
-      provider: result.provider,
-      groundingUsed: result.groundingUsed,
-      configSource: active.source,
-      cotality: cotalityNote,
-      timestamp: new Date().toISOString(),
-    };
-    return res.status(200).json(payload);
-  } catch (e) {
-    const status = e instanceof AIResearchError ? e.status : 500;
-    return res.status(status).json({ error: e instanceof Error ? e.message : 'Research failed.' });
+      const declared = (result.json.sources as AIResearchSource[] | undefined);
+      const payload: Record<string, unknown> = {
+        ...result.json,
+        sources: mergeSources(result.groundingSources, declared),
+        model: p.model,
+        provider: result.provider,
+        groundingUsed: result.groundingUsed,
+        configSource: p.source,
+        cotality: cotalityNote,
+        timestamp: new Date().toISOString(),
+      };
+      if (i > 0) payload.failoverNote = `Primary provider (${resolved.chain[0].provider}) was rate-limited; served by ${p.provider} instead.`;
+      return res.status(200).json(payload);
+    } catch (e) {
+      const status = e instanceof AIResearchError ? e.status : 500;
+      const msg = e instanceof Error ? e.message : 'Research failed.';
+      errors.push(`${p.provider}: ${msg}`);
+      if (status === 429 && resolved.autoFailover && i < resolved.chain.length - 1) continue;
+      return res.status(status).json({ error: msg, ...(errors.length > 1 ? { attempted: errors } : {}) });
+    }
   }
+  return res.status(429).json({ error: `All configured AI providers are rate-limited. ${errors.join(' | ')}`, attempted: errors });
 }

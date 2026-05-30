@@ -1,13 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { setCors } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
-import {
-  resolveActiveSettings,
-  toGeminiApiModel,
-  toDeepSeekApiModel,
-  toOpenRouterApiModel,
-} from '../_lib/aiSettings';
+import { resolveProviderChain } from '../_lib/aiSettings';
+import { runAIResearch, mergeSources, AIResearchError, type AIResearchSource } from '../_lib/aiClient';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
 
 /**
@@ -50,39 +45,6 @@ interface ResearchRequest {
    *  comparable-sales lookup to this specific suburb instead of the
    *  state × locationGrade average. */
   suburb?: string;
-}
-
-interface ResearchResult {
-  summary: string;
-  // Cost / construction
-  rateLow?: number;
-  rateHigh?: number;
-  totalLow?: number;
-  totalHigh?: number;
-  feeBreakdown?: Array<{
-    discipline: string;
-    percentLow: number;
-    percentHigh: number;
-    dollarLow?: number;
-    dollarHigh?: number;
-  }>;
-  // GRV
-  pricingBasis?: string;
-  perUnitLow?: number;
-  perUnitHigh?: number;
-  breakdown?: Array<{
-    label: string;
-    perUnitLow: number;
-    perUnitHigh: number;
-    pricingBasis?: string;
-    note?: string;
-  }>;
-  // Common
-  sources: Array<{ title: string; url: string; snippet?: string }>;
-  model: string;
-  timestamp: string;
-  /** Whether/how real Cotality property data was used to ground the result. */
-  cotality?: CotalityNote;
 }
 
 interface CotalityNote {
@@ -275,13 +237,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
   const supabase = isSupabaseConfigured() ? getAdminSupabase() : null;
-  const active = await resolveActiveSettings(supabase);
-  if (!active) {
+  const resolved = await resolveProviderChain(supabase);
+  if (!resolved) {
     return res.status(503).json({
       error: 'AI research is not configured. An admin can set the API key and model in the Admin Portal → AI Settings, or set the GEMINI_API_KEY env var on the server.',
     });
   }
-  const apiKey = active.apiKey;
 
   let body: ResearchRequest;
   try {
@@ -303,8 +264,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'buildingType, finishQuality, and siteComplexity are required for construction/professional modes' });
   }
 
-  const model = active.model;
-  const provider = active.provider;
   const systemPrompt = body.mode === 'grv' ? SYSTEM_PROMPT_GRV : SYSTEM_PROMPT_COST;
   let userPrompt = buildUserPrompt(body);
 
@@ -341,358 +300,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     /* never block AI research on Cotality */
   }
 
-  if (provider === 'deepseek') {
-    return handleDeepSeek({
-      apiKey, model, systemPrompt, userPrompt, source: active.source, cotality: cotalityNote, res,
-    });
+  // ── Run with auto-failover across configured providers ────────────────────
+  // The active provider is tried first; on a quota/rate-limit (429) the request
+  // fails over to the next configured provider (when autoFailover is on). The
+  // Gemini Google-Search grounding is skipped entirely when useGrounding is off
+  // (avoids the scarce free-tier grounding quota).
+  const errors: string[] = [];
+  let failoverNote: string | undefined;
+  for (let i = 0; i < resolved.chain.length; i++) {
+    const p = resolved.chain[i];
+    try {
+      const result = await runAIResearch({
+        provider: p.provider,
+        model: p.model,
+        apiKey: p.apiKey,
+        systemPrompt,
+        userPrompt,
+        useGrounding: resolved.useGrounding,
+      });
+
+      const declared = result.json.sources as Array<{ title: string; url: string; snippet?: string }> | undefined;
+      const payload: Record<string, unknown> = {
+        ...result.json,
+        sources: mergeSources(result.groundingSources, declared as AIResearchSource[] | undefined),
+        model: p.model,
+        provider: result.provider,
+        groundingUsed: result.groundingUsed,
+        configSource: p.source,
+        cotality: cotalityNote,
+        timestamp: new Date().toISOString(),
+      };
+      if (i > 0) {
+        failoverNote = `Primary provider (${resolved.chain[0].provider}) was rate-limited; served by ${p.provider} instead.`;
+      }
+      if (failoverNote) payload.failoverNote = failoverNote;
+      return res.status(200).json(payload);
+    } catch (e) {
+      const status = e instanceof AIResearchError ? e.status : 500;
+      const msg = e instanceof Error ? e.message : 'Unknown error';
+      errors.push(`${p.provider}: ${msg}`);
+      // Only fail over on quota / rate-limit (429) when enabled and another
+      // provider remains. Any other error is returned immediately.
+      const isQuota = status === 429;
+      const hasNext = i < resolved.chain.length - 1;
+      if (isQuota && resolved.autoFailover && hasNext) continue;
+      return res.status(status).json({
+        error: msg,
+        ...(errors.length > 1 ? { attempted: errors } : {}),
+      });
+    }
   }
-  if (provider === 'openrouter') {
-    return handleOpenRouter({
-      apiKey, model, systemPrompt, userPrompt, source: active.source, cotality: cotalityNote, res,
-    });
-  }
-  return handleGemini({
-    apiKey, model, systemPrompt, userPrompt, source: active.source, cotality: cotalityNote, res,
+  // Exhausted the chain (all 429).
+  return res.status(429).json({
+    error: `All configured AI providers are rate-limited. ${errors.join(' | ')}`,
+    attempted: errors,
   });
 }
 
-/* ── Gemini handler ──────────────────────────────────────────────────────── */
-
-async function handleGemini({
-  apiKey, model, systemPrompt, userPrompt, source, cotality, res,
-}: {
-  apiKey: string;
-  model: string;
-  systemPrompt: string;
-  userPrompt: string;
-  source: 'stored' | 'env';
-  cotality: CotalityNote;
-  res: VercelResponse;
-}) {
-  const client = new GoogleGenerativeAI(apiKey);
-  const apiModelName = toGeminiApiModel(model);
-
-  // Google Search grounding tool name differs by model generation:
-  //   - Gemini 1.5.x → googleSearchRetrieval
-  //   - Gemini 2.0+  → googleSearch
-  const isGen2 = apiModelName.startsWith('gemini-2');
-  const groundingTool = isGen2
-    ? { googleSearch: {} }
-    : { googleSearchRetrieval: {} };
-
-  const callGemini = async (useGrounding: boolean) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const config: any = { model: apiModelName, systemInstruction: systemPrompt };
-    if (useGrounding) config.tools = [groundingTool];
-    const genModel = client.getGenerativeModel(config);
-    return genModel.generateContent(userPrompt);
-  };
-
-  let groundingUsed = true;
-  let groundingFallbackReason: string | null = null;
-
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let response: any;
-    try {
-      response = await callGemini(true);
-    } catch (err) {
-      const m = err instanceof Error ? err.message : '';
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const c = (err as any)?.code || (err as any)?.status || '';
-      const isQuotaOrPerm =
-        m.includes('RESOURCE_EXHAUSTED') || /\bquota\b/i.test(m) || /\b429\b/.test(m) || c === 429 ||
-        m.includes('PERMISSION_DENIED') || /\b403\b/.test(m) || c === 403;
-      if (!isQuotaOrPerm) throw err;
-      groundingUsed = false;
-      groundingFallbackReason = m || 'Google Search grounding quota / permission error';
-      response = await callGemini(false);
-    }
-
-    const text = response.response.text();
-    const parsed = parseJsonResponse(text);
-    if (!parsed) {
-      return res.status(502).json({
-        error: 'AI response did not contain valid JSON.',
-        raw: text,
-      });
-    }
-
-    // Merge grounding citations into the sources list.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const candidates = (response.response as any)?.candidates ?? [];
-    const grounding = candidates[0]?.groundingMetadata;
-    if (grounding) {
-      const chunks = grounding.groundingChunks ?? [];
-      const groundingSources = chunks
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .map((c: any) => c?.web)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .filter((w: any) => w?.uri)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .map((w: any) => ({ title: w.title || w.uri, url: w.uri }));
-      if (groundingSources.length > 0) {
-        const seen = new Set(groundingSources.map((s: { url: string }) => s.url));
-        const extra = (parsed.sources ?? []).filter(s => !seen.has(s.url));
-        parsed.sources = [...groundingSources, ...extra];
-      }
-    }
-
-    parsed.model = model;
-    parsed.timestamp = new Date().toISOString();
-    const augmented = parsed as ResearchResult & {
-      configSource?: string;
-      provider?: string;
-      groundingUsed?: boolean;
-      groundingFallbackReason?: string;
-    };
-    augmented.configSource = source;
-    augmented.provider = 'gemini';
-    augmented.groundingUsed = groundingUsed;
-    if (groundingFallbackReason) augmented.groundingFallbackReason = groundingFallbackReason;
-    parsed.cotality = cotality;
-
-    return res.status(200).json(parsed);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const errAny = err as any;
-    const errCode = errAny?.code || errAny?.status || errAny?.statusCode || '';
-    const detail = errAny?.errorDetails ?? errAny?.response?.error ?? null;
-
-    if (msg.includes('API key') || msg.includes('authentication') || msg.includes('401') || msg.includes('UNAUTHENTICATED')) {
-      return res.status(500).json({
-        error: `Google Gemini API key is invalid (source: ${source}). Update it in the Admin Portal → AI Settings. Get a free key at https://aistudio.google.com/apikey`,
-        debug: { code: errCode, message: msg },
-      });
-    }
-    if (msg.includes('NOT_FOUND') || msg.includes('not found') || /\b404\b/.test(msg) || errCode === 404) {
-      return res.status(502).json({
-        error: `Gemini model "${apiModelName}" was not found (404). The selected model may have been renamed or retired by Google. Try a different model in Admin → AI Settings, or check https://ai.google.dev/gemini-api/docs/models for current model IDs.`,
-        debug: { code: errCode, message: msg },
-      });
-    }
-    if (msg.includes('RESOURCE_EXHAUSTED') || /\bquota\b/i.test(msg) || /\b429\b/.test(msg) || errCode === 429) {
-      const onFlash = apiModelName === 'gemini-2.0-flash' || apiModelName === 'gemini-1.5-flash';
-      const hint = onFlash
-        ? `Even on Gemini 2.0/1.5 Flash, the project has hit its quota (free tier: 15 req/min, 1,500 req/day for 2.0 Flash). Wait a minute and retry, or enable billing at https://console.cloud.google.com/ to raise the cap. As a free alternative, switch to "DeepSeek Chat" in Admin → AI Settings (very low cost, no Google quota).`
-        : `Per-model quota exhausted for "${apiModelName}". Switch to "Gemini 2.0 Flash" or "DeepSeek Chat" in Admin → AI Settings, or enable billing at https://console.cloud.google.com/.`;
-      return res.status(429).json({
-        error: `Google Gemini API quota / rate limit reached. ${hint}`,
-        debug: { code: errCode, message: msg, detail },
-      });
-    }
-    if (msg.includes('PERMISSION_DENIED') || /\b403\b/.test(msg) || errCode === 403) {
-      return res.status(502).json({
-        error: `Google Gemini permission denied. The API key may not have access to "${apiModelName}", or the API may not be enabled. Check https://aistudio.google.com/ and enable "Generative Language API" in the Google Cloud project.`,
-        debug: { code: errCode, message: msg, detail },
-      });
-    }
-
-    return res.status(500).json({
-      error: `Live benchmark research failed: ${msg}`,
-      debug: { code: errCode, message: msg, detail },
-    });
-  }
-}
-
-/* ── DeepSeek handler ────────────────────────────────────────────────────── */
-
-async function handleDeepSeek({
-  apiKey, model, systemPrompt, userPrompt, source, cotality, res,
-}: {
-  apiKey: string;
-  model: string;
-  systemPrompt: string;
-  userPrompt: string;
-  source: 'stored' | 'env';
-  cotality: CotalityNote;
-  res: VercelResponse;
-}) {
-  const apiModelName = toDeepSeekApiModel(model);
-
-  try {
-    const r = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: apiModelName,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user',   content: userPrompt   },
-        ],
-        // DeepSeek supports OpenAI-style structured JSON output.
-        response_format: { type: 'json_object' },
-        // Reasoner uses chain-of-thought; chat is faster.
-        temperature: 0.2,
-        stream: false,
-      }),
-    });
-
-    if (!r.ok) {
-      const errText = await r.text().catch(() => '');
-      const debug = { status: r.status, body: errText.slice(0, 1000) };
-      if (r.status === 401) {
-        return res.status(500).json({
-          error: `DeepSeek API key is invalid (source: ${source}). Update it in the Admin Portal → AI Settings. Get a key at https://platform.deepseek.com/api_keys`,
-          debug,
-        });
-      }
-      if (r.status === 402) {
-        return res.status(402).json({
-          error: 'DeepSeek API: insufficient balance. Top up at https://platform.deepseek.com/top_up.',
-          debug,
-        });
-      }
-      if (r.status === 429) {
-        return res.status(429).json({
-          error: 'DeepSeek API rate limit reached. Wait a minute and retry.',
-          debug,
-        });
-      }
-      if (r.status === 404) {
-        return res.status(502).json({
-          error: `DeepSeek model "${apiModelName}" was not found. Check https://api-docs.deepseek.com/ for current model IDs.`,
-          debug,
-        });
-      }
-      return res.status(502).json({
-        error: `DeepSeek API error ${r.status}: ${errText || r.statusText}`,
-        debug,
-      });
-    }
-
-    const data = await r.json() as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const text = data.choices?.[0]?.message?.content ?? '';
-    const parsed = parseJsonResponse(text);
-    if (!parsed) {
-      return res.status(502).json({
-        error: 'DeepSeek response did not contain valid JSON.',
-        raw: text,
-      });
-    }
-
-    parsed.model = model;
-    parsed.timestamp = new Date().toISOString();
-    const augmented = parsed as ResearchResult & {
-      configSource?: string;
-      provider?: string;
-      groundingUsed?: boolean;
-      webSearchSupported?: boolean;
-    };
-    augmented.configSource = source;
-    augmented.provider = 'deepseek';
-    augmented.groundingUsed = false;
-    augmented.webSearchSupported = false; // DeepSeek has no built-in web search
-    parsed.cotality = cotality;
-
-    return res.status(200).json(parsed);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    return res.status(500).json({
-      error: `DeepSeek live benchmark research failed: ${msg}`,
-      debug: { message: msg },
-    });
-  }
-}
-
-/* ── OpenRouter handler (OpenAI-compatible; most free models lack web search) ─ */
-
-async function handleOpenRouter({
-  apiKey, model, systemPrompt, userPrompt, source, cotality, res,
-}: {
-  apiKey: string;
-  model: string;
-  systemPrompt: string;
-  userPrompt: string;
-  source: 'stored' | 'env';
-  cotality: CotalityNote;
-  res: VercelResponse;
-}) {
-  const apiModelName = toOpenRouterApiModel(model);
-  try {
-    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-        'HTTP-Referer': 'https://feasibility.app',
-        'X-Title': 'Feasibility Model',
-      },
-      body: JSON.stringify({
-        model: apiModelName,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.2,
-        stream: false,
-      }),
-    });
-
-    if (!r.ok) {
-      const errText = await r.text().catch(() => '');
-      const debug = { status: r.status, body: errText.slice(0, 1000) };
-      if (r.status === 401) {
-        return res.status(500).json({ error: `OpenRouter API key is invalid (source: ${source}). Update it in Admin → AI Settings. Get a key at https://openrouter.ai/keys`, debug });
-      }
-      if (r.status === 402) {
-        return res.status(402).json({ error: 'OpenRouter: insufficient credits for this model. Pick a free model (Admin → AI Settings → Update models) or top up.', debug });
-      }
-      if (r.status === 429) {
-        return res.status(429).json({ error: 'OpenRouter rate limit reached. Wait a minute, or pick a different free model.', debug });
-      }
-      if (r.status === 404) {
-        return res.status(502).json({ error: `OpenRouter model "${apiModelName}" not found. Refresh the free-model list in Admin → AI Settings.`, debug });
-      }
-      return res.status(502).json({ error: `OpenRouter API error ${r.status}: ${errText || r.statusText}`, debug });
-    }
-
-    const data = await r.json() as { choices?: Array<{ message?: { content?: string } }> };
-    const text = data.choices?.[0]?.message?.content ?? '';
-    const parsed = parseJsonResponse(text);
-    if (!parsed) {
-      return res.status(502).json({ error: 'OpenRouter response did not contain valid JSON. Some free models ignore JSON mode — try another model.', raw: text });
-    }
-    parsed.model = model;
-    parsed.timestamp = new Date().toISOString();
-    const augmented = parsed as ResearchResult & {
-      configSource?: string; provider?: string; groundingUsed?: boolean; webSearchSupported?: boolean;
-    };
-    augmented.configSource = source;
-    augmented.provider = 'openrouter';
-    augmented.groundingUsed = false;
-    augmented.webSearchSupported = false;
-    parsed.cotality = cotality;
-    return res.status(200).json(parsed);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    return res.status(500).json({ error: `OpenRouter live benchmark research failed: ${msg}`, debug: { message: msg } });
-  }
-}
-
-/* ── Helpers ────────────────────────────────────────────────────────────── */
-
-/** Parse a JSON response, stripping markdown fences and extracting first {...} block as a fallback. */
-function parseJsonResponse(text: string): ResearchResult | null {
-  const cleaned = text
-    .replace(/^\s*```(?:json)?\s*/i, '')
-    .replace(/\s*```\s*$/i, '')
-    .trim();
-
-  try {
-    return JSON.parse(cleaned) as ResearchResult;
-  } catch {
-    const m = cleaned.match(/\{[\s\S]*\}/);
-    if (m) {
-      try { return JSON.parse(m[0]) as ResearchResult; } catch { /* ignore */ }
-    }
-    return null;
-  }
-}

@@ -131,6 +131,12 @@ export interface StoredAISettings {
   provider: AIProvider;
   model: string;
   enabled: boolean;
+  /** When true (default), Gemini requests use Google Search grounding. Turn off
+   *  to avoid the scarce free-tier grounding quota (no live web search). */
+  useGrounding: boolean;
+  /** When true (default), on a quota/rate-limit error the active provider fails
+   *  over to the next configured provider. */
+  autoFailover: boolean;
   /** Per-provider API keys (plaintext, server-only). */
   keys: Partial<Record<AIProvider, string>>;
   /** Cached OpenRouter free-model list (from the last "Update models"). */
@@ -188,6 +194,8 @@ function normalizeStored(raw: unknown): StoredAISettings | null {
     provider,
     model: model || DEFAULT_MODEL_FOR[provider],
     enabled: r.enabled !== false,
+    useGrounding: r.useGrounding !== false,   // default ON
+    autoFailover: r.autoFailover !== false,   // default ON
     keys,
     openrouterModels: orModels,
     openrouterModelsUpdatedAt: typeof r.openrouterModelsUpdatedAt === 'string' ? r.openrouterModelsUpdatedAt : undefined,
@@ -255,32 +263,77 @@ function envKey(p: AIProvider): string | undefined { return process.env[ENV_KEY[
  *   2. If the selected provider has no key, fall back to any provider that does
  *      (stored first, then env), using that provider's default/selected model.
  */
-export async function resolveActiveSettings(
-  supabase: SupabaseClient | null,
-): Promise<{ apiKey: string; model: string; provider: AIProvider; source: 'stored' | 'env' } | null> {
+export interface ResolvedProvider {
+  apiKey: string;
+  model: string;
+  provider: AIProvider;
+  source: 'stored' | 'env';
+}
+
+export interface ResolvedChain {
+  /** Usable providers in priority order: active provider first, then others
+   *  that have a key (for auto-failover). At least one entry. */
+  chain: ResolvedProvider[];
+  useGrounding: boolean;
+  autoFailover: boolean;
+}
+
+/**
+ * Build the ordered list of usable providers. The active (stored-selected)
+ * provider comes first with its selected model; remaining providers that have a
+ * key follow with their default model, so the caller can fail over on quota.
+ */
+export async function resolveProviderChain(supabase: SupabaseClient | null): Promise<ResolvedChain | null> {
   const stored = supabase ? await loadAISettings(supabase) : null;
+  const order: AIProvider[] = ['gemini', 'deepseek', 'openrouter'];
+  const chain: ResolvedProvider[] = [];
+  const seen = new Set<AIProvider>();
+
+  const keyFor = (p: AIProvider): { key: string; source: 'stored' | 'env' } | null => {
+    const sk = stored?.keys?.[p];
+    if (sk) return { key: sk, source: 'stored' };
+    const ek = envKey(p);
+    if (ek) return { key: ek, source: 'env' };
+    return null;
+  };
 
   if (stored && stored.enabled) {
     const p = stored.provider;
-    const sk = stored.keys[p];
-    if (sk) return { apiKey: sk, model: stored.model || DEFAULT_MODEL_FOR[p], provider: p, source: 'stored' };
-    const ek = envKey(p);
-    if (ek) return { apiKey: ek, model: stored.model || DEFAULT_MODEL_FOR[p], provider: p, source: 'env' };
-    // Selected provider has no key — fall back to another stored key.
-    for (const fb of ['gemini', 'deepseek', 'openrouter'] as AIProvider[]) {
-      if (stored.keys[fb]) return { apiKey: stored.keys[fb]!, model: DEFAULT_MODEL_FOR[fb], provider: fb, source: 'stored' };
+    const k = keyFor(p);
+    if (k) {
+      chain.push({ apiKey: k.key, model: stored.model || DEFAULT_MODEL_FOR[p], provider: p, source: k.source });
+      seen.add(p);
+    }
+  }
+  // Append remaining providers that have a key (failover candidates).
+  for (const p of order) {
+    if (seen.has(p)) continue;
+    const k = keyFor(p);
+    if (k) {
+      const m = (stored?.provider === p && stored.model) ? stored.model
+        : (process.env[ENV_MODEL[p]]?.trim() || DEFAULT_MODEL_FOR[p]);
+      chain.push({ apiKey: k.key, model: m, provider: p, source: k.source });
+      seen.add(p);
     }
   }
 
-  // No usable stored settings — try env vars in priority order.
-  for (const p of ['gemini', 'deepseek', 'openrouter'] as AIProvider[]) {
-    const ek = envKey(p);
-    if (ek) {
-      const m = process.env[ENV_MODEL[p]]?.trim() || DEFAULT_MODEL_FOR[p];
-      return { apiKey: ek, model: m, provider: p, source: 'env' };
-    }
-  }
-  return null;
+  if (chain.length === 0) return null;
+  return {
+    chain,
+    useGrounding: stored?.useGrounding !== false,
+    autoFailover: stored?.autoFailover !== false,
+  };
+}
+
+/**
+ * Resolve the single active key + model + provider (back-compat thin wrapper
+ * over resolveProviderChain — returns the first/active entry).
+ */
+export async function resolveActiveSettings(
+  supabase: SupabaseClient | null,
+): Promise<ResolvedProvider | null> {
+  const r = await resolveProviderChain(supabase);
+  return r ? r.chain[0] : null;
 }
 
 /* ── OpenRouter free-model discovery ───────────────────────────────────────── */

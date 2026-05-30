@@ -51,6 +51,8 @@ export function AISettingsPage() {
   const [provider, setProvider] = useState<AIProvider>('gemini');
   const [model, setModel] = useState<string>('gemini-2-0-flash');
   const [enabled, setEnabled] = useState(true);
+  const [useGrounding, setUseGrounding] = useState(true);
+  const [autoFailover, setAutoFailover] = useState(true);
   // Per-provider draft key replacements (blank = keep stored).
   const [keyInputs, setKeyInputs] = useState<Record<AIProvider, string>>({ gemini: '', deepseek: '', openrouter: '' });
   const [showKey, setShowKey] = useState(false);
@@ -72,6 +74,8 @@ export function AISettingsPage() {
         setProvider(s.provider);
         setModel(s.model);
         setEnabled(s.enabled);
+        setUseGrounding(s.useGrounding);
+        setAutoFailover(s.autoFailover);
       })
       .catch((e: Error) => !cancelled && setLoadError(e.message));
     return () => { cancelled = true; };
@@ -112,7 +116,7 @@ export function AISettingsPage() {
     try {
       const keys: Partial<Record<AIProvider, string>> = {};
       for (const p of PROVIDER_ORDER) if (keyInputs[p].trim()) keys[p] = keyInputs[p].trim();
-      const patch = { provider, model, enabled, ...(Object.keys(keys).length ? { keys } : {}) };
+      const patch = { provider, model, enabled, useGrounding, autoFailover, ...(Object.keys(keys).length ? { keys } : {}) };
       await updateAISettings(patch);
       // Refetch to get fresh previews / providers status.
       const fresh = await fetchAISettings();
@@ -202,6 +206,7 @@ export function AISettingsPage() {
   const info = PROVIDERS[provider];
   const dirty =
     provider !== settings.provider || model !== settings.model || enabled !== settings.enabled ||
+    useGrounding !== settings.useGrounding || autoFailover !== settings.autoFailover ||
     PROVIDER_ORDER.some(p => keyInputs[p].trim() !== '');
 
   return (
@@ -316,6 +321,30 @@ export function AISettingsPage() {
               {modelOptions.map(opt => <ModelOption key={opt.id} option={opt} selected={model === opt.id} onSelect={() => setModel(opt.id)} />)}
             </div>
           )}
+        </Card>
+
+        {/* Quota & reliability */}
+        <Card title="Quota & reliability">
+          <label className="flex items-start gap-3 cursor-pointer mb-3">
+            <input type="checkbox" checked={useGrounding} onChange={e => setUseGrounding(e.target.checked)} className="w-4 h-4 mt-0.5" />
+            <span className="text-sm text-gray-200">Use Google Search grounding (Gemini)
+              <span className="block text-xs text-gray-500 mt-0.5">
+                ON = Gemini searches the live web (best for current data), but uses the small free-tier
+                <strong className="text-gray-400"> grounding quota</strong> that can hit "quota / rate limit" even on light use.
+                Turn OFF to run Gemini without web search (answers from training data) and avoid that quota.
+                No effect on DeepSeek / OpenRouter.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input type="checkbox" checked={autoFailover} onChange={e => setAutoFailover(e.target.checked)} className="w-4 h-4 mt-0.5" />
+            <span className="text-sm text-gray-200">Auto-failover on rate limit
+              <span className="block text-xs text-gray-500 mt-0.5">
+                When the active provider is rate-limited (429), automatically retry the request on the next
+                provider that has a key (e.g. Gemini → DeepSeek). The result notes when a fallback was used.
+              </span>
+            </span>
+          </label>
         </Card>
 
         {/* Enable toggle */}

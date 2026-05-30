@@ -149,6 +149,8 @@ export interface AISettings {
   provider: AIProvider;
   model: string;
   enabled: boolean;
+  useGrounding: boolean;     // Gemini Google-Search grounding on/off
+  autoFailover: boolean;     // fail over to another provider on quota 429
   hasKey: boolean;            // active provider has a usable key
   anyKey: boolean;           // any provider has a usable key
   providers: ProviderKeyStatus[];
@@ -161,6 +163,8 @@ export interface AISettingsPatch {
   provider?: AIProvider;
   model?: string;
   enabled?: boolean;
+  useGrounding?: boolean;
+  autoFailover?: boolean;
   keys?: Partial<Record<AIProvider, string>>;
 }
 

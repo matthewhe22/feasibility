@@ -55,6 +55,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       provider: activeProvider,
       model: stored?.model ?? 'gemini-2-0-flash',
       enabled: stored?.enabled ?? true,
+      useGrounding: stored?.useGrounding ?? true,
+      autoFailover: stored?.autoFailover ?? true,
       hasKey: activeHasKey,
       anyKey,
       providers,
@@ -67,6 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'POST') {
     let body: {
       provider?: string; model?: string; enabled?: boolean;
+      useGrounding?: boolean; autoFailover?: boolean;
       keys?: Partial<Record<AIProvider, string>>;
       test?: boolean; key?: string;
     };
@@ -128,6 +131,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       provider: (body.provider as AIProvider) ?? existing?.provider ?? 'gemini',
       model: body.model ?? existing?.model ?? 'gemini-2-0-flash',
       enabled: body.enabled ?? existing?.enabled ?? true,
+      useGrounding: body.useGrounding ?? existing?.useGrounding ?? true,
+      autoFailover: body.autoFailover ?? existing?.autoFailover ?? true,
       keys,
       openrouterModels: existing?.openrouterModels,
       openrouterModelsUpdatedAt: existing?.openrouterModelsUpdatedAt,
@@ -139,6 +144,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       provider: next.provider,
       model: next.model,
       enabled: next.enabled,
+      useGrounding: next.useGrounding,
+      autoFailover: next.autoFailover,
       providers: PROVIDERS.map(p => ({ provider: p, hasStoredKey: Boolean(keys[p]), keyPreview: keys[p] ? maskKey(keys[p]!) : '' })),
     });
   }

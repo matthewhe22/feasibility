@@ -46,6 +46,9 @@ export interface RunAIResearchInput {
   apiKey: string;
   systemPrompt: string;
   userPrompt: string;
+  /** Gemini only: use Google Search grounding (default true). Set false to skip
+   *  the scarce free-tier grounding quota and run plain (no live web search). */
+  useGrounding?: boolean;
 }
 
 export async function runAIResearch(input: RunAIResearchInput): Promise<AIResearchResult> {
@@ -56,24 +59,28 @@ export async function runAIResearch(input: RunAIResearchInput): Promise<AIResear
 
 /* ── Gemini (with Google Search grounding + quota fallback) ─────────────────── */
 
-async function runGemini({ apiKey, model, systemPrompt, userPrompt }: RunAIResearchInput): Promise<AIResearchResult> {
+async function runGemini({ apiKey, model, systemPrompt, userPrompt, useGrounding = true }: RunAIResearchInput): Promise<AIResearchResult> {
   const client = new GoogleGenerativeAI(apiKey);
   const apiModelName = toGeminiApiModel(model);
   const isGen2 = apiModelName.startsWith('gemini-2');
   const groundingTool = isGen2 ? { googleSearch: {} } : { googleSearchRetrieval: {} };
 
-  const call = async (useGrounding: boolean) => {
+  const call = async (grounding: boolean) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const config: any = { model: apiModelName, systemInstruction: systemPrompt };
-    if (useGrounding) config.tools = [groundingTool];
+    if (grounding) config.tools = [groundingTool];
     return client.getGenerativeModel(config).generateContent(userPrompt);
   };
 
-  let groundingUsed = true;
+  // When grounding is disabled by the admin, skip it entirely — this avoids the
+  // scarce free-tier Google-Search grounding quota that 429s even on light use.
+  let groundingUsed = useGrounding;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let response: any;
   try {
-    try {
+    if (!useGrounding) {
+      response = await call(false);
+    } else try {
       response = await call(true);
     } catch (err) {
       const m = err instanceof Error ? err.message : '';
