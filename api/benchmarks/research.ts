@@ -4,6 +4,7 @@ import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
 import { resolveProviderChain } from '../_lib/aiSettings';
 import { runAIResearch, mergeSources, AIResearchError, type AIResearchSource } from '../_lib/aiClient';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
+import { researchCacheKey, getCachedResearch, setCachedResearch } from '../_lib/researchCache';
 
 /**
  * POST /api/benchmarks/research
@@ -300,6 +301,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     /* never block AI research on Cotality */
   }
 
+  // ── Response cache (minimise Gemini queries) ──────────────────────────────
+  // An identical request (same profile + provider/model + grounding + Cotality)
+  // returns the prior answer without calling the model at all. Benchmarks are
+  // stable hour-to-hour, so this is the primary lever against the scarce
+  // free-tier search quota. Bypass with { refresh: true } in the body.
+  const head = resolved.chain[0];
+  const cacheKey = researchCacheKey({
+    endpoint: 'benchmarks',
+    body,
+    provider: head?.provider,
+    model: head?.model,
+    grounding: resolved.useGrounding,
+    cotality: cotalityNote.used,
+  });
+  const refresh = (body as ResearchRequest & { refresh?: boolean }).refresh === true;
+  if (!refresh) {
+    const cached = getCachedResearch(cacheKey);
+    if (cached) return res.status(200).json(cached);
+  }
+
   // ── Run with auto-failover across configured providers ────────────────────
   // The active provider is tried first; on a quota/rate-limit (429) the request
   // fails over to the next configured provider (when autoFailover is on). The
@@ -334,6 +355,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         failoverNote = `Primary provider (${resolved.chain[0].provider}) was rate-limited; served by ${p.provider} instead.`;
       }
       if (failoverNote) payload.failoverNote = failoverNote;
+      setCachedResearch(cacheKey, payload);
       return res.status(200).json(payload);
     } catch (e) {
       const status = e instanceof AIResearchError ? e.status : 500;

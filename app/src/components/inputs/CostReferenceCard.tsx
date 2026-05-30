@@ -15,6 +15,7 @@ import {
   type BenchmarkInputs,
 } from '../../utils/costBenchmarks';
 import { formatCurrency, formatMillions, formatPercent } from '../../utils';
+import { researchKey, getCachedResearch, setCachedResearch } from '../../utils/researchCache';
 
 type Mode = 'construction' | 'professional';
 
@@ -118,7 +119,7 @@ export function CostReferenceCard({
     return (refRate - benchmark.rateMid) / benchmark.rateMid;
   }, [benchmark, currentRate, currentTotal, gfa]);
 
-  const runLiveResearch = async () => {
+  const runLiveResearch = async (forceRefresh = false) => {
     setLiveLoading(true);
     setLiveError(null);
     setLiveConstruction(null);
@@ -135,16 +136,31 @@ export function CostReferenceCard({
         units: units || undefined,
         contractValue: mode === 'professional' ? (contractValue || currentTotal || undefined) : undefined,
       };
+
+      // Serve from the durable local cache first so an identical request never
+      // re-hits the rate-limited Gemini free tier. "Refresh" bypasses it.
+      const key = researchKey(body);
+      if (!forceRefresh) {
+        const cached = getCachedResearch<ConstructionResearch | ProfessionalResearch>(key);
+        if (cached) {
+          const tagged = { ...cached, cached: true };
+          if (mode === 'construction') setLiveConstruction(tagged as ConstructionResearch);
+          else setLiveProfessional(tagged as ProfessionalResearch);
+          return;
+        }
+      }
+
       const r = await fetch('/api/benchmarks/research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(forceRefresh ? { ...body, refresh: true } : body),
       });
       if (!r.ok) {
         const err = await r.json().catch(() => ({ error: r.statusText }));
         throw new Error(err.error || `HTTP ${r.status}`);
       }
       const data = await r.json();
+      setCachedResearch(key, data);
       if (mode === 'construction') setLiveConstruction(data as ConstructionResearch);
       else setLiveProfessional(data as ProfessionalResearch);
     } catch (e) {
@@ -537,10 +553,12 @@ function LiveResearchPanel({
   error: string | null;
   constructionResult: ConstructionResearch | null;
   professionalResult: ProfessionalResearch | null;
-  onRun: () => void;
+  onRun: (forceRefresh?: boolean) => void;
   gfa: number;
   contractValue: number;
 }) {
+  const result = mode === 'construction' ? constructionResult : professionalResult;
+  const isCached = (result as { cached?: boolean } | null)?.cached === true;
   return (
     <div className="mt-4 pt-3 border-t border-blue-200">
       <div className="flex items-center gap-2 mb-2">
@@ -549,12 +567,27 @@ function LiveResearchPanel({
         </p>
         <button
           type="button"
-          onClick={onRun}
+          onClick={() => onRun(false)}
           disabled={loading}
           className="text-[11px] bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white px-3 py-1 rounded"
         >
           {loading ? 'Researching…' : 'Research live benchmarks'}
         </button>
+        {result && !loading && (
+          <button
+            type="button"
+            onClick={() => onRun(true)}
+            title="Bypass the cached result and re-query the AI (uses Gemini quota)"
+            className="text-[11px] border border-purple-300 text-purple-700 hover:bg-purple-50 px-2 py-1 rounded"
+          >
+            ↻ Refresh
+          </button>
+        )}
+        {isCached && (
+          <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+            cached
+          </span>
+        )}
         <span className="text-[10px] text-gray-500 italic ml-auto">
           Uses Admin → AI Settings (Gemini API key)
         </span>

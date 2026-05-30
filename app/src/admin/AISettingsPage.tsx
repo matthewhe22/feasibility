@@ -185,7 +185,7 @@ export function AISettingsPage() {
       const r = await fetch('/api/benchmarks/research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'construction', buildingType: 'High-rise apartments (15+ storeys)', storeys: 20, state: 'NSW', finishQuality: 'standard', siteComplexity: 'moderate', gfa: 10000 }),
+        body: JSON.stringify({ mode: 'construction', buildingType: 'High-rise apartments (15+ storeys)', storeys: 20, state: 'NSW', finishQuality: 'standard', siteComplexity: 'moderate', gfa: 10000, refresh: true }),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);

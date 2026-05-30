@@ -4,6 +4,7 @@ import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
 import { resolveProviderChain } from '../_lib/aiSettings';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
 import { runAIResearch, mergeSources, AIResearchError, type AIResearchSource } from '../_lib/aiClient';
+import { researchCacheKey, getCachedResearch, setCachedResearch } from '../_lib/researchCache';
 
 /**
  * POST /api/research/retirement-village
@@ -190,6 +191,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   } catch { /* never block AI research on Cotality */ }
 
+  // Response cache — identical research returns the prior answer without
+  // calling the model, sparing the scarce Gemini search quota. Bypass with
+  // { refresh: true }.
+  const head = resolved.chain[0];
+  const cacheKey = researchCacheKey({
+    endpoint: 'retirement-village',
+    body,
+    provider: head?.provider,
+    model: head?.model,
+    grounding: resolved.useGrounding,
+    cotality: cotalityNote.used,
+  });
+  if ((body as RVRequest & { refresh?: boolean }).refresh !== true) {
+    const cached = getCachedResearch(cacheKey);
+    if (cached) return res.status(200).json(cached);
+  }
+
   // Run with auto-failover across configured providers (active first); on a
   // quota 429 fall through to the next provider when enabled.
   const errors: string[] = [];
@@ -217,6 +235,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         timestamp: new Date().toISOString(),
       };
       if (i > 0) payload.failoverNote = `Primary provider (${resolved.chain[0].provider}) was rate-limited; served by ${p.provider} instead.`;
+      setCachedResearch(cacheKey, payload);
       return res.status(200).json(payload);
     } catch (e) {
       const status = e instanceof AIResearchError ? e.status : 500;

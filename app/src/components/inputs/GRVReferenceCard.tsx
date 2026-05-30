@@ -17,6 +17,7 @@ import {
 } from '../../utils/grvBenchmarks';
 import { lookupSuburb } from '../../utils/suburbLookup';
 import { formatCurrency, formatMillions, formatPercent } from '../../utils';
+import { researchKey, getCachedResearch, setCachedResearch } from '../../utils/researchCache';
 
 interface GRVReferenceCardProps {
   /** Total saleable area in m² (sum of unit areas). Optional. */
@@ -61,6 +62,8 @@ interface GRVResearch {
   timestamp: string;
   /** Set when the result was grounded in (or attempted against) Cotality data. */
   cotality?: { used: boolean; url?: string; reason?: string };
+  /** True when served from cache (local or server) rather than a fresh AI call. */
+  cached?: boolean;
 }
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -138,7 +141,7 @@ export function GRVReferenceCard({
     return (currentTotalGRV - benchmark.totalMid) / benchmark.totalMid;
   }, [benchmark, currentTotalGRV]);
 
-  const runLiveResearch = async () => {
+  const runLiveResearch = async (forceRefresh = false) => {
     setLiveLoading(true);
     setLiveError(null);
     setLiveResult(null);
@@ -160,16 +163,29 @@ export function GRVReferenceCard({
         // precise on the "comparable sales" side.
         suburb: addressMatch?.suburb || undefined,
       };
+
+      // Durable local cache: identical GRV request reuses the prior answer
+      // instead of re-hitting the rate-limited Gemini free tier.
+      const key = researchKey(body);
+      if (!forceRefresh) {
+        const cached = getCachedResearch<GRVResearch>(key);
+        if (cached) {
+          setLiveResult({ ...cached, cached: true } as GRVResearch);
+          return;
+        }
+      }
+
       const r = await fetch('/api/benchmarks/research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(forceRefresh ? { ...body, refresh: true } : body),
       });
       if (!r.ok) {
         const err = await r.json().catch(() => ({ error: r.statusText }));
         throw new Error(err.error || `HTTP ${r.status}`);
       }
       const data = (await r.json()) as GRVResearch;
+      setCachedResearch(key, data);
       setLiveResult(data);
     } catch (e) {
       setLiveError(e instanceof Error ? e.message : 'Live research request failed.');
@@ -524,7 +540,7 @@ function LiveResearchPanel({
   loading: boolean;
   error: string | null;
   result: GRVResearch | null;
-  onRun: () => void;
+  onRun: (forceRefresh?: boolean) => void;
   assetType: GRVAssetType;
   targetYear: number;
   totalArea: number;
@@ -538,12 +554,27 @@ function LiveResearchPanel({
         </p>
         <button
           type="button"
-          onClick={onRun}
+          onClick={() => onRun(false)}
           disabled={loading}
           className="text-[11px] bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white px-3 py-1 rounded"
         >
           {loading ? 'Researching…' : `Research live ${targetYear} prices`}
         </button>
+        {result && !loading && (
+          <button
+            type="button"
+            onClick={() => onRun(true)}
+            title="Bypass the cached result and re-query the AI (uses Gemini quota)"
+            className="text-[11px] border border-purple-300 text-purple-700 hover:bg-purple-50 px-2 py-1 rounded"
+          >
+            ↻ Refresh
+          </button>
+        )}
+        {result?.cached && (
+          <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+            cached
+          </span>
+        )}
         <span className="text-[10px] text-gray-500 italic ml-auto">
           Uses Admin → AI Settings (Gemini API key)
         </span>
