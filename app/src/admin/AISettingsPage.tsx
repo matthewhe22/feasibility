@@ -60,8 +60,6 @@ export function AISettingsPage() {
   const [testStatus, setTestStatus] = useState<{ type: 'ok' | 'err' | 'running'; text: string } | null>(null);
   // Per-provider key test (independent of the saved/active settings).
   const [providerTest, setProviderTest] = useState<{ type: 'ok' | 'err' | 'running'; text: string } | null>(null);
-  // Per-provider key test (independent of the saved/active settings).
-  const [providerTest, setProviderTest] = useState<{ type: 'ok' | 'err' | 'running'; text: string } | null>(null);
   const [orRefreshing, setOrRefreshing] = useState(false);
   const [orMsg, setOrMsg] = useState<string | null>(null);
 
@@ -148,8 +146,11 @@ export function AISettingsPage() {
   const handleTestProvider = async () => {
     setProviderTest({ type: 'running', text: `Testing ${PROVIDERS[provider].label}…` });
     try {
-      const draft = keyInputs[provider].trim() || undefined;
-      const r = await testAIProvider({ provider, model: model || undefined, key: draft });
+      const args: { provider: AIProvider; model?: string; key?: string } = { provider };
+      if (model) args.model = model;
+      const draft = keyInputs[provider].trim();
+      if (draft) args.key = draft;
+      const r = await testAIProvider(args);
       setProviderTest({ type: 'ok', text: r.message });
     } catch (e) {
       setProviderTest({ type: 'err', text: e instanceof Error ? e.message : 'Test failed.' });
