@@ -8,9 +8,11 @@ import {
   deleteAISettings,
   ALLOWED_MODELS,
   maskKey,
+  defaultModelFor,
   type AIProvider,
   type StoredAISettings,
 } from '../_lib/aiSettings';
+import { pingAIProvider, AIResearchError } from '../_lib/aiClient';
 
 /**
  * GET    /api/admin/ai-settings  → per-provider key status + active provider/model + catalogs
@@ -66,11 +68,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let body: {
       provider?: string; model?: string; enabled?: boolean;
       keys?: Partial<Record<AIProvider, string>>;
+      test?: boolean; key?: string;
     };
     try {
       body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body) ?? {};
     } catch {
       return res.status(400).json({ error: 'Invalid JSON body' });
+    }
+
+    // Per-provider connection test — verifies a key/model independently of the
+    // active settings, using a draft (unsaved) key if supplied, else the
+    // provider's stored or env key. Does not persist anything.
+    if (body.test) {
+      const p = (body.provider as AIProvider) ?? 'gemini';
+      if (!PROVIDERS.includes(p)) {
+        return res.status(400).json({ error: `Invalid provider. Allowed: ${PROVIDERS.join(', ')}` });
+      }
+      const existing = await loadAISettings(supabase);
+      const draft = typeof body.key === 'string' && body.key.trim() ? body.key.trim() : undefined;
+      const key = draft || existing?.keys?.[p] || process.env[ENV_KEY[p]]?.trim();
+      if (!key) {
+        return res.status(400).json({ error: `No ${p} key to test. Enter one above first.` });
+      }
+      const model = (body.model && body.model.trim()) || defaultModelFor(p);
+      try {
+        await pingAIProvider({ provider: p, model, apiKey: key });
+        return res.status(200).json({ ok: true, message: `${p} key works (model: ${model}).` });
+      } catch (e) {
+        const status = e instanceof AIResearchError && e.status ? e.status : 502;
+        return res.status(status).json({ error: e instanceof Error ? e.message : 'Test failed.' });
+      }
     }
 
     if (body.provider !== undefined && !PROVIDERS.includes(body.provider as AIProvider)) {

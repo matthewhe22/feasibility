@@ -144,6 +144,11 @@ const DEFAULT_MODEL_FOR: Record<AIProvider, string> = {
   openrouter: 'openrouter/auto',
 };
 
+/** Default model id for a provider (used when none is selected). */
+export function defaultModelFor(provider: AIProvider): string {
+  return DEFAULT_MODEL_FOR[provider];
+}
+
 /** Normalise a raw persisted object (old single-key OR new multi-key) → StoredAISettings. */
 function normalizeStored(raw: unknown): StoredAISettings | null {
   if (!raw || typeof raw !== 'object') return null;

@@ -210,6 +210,56 @@ async function runOpenRouter({ apiKey, model, systemPrompt, userPrompt }: RunAIR
 
 /* ── Helpers ───────────────────────────────────────────────────────────────── */
 
+/**
+ * Lightweight credential check — a minimal call per provider that verifies the
+ * key + model respond, without requiring JSON output or web grounding. Throws
+ * AIResearchError on failure; resolves on success. Used by the per-provider
+ * "Test" button so each key can be verified independently of the active one.
+ */
+export async function pingAIProvider(input: { provider: AIProvider; model: string; apiKey: string }): Promise<void> {
+  const { provider, model, apiKey } = input;
+
+  if (provider === 'gemini') {
+    const apiModelName = toGeminiApiModel(model);
+    try {
+      const client = new GoogleGenerativeAI(apiKey);
+      const r = await client.getGenerativeModel({ model: apiModelName }).generateContent('Reply with the single word: OK');
+      if (!r.response.text()) throw new AIResearchError('Empty response from Gemini.', 502);
+    } catch (err) {
+      if (err instanceof AIResearchError) throw err;
+      throw mapGeminiError(err, apiModelName);
+    }
+    return;
+  }
+
+  // OpenAI-compatible providers (DeepSeek / OpenRouter).
+  const url = provider === 'deepseek'
+    ? 'https://api.deepseek.com/chat/completions'
+    : 'https://openrouter.ai/api/v1/chat/completions';
+  const apiModelName = provider === 'deepseek' ? toDeepSeekApiModel(model) : toOpenRouterApiModel(model);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` };
+  if (provider === 'openrouter') { headers['HTTP-Referer'] = 'https://feasibility.app'; headers['X-Title'] = 'Feasibility Model'; }
+
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model: apiModelName, messages: [{ role: 'user', content: 'Reply with the single word: OK' }], max_tokens: 5, stream: false }),
+    });
+  } catch (e) {
+    throw new AIResearchError(`${provider} request failed: ${e instanceof Error ? e.message : 'network error'}`, 502);
+  }
+  if (!r.ok) {
+    const t = await r.text().catch(() => '');
+    if (r.status === 401) throw new AIResearchError(`${provider} API key is invalid.`, 401);
+    if (r.status === 402) throw new AIResearchError(`${provider}: insufficient balance/credits.`, 402);
+    if (r.status === 429) throw new AIResearchError(`${provider} rate limit reached. Wait and retry.`, 429);
+    if (r.status === 404) throw new AIResearchError(`${provider} model "${apiModelName}" not found.`, 404);
+    throw new AIResearchError(`${provider} API error ${r.status}: ${t.slice(0, 200)}`, 502);
+  }
+}
+
 export function parseJsonResponse(text: string): Record<string, unknown> | null {
   const cleaned = text.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
   try {

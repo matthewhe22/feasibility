@@ -187,6 +187,22 @@ export async function refreshOpenRouterModels(): Promise<{ ok: true; count: numb
   return apiFetch('/openrouter-models', { method: 'POST' });
 }
 
+/**
+ * Verify a single provider's key/model independently of the active settings.
+ * Tests a draft (unsaved) key when `key` is supplied, else the stored/env key.
+ */
+export async function testAIProvider(args: { provider: AIProvider; model?: string; key?: string }): Promise<{ ok: true; message: string }> {
+  return apiFetch('/ai-settings', { method: 'POST', body: JSON.stringify({ test: true, ...args }) });
+}
+
+/**
+ * Verify a single provider's key/model independently of the active settings.
+ * Tests a draft (unsaved) key when `key` is supplied, else the stored/env key.
+ */
+export async function testAIProvider(args: { provider: AIProvider; model?: string; key?: string }): Promise<{ ok: true; message: string }> {
+  return apiFetch('/ai-settings', { method: 'POST', body: JSON.stringify({ test: true, ...args }) });
+}
+
 // ── Cotality (CoreLogic) Data Settings ────────────────────────────────────────
 
 export type CotalityRegion = 'au' | 'nz';

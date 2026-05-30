@@ -4,6 +4,7 @@ import {
   updateAISettings,
   deleteStoredAIKey,
   refreshOpenRouterModels,
+  testAIProvider,
   type AISettings,
   type AIProvider,
   type AIModelOption,
@@ -57,6 +58,10 @@ export function AISettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [testStatus, setTestStatus] = useState<{ type: 'ok' | 'err' | 'running'; text: string } | null>(null);
+  // Per-provider key test (independent of the saved/active settings).
+  const [providerTest, setProviderTest] = useState<{ type: 'ok' | 'err' | 'running'; text: string } | null>(null);
+  // Per-provider key test (independent of the saved/active settings).
+  const [providerTest, setProviderTest] = useState<{ type: 'ok' | 'err' | 'running'; text: string } | null>(null);
   const [orRefreshing, setOrRefreshing] = useState(false);
   const [orMsg, setOrMsg] = useState<string | null>(null);
 
@@ -95,6 +100,7 @@ export function AISettingsPage() {
   // When switching provider, snap the model to a valid one for that provider.
   function selectProvider(p: AIProvider) {
     setProvider(p);
+    setProviderTest(null);
     if (!settings) return;
     const opts = p === 'openrouter'
       ? settings.openrouterModels.map(m => m.id)
@@ -136,6 +142,17 @@ export function AISettingsPage() {
       setSaveMsg({ type: 'err', text: e instanceof Error ? e.message : 'Remove failed.' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTestProvider = async () => {
+    setProviderTest({ type: 'running', text: `Testing ${PROVIDERS[provider].label}…` });
+    try {
+      const draft = keyInputs[provider].trim() || undefined;
+      const r = await testAIProvider({ provider, model: model || undefined, key: draft });
+      setProviderTest({ type: 'ok', text: r.message });
+    } catch (e) {
+      setProviderTest({ type: 'err', text: e instanceof Error ? e.message : 'Test failed.' });
     }
   };
 
@@ -249,7 +266,23 @@ export function AISettingsPage() {
               className="flex-1 text-sm bg-gray-700 border border-gray-600 text-white rounded px-3 py-2 font-mono focus:outline-none focus:border-blue-500"
             />
             <button type="button" onClick={() => setShowKey(s => !s)} className="text-xs bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-300 px-2 py-2 rounded">{showKey ? 'Hide' : 'Show'}</button>
+            <button
+              type="button"
+              onClick={handleTestProvider}
+              disabled={providerTest?.type === 'running' || (!providerStatus?.hasKey && !keyInputs[provider].trim())}
+              className="text-xs bg-purple-700 hover:bg-purple-800 disabled:opacity-40 text-white px-2 py-2 rounded whitespace-nowrap"
+            >
+              {providerTest?.type === 'running' ? 'Testing…' : 'Test this key'}
+            </button>
           </div>
+          <p className="text-[10px] text-gray-500 mt-1.5">
+            "Test this key" verifies {info.label} directly — using the key typed above if present, otherwise the stored key — without saving.
+          </p>
+          {providerTest && providerTest.type !== 'running' && (
+            <div className={`mt-2 p-2 rounded text-xs ${providerTest.type === 'ok' ? 'bg-green-900/40 border border-green-700 text-green-300' : 'bg-red-900/40 border border-red-700 text-red-300'}`}>
+              <span className="font-semibold">{providerTest.type === 'ok' ? '✓ ' : '✗ '}</span>{providerTest.text}
+            </div>
+          )}
         </Card>
 
         {/* Model selector */}
