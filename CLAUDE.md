@@ -292,8 +292,18 @@ Search.
   into the prompt as the primary current-data source, merge the result URLs into
   `sources`, set `groundingUsed=true`, and carry a `tavily:{used,results}` note.
   Gated on the head provider ≠ gemini; Gemini keeps its own grounding. Every
-  Tavily call is best-effort — failure degrades to ungrounded research. The
-  response cache key includes `tavily.used`.
+  Tavily call is best-effort — failure degrades to ungrounded research.
+- **Rate-limit protection (Tavily has a monthly query cap):**
+  1. The **response cache is checked BEFORE any Tavily/Cotality/model call**, so a
+     cached request spends **zero** Tavily searches. (Grounding *config* is
+     resolved first — cheap DB reads — only to partition the cache key by whether
+     Tavily/Cotality are configured.)
+  2. **At most one** Tavily search per cache-miss request (failover reuses the
+     already-built prompt; it does not re-search).
+  3. A **query-level result cache** in `tavily.ts` (`TAVILY_CACHE_TTL_MS`, default
+     1h) dedupes identical search queries across requests/instances.
+  4. `maxResults` (1–10) and `searchDepth` (basic=1 credit / advanced=2) are
+     admin-capped; `enabled=false` disables Tavily entirely.
 - UI: Admin page `app/src/admin/TavilySettingsPage.tsx` (nav: **Tavily Search**).
   The GRV card and RV Research Meta show a "Grounded in live web search (Tavily)"
   badge when used.

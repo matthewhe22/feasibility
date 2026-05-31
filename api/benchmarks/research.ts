@@ -286,15 +286,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const systemPrompt = body.mode === 'grv' ? SYSTEM_PROMPT_GRV : SYSTEM_PROMPT_COST;
   let userPrompt = buildUserPrompt(body);
+  const head = resolved.chain[0];
+  const refresh = (body as ResearchRequest & { refresh?: boolean }).refresh === true;
 
+  // ── Resolve grounding *config* (cheap reads — no external API calls) ───────
+  // We resolve which grounding sources WOULD apply so the cache key can include
+  // them, but we DON'T perform the Cotality / Tavily lookups yet. Those are paid
+  // / rate-limited calls, so they must only run on a cache miss — otherwise an
+  // identical (cached) request would still burn a Tavily search + Cotality call.
+  let cotalitySettings: Awaited<ReturnType<typeof resolveCotalitySettings>> = null;
+  try { cotalitySettings = await resolveCotalitySettings(supabase); } catch { /* ignore */ }
+  let tavilySettings: Awaited<ReturnType<typeof resolveTavilySettings>> = null;
+  if (head && head.provider !== 'gemini') {
+    try { tavilySettings = await resolveTavilySettings(supabase); } catch { /* ignore */ }
+  }
+
+  // ── Response cache (checked BEFORE any model / Cotality / Tavily call) ──────
+  // An identical request (same profile + provider/model + grounding config)
+  // returns the prior answer without calling the model OR spending a Tavily
+  // search / Cotality lookup. Bypass with { refresh: true }.
+  const cacheKey = researchCacheKey({
+    endpoint: 'benchmarks',
+    body,
+    provider: head?.provider,
+    model: head?.model,
+    grounding: resolved.useGrounding,
+    cotality: Boolean(cotalitySettings),
+    tavily: Boolean(tavilySettings),
+  });
+  if (!refresh) {
+    const cached = getCachedResearch(cacheKey);
+    if (cached) return res.status(200).json(cached);
+  }
+
+  // ── Cache miss: now perform the (paid) grounding lookups, once. ────────────
   // Optional: ground the research in real Cotality (CoreLogic) property data.
-  // Best-effort — any failure degrades silently to web-search-only research so
-  // the benchmark button never breaks because of a Cotality outage/misconfig.
+  // Best-effort — any failure degrades silently to web-search-only research.
   let cotalityNote: CotalityNote = { used: false };
-  try {
-    const cotality = await resolveCotalitySettings(supabase);
-    if (cotality) {
-      const ctx = await fetchCotalityContext(cotality, {
+  if (cotalitySettings) {
+    try {
+      const ctx = await fetchCotalityContext(cotalitySettings, {
         suburb: body.suburb,
         state: body.state,
         postcode: extractPostcode(body.propertyAddress),
@@ -309,63 +340,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           `sources against them and note material discrepancies in the summary. Include ` +
           `"Cotality" in the sources list with the URL above.`;
         cotalityNote = { used: true, url: ctx.url };
-      } else if (cotality.propertyDataPath) {
+      } else if (cotalitySettings.propertyDataPath) {
         cotalityNote = {
           used: false,
           reason: 'Cotality is configured but returned no usable data for this suburb/postcode — used web research only.',
         };
       }
+    } catch {
+      /* never block AI research on Cotality */
     }
-  } catch {
-    /* never block AI research on Cotality */
   }
 
-  // ── Optional: Tavily web search for providers without native grounding ─────
-  // Gemini has its own Google-Search grounding, so Tavily applies only when the
-  // active provider is DeepSeek / OpenRouter / NVIDIA. Best-effort: any failure
-  // degrades silently to ungrounded research.
-  const head = resolved.chain[0];
+  // Optional: Tavily web search for providers without native grounding (Gemini
+  // uses its own grounding). One search per cache-miss request maximum.
   let tavilyNote: TavilyNote = { used: false };
   let tavilySources: AIResearchSource[] = [];
-  if (head && head.provider !== 'gemini') {
+  if (tavilySettings) {
     try {
-      const tavily = await resolveTavilySettings(supabase);
-      if (tavily) {
-        const ctx = await fetchTavilyContext(tavily, buildSearchQuery(body));
-        if (ctx) {
-          userPrompt =
-            `${userPrompt}\n\n` +
-            `=== LIVE WEB SEARCH RESULTS (Tavily) — use as the primary current-data source; cite the URLs ===\n` +
-            `${ctx.promptBlock}\n` +
-            `=== END WEB SEARCH RESULTS ===\n` +
-            `Base your figures on these live results where relevant and cite the URLs above in the sources list.`;
-          tavilyNote = { used: true, results: ctx.resultCount };
-          tavilySources = ctx.sources;
-        }
+      const ctx = await fetchTavilyContext(tavilySettings, buildSearchQuery(body));
+      if (ctx) {
+        userPrompt =
+          `${userPrompt}\n\n` +
+          `=== LIVE WEB SEARCH RESULTS (Tavily) — use as the primary current-data source; cite the URLs ===\n` +
+          `${ctx.promptBlock}\n` +
+          `=== END WEB SEARCH RESULTS ===\n` +
+          `Base your figures on these live results where relevant and cite the URLs above in the sources list.`;
+        tavilyNote = { used: true, results: ctx.resultCount };
+        tavilySources = ctx.sources;
       }
     } catch {
       /* never block AI research on Tavily */
     }
-  }
-
-  // ── Response cache (minimise Gemini queries) ──────────────────────────────
-  // An identical request (same profile + provider/model + grounding + Cotality
-  // + Tavily) returns the prior answer without calling the model at all.
-  // Benchmarks are stable hour-to-hour, so this is the primary lever against the
-  // scarce free-tier search quota. Bypass with { refresh: true } in the body.
-  const cacheKey = researchCacheKey({
-    endpoint: 'benchmarks',
-    body,
-    provider: head?.provider,
-    model: head?.model,
-    grounding: resolved.useGrounding,
-    cotality: cotalityNote.used,
-    tavily: tavilyNote.used,
-  });
-  const refresh = (body as ResearchRequest & { refresh?: boolean }).refresh === true;
-  if (!refresh) {
-    const cached = getCachedResearch(cacheKey);
-    if (cached) return res.status(200).json(cached);
   }
 
   // ── Run with auto-failover across configured providers ────────────────────

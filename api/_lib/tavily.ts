@@ -187,34 +187,72 @@ export interface TavilyContext {
   resultCount: number;
 }
 
+/* ── Query-level result cache (further reduces Tavily quantity) ────────────────
+ * Keyed on the normalised query + result count + depth. Even when the response
+ * cache misses (e.g. a different model was selected) two requests that generate
+ * the same web query share a single Tavily search. Per-instance + ephemeral on
+ * serverless, but it cheaply absorbs bursts and near-duplicate queries. TTL via
+ * TAVILY_CACHE_TTL_MS (default 1h; 0 disables). */
+interface CtxEntry { value: TavilyContext | null; expiresAt: number; }
+const _ctxCache = new Map<string, CtxEntry>();
+const CTX_MAX_ENTRIES = 200;
+
+function ctxTtlMs(): number {
+  const raw = process.env.TAVILY_CACHE_TTL_MS;
+  if (raw === undefined || raw === '') return 60 * 60 * 1000;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 60 * 60 * 1000;
+}
+
 /**
  * Best-effort grounding context for prompt injection. Returns null (never
  * throws) when not configured or on any failure — the caller falls back to
- * ungrounded research.
+ * ungrounded research. Identical queries within the TTL reuse one search.
  */
 export async function fetchTavilyContext(
   s: StoredTavilySettings,
   query: string,
 ): Promise<TavilyContext | null> {
   if (!s.apiKey || !query.trim()) return null;
+
+  const ttl = ctxTtlMs();
+  const cacheKey = `${query.trim().toLowerCase()}|${s.maxResults}|${s.searchDepth}`;
+  if (ttl > 0) {
+    const hit = _ctxCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) return hit.value;
+    if (hit) _ctxCache.delete(cacheKey);
+  }
+
   let r: TavilySearchResponse;
   try {
     r = await tavilySearch(s, query);
   } catch {
     return null; // search problems must not break AI research
   }
-  if (r.results.length === 0 && !r.answer) return null;
 
-  const lines: string[] = [];
-  if (r.answer) lines.push(`Search answer: ${r.answer}`, '');
-  r.results.forEach((res, i) => {
-    lines.push(`[${i + 1}] ${res.title}\n${res.url}\n${res.content.slice(0, 600)}`);
-  });
-  return {
-    promptBlock: lines.join('\n'),
-    sources: r.results.map(res => ({ title: res.title, url: res.url, snippet: res.content.slice(0, 160) })),
-    resultCount: r.results.length,
-  };
+  let value: TavilyContext | null = null;
+  if (r.results.length > 0 || r.answer) {
+    const lines: string[] = [];
+    if (r.answer) lines.push(`Search answer: ${r.answer}`, '');
+    r.results.forEach((res, i) => {
+      lines.push(`[${i + 1}] ${res.title}\n${res.url}\n${res.content.slice(0, 600)}`);
+    });
+    value = {
+      promptBlock: lines.join('\n'),
+      sources: r.results.map(res => ({ title: res.title, url: res.url, snippet: res.content.slice(0, 160) })),
+      resultCount: r.results.length,
+    };
+  }
+
+  if (ttl > 0) {
+    while (_ctxCache.size >= CTX_MAX_ENTRIES) {
+      const oldest = _ctxCache.keys().next().value;
+      if (oldest === undefined) break;
+      _ctxCache.delete(oldest);
+    }
+    _ctxCache.set(cacheKey, { value, expiresAt: Date.now() + ttl });
+  }
+  return value;
 }
 
 /** Mask a key like "tvly-abcd...wxyz" → "tvly-***wxyz". */
