@@ -7,6 +7,7 @@ import {
   saveAISettings,
   deleteAISettings,
   ALLOWED_MODELS,
+  NVIDIA_DEFAULT_MODELS,
   maskKey,
   defaultModelFor,
   type AIProvider,
@@ -63,7 +64,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       allowedModels: ALLOWED_MODELS,
       openrouterModels: stored?.openrouterModels ?? [],
       openrouterModelsUpdatedAt: stored?.openrouterModelsUpdatedAt ?? null,
-      nvidiaModels: stored?.nvidiaModels ?? [],
+      // Seed a curated list so the NVIDIA dropdown is populated before the
+      // admin runs "Update models"; the fetched catalogue supersedes it.
+      nvidiaModels: stored?.nvidiaModels?.length ? stored.nvidiaModels : NVIDIA_DEFAULT_MODELS,
       nvidiaModelsUpdatedAt: stored?.nvidiaModelsUpdatedAt ?? null,
     });
   }

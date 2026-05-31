@@ -248,22 +248,31 @@ The live research features (benchmark "Research" buttons + RV Research) are
 powered by a configurable AI provider, managed in Admin → AI Settings.
 
 - **Providers:** Google Gemini (free tier, live Google-Search grounding),
-  DeepSeek (low cost, no web search), and **OpenRouter** (one key → hundreds of
-  models incl. many free; most free models have no web search).
+  DeepSeek (low cost, no web search), **OpenRouter** (one key → hundreds of
+  models incl. many free; most free models have no web search), and **NVIDIA**
+  (free hosted NIM models for development; no web search). Gemini is the only
+  provider with built-in live web search.
 - **Per-provider keys:** keys are stored per provider in the `__ai_settings__`
-  sentinel row (`admin.aiSettings.keys.{gemini|deepseek|openrouter}`), so all
-  keys persist and the active provider/model can be switched without re-entering
-  anything. Back-compat: the legacy single `apiKey` shape is normalised into the
-  keys map on read (`api/_lib/aiSettings.ts:normalizeStored`).
+  sentinel row (`admin.aiSettings.keys.{gemini|deepseek|openrouter|nvidia}`), so
+  all keys persist and the active provider/model can be switched without
+  re-entering anything. Back-compat: the legacy single `apiKey` shape is
+  normalised into the keys map on read (`api/_lib/aiSettings.ts:normalizeStored`).
 - **OpenRouter free models** are dynamic: `POST /api/admin/openrouter-models`
   fetches OpenRouter's public catalogue, filters to free models (price 0 or
   `:free` id), caches the list in the sentinel, and the Admin "Update models"
   button populates the model dropdown.
+- **NVIDIA models** are dynamic too: `POST /api/admin/nvidia-models` fetches
+  NVIDIA's hosted NIM catalogue (`integrate.api.nvidia.com/v1/models`,
+  authenticated — needs a saved key), caches it in the sentinel, and the Admin
+  "Update models" button populates the dropdown. A curated `NVIDIA_DEFAULT_MODELS`
+  list seeds the dropdown before the first refresh.
 - **Resolution:** `resolveActiveSettings` returns the selected provider's key
-  (stored, else env: `GEMINI_API_KEY` / `DEEPSEEK_API_KEY` / `OPENROUTER_API_KEY`),
-  falling back to any provider that has a key. Both research endpoints + the
-  shared `api/_lib/aiClient.ts` dispatch Gemini / DeepSeek / OpenRouter
-  (OpenAI-compatible) accordingly.
+  (stored, else env: `GEMINI_API_KEY` / `DEEPSEEK_API_KEY` / `OPENROUTER_API_KEY`
+  / `NVIDIA_API_KEY`), falling back to any provider that has a key. Both research
+  endpoints + the shared `api/_lib/aiClient.ts` dispatch Gemini / DeepSeek /
+  OpenRouter / NVIDIA (OpenAI-compatible) accordingly. `resolveProviderChain`
+  orders the active provider first, then the rest as failover candidates
+  (auto-failover defaults ON).
 
 ## Cotality (CoreLogic) Property-Data Integration
 Live AI benchmark research (the "Research benchmarks" buttons on the GRV/cost

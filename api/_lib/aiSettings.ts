@@ -134,6 +134,19 @@ export interface OpenRouterModel {
  *  true for the listed models. */
 export type NvidiaModel = OpenRouterModel;
 
+/** Curated NVIDIA models shown before the admin clicks "Update models", so the
+ *  dropdown is never empty. All are free hosted NIM models for development.
+ *  The live catalogue (fetched via the button) supersedes this list. */
+export const NVIDIA_DEFAULT_MODELS: NvidiaModel[] = [
+  { id: 'meta/llama-3.1-8b-instruct',                label: 'Llama 3.1 8B Instruct — fast (recommended)', free: true },
+  { id: 'meta/llama-3.3-70b-instruct',               label: 'Llama 3.3 70B Instruct — high quality',      free: true },
+  { id: 'meta/llama-3.1-70b-instruct',               label: 'Llama 3.1 70B Instruct',                     free: true },
+  { id: 'nvidia/llama-3.1-nemotron-70b-instruct',    label: 'Nemotron 70B Instruct — NVIDIA-tuned',       free: true },
+  { id: 'mistralai/mistral-7b-instruct-v0.3',        label: 'Mistral 7B Instruct v0.3',                   free: true },
+  { id: 'qwen/qwen2.5-7b-instruct',                  label: 'Qwen2.5 7B Instruct',                        free: true },
+  { id: 'deepseek-ai/deepseek-r1',                   label: 'DeepSeek-R1 — reasoning',                    free: true },
+];
+
 export interface StoredAISettings {
   provider: AIProvider;
   model: string;
