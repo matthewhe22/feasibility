@@ -7,10 +7,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  * table — same pattern as branding / Cotality. The settings JSON is stored in
  * the row's `admin` JSONB column under `aiSettings`.
  *
- * Keys are stored PER PROVIDER so the user can keep a Gemini, DeepSeek and
- * OpenRouter key on file simultaneously and switch the active provider without
- * re-entering anything. Plaintext keys are only ever read on the server; the
- * admin endpoint returns masked previews only.
+ * Keys are stored PER PROVIDER so the user can keep a Gemini, DeepSeek,
+ * OpenRouter and NVIDIA key on file simultaneously and switch the active
+ * provider without re-entering anything. Plaintext keys are only ever read on
+ * the server; the admin endpoint returns masked previews only.
  *
  * Back-compat: the previous shape stored a single { apiKey, model, enabled }.
  * loadAISettings() normalises that into the new per-provider `keys` map.
@@ -18,7 +18,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const AI_SETTINGS_SENTINEL = '__ai_settings__';
 
-export type AIProvider = 'gemini' | 'deepseek' | 'openrouter';
+export type AIProvider = 'gemini' | 'deepseek' | 'openrouter' | 'nvidia';
 
 export type AIModelId =
   // Google Gemini
@@ -42,9 +42,10 @@ export function toGeminiApiModel(id: string): string {
   }
 }
 
-/** DeepSeek + OpenRouter expect their model IDs verbatim. */
+/** DeepSeek + OpenRouter + NVIDIA expect their model IDs verbatim. */
 export function toDeepSeekApiModel(id: string): string { return id; }
 export function toOpenRouterApiModel(id: string): string { return id; }
+export function toNvidiaApiModel(id: string): string { return id; }
 
 /** Derive the provider for a STATIC (gemini/deepseek) model id. */
 export function getProvider(id: string): AIProvider {
@@ -127,6 +128,12 @@ export interface OpenRouterModel {
   free: boolean;         // pricing prompt+completion == 0
 }
 
+/** NVIDIA model entry (dynamic — refreshed via the "Update models" button).
+ *  Shares the OpenRouterModel shape; the hosted NIM endpoint
+ *  (integrate.api.nvidia.com) is free for development, so `free` is always
+ *  true for the listed models. */
+export type NvidiaModel = OpenRouterModel;
+
 export interface StoredAISettings {
   provider: AIProvider;
   model: string;
@@ -142,12 +149,16 @@ export interface StoredAISettings {
   /** Cached OpenRouter free-model list (from the last "Update models"). */
   openrouterModels?: OpenRouterModel[];
   openrouterModelsUpdatedAt?: string;
+  /** Cached NVIDIA model list (from the last "Update models"). */
+  nvidiaModels?: NvidiaModel[];
+  nvidiaModelsUpdatedAt?: string;
 }
 
 const DEFAULT_MODEL_FOR: Record<AIProvider, string> = {
   gemini: 'gemini-2-0-flash',
   deepseek: 'deepseek-v4-flash',
   openrouter: 'openrouter/auto',
+  nvidia: 'meta/llama-3.1-8b-instruct',
 };
 
 /** Default model id for a provider (used when none is selected). */
@@ -164,7 +175,7 @@ function normalizeStored(raw: unknown): StoredAISettings | null {
   const keys: Partial<Record<AIProvider, string>> = {};
   const rawKeys = r.keys as Record<string, unknown> | undefined;
   if (rawKeys && typeof rawKeys === 'object') {
-    for (const p of ['gemini', 'deepseek', 'openrouter'] as AIProvider[]) {
+    for (const p of ['gemini', 'deepseek', 'openrouter', 'nvidia'] as AIProvider[]) {
       if (typeof rawKeys[p] === 'string' && rawKeys[p]) keys[p] = rawKeys[p] as string;
     }
   }
@@ -179,7 +190,7 @@ function normalizeStored(raw: unknown): StoredAISettings | null {
 
   // Active provider: explicit if present, else derive from model, else first key.
   let provider = r.provider as AIProvider | undefined;
-  const valid = (p: unknown): p is AIProvider => p === 'gemini' || p === 'deepseek' || p === 'openrouter';
+  const valid = (p: unknown): p is AIProvider => p === 'gemini' || p === 'deepseek' || p === 'openrouter' || p === 'nvidia';
   if (!valid(provider)) {
     provider = model && (model.startsWith('gemini-') || model.startsWith('deepseek-'))
       ? getProvider(model)
@@ -188,6 +199,9 @@ function normalizeStored(raw: unknown): StoredAISettings | null {
 
   const orModels = Array.isArray(r.openrouterModels)
     ? (r.openrouterModels as OpenRouterModel[]).filter(m => m && typeof m.id === 'string')
+    : undefined;
+  const nvModels = Array.isArray(r.nvidiaModels)
+    ? (r.nvidiaModels as NvidiaModel[]).filter(m => m && typeof m.id === 'string')
     : undefined;
 
   return {
@@ -199,6 +213,8 @@ function normalizeStored(raw: unknown): StoredAISettings | null {
     keys,
     openrouterModels: orModels,
     openrouterModelsUpdatedAt: typeof r.openrouterModelsUpdatedAt === 'string' ? r.openrouterModelsUpdatedAt : undefined,
+    nvidiaModels: nvModels,
+    nvidiaModelsUpdatedAt: typeof r.nvidiaModelsUpdatedAt === 'string' ? r.nvidiaModelsUpdatedAt : undefined,
   };
 }
 
@@ -248,11 +264,13 @@ const ENV_KEY: Record<AIProvider, string> = {
   gemini: 'GEMINI_API_KEY',
   deepseek: 'DEEPSEEK_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
+  nvidia: 'NVIDIA_API_KEY',
 };
 const ENV_MODEL: Record<AIProvider, string> = {
   gemini: 'GEMINI_MODEL',
   deepseek: 'DEEPSEEK_MODEL',
   openrouter: 'OPENROUTER_MODEL',
+  nvidia: 'NVIDIA_MODEL',
 };
 
 function envKey(p: AIProvider): string | undefined { return process.env[ENV_KEY[p]]?.trim() || undefined; }
@@ -285,7 +303,7 @@ export interface ResolvedChain {
  */
 export async function resolveProviderChain(supabase: SupabaseClient | null): Promise<ResolvedChain | null> {
   const stored = supabase ? await loadAISettings(supabase) : null;
-  const order: AIProvider[] = ['gemini', 'deepseek', 'openrouter'];
+  const order: AIProvider[] = ['gemini', 'deepseek', 'openrouter', 'nvidia'];
   const chain: ResolvedProvider[] = [];
   const seen = new Set<AIProvider>();
 
@@ -375,6 +393,40 @@ export async function fetchOpenRouterFreeModels(apiKey?: string): Promise<OpenRo
     throw new Error(`OpenRouter /models failed (HTTP ${r.status}): ${t.slice(0, 200)}`);
   }
   return parseOpenRouterFreeModels(await r.json());
+}
+
+/* ── NVIDIA model discovery ────────────────────────────────────────────────── */
+
+export const NVIDIA_API_BASE = 'https://integrate.api.nvidia.com/v1';
+
+interface NvidiaApiModel {
+  id: string;
+  object?: string;
+  owned_by?: string;
+}
+
+/** Parse NVIDIA's OpenAI-style /models payload into our model list. The hosted
+ *  NIM endpoint is free for development, so every listed model is marked free. */
+export function parseNvidiaModels(payload: unknown): NvidiaModel[] {
+  const data = (payload as { data?: NvidiaApiModel[] })?.data;
+  if (!Array.isArray(data)) return [];
+  return data
+    .filter(m => m && typeof m.id === 'string')
+    .map(m => ({ id: m.id, label: m.id, free: true }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/** Fetch NVIDIA's hosted model catalogue. Requires a key (the endpoint is
+ *  authenticated, unlike OpenRouter's public list). */
+export async function fetchNvidiaModels(apiKey: string): Promise<NvidiaModel[]> {
+  const r = await fetch(`${NVIDIA_API_BASE}/models`, {
+    headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` },
+  });
+  if (!r.ok) {
+    const t = await r.text().catch(() => '');
+    throw new Error(`NVIDIA /models failed (HTTP ${r.status}): ${t.slice(0, 200)}`);
+  }
+  return parseNvidiaModels(await r.json());
 }
 
 /** Mask a key like "sk-or-v1-abc...wxyz" → "sk-or-***wxyz". */

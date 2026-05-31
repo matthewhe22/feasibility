@@ -114,7 +114,7 @@ export async function deleteProject(id: number): Promise<void> {
 
 // ── AI Settings ──────────────────────────────────────────────────────────────
 
-export type AIProvider = 'gemini' | 'deepseek' | 'openrouter';
+export type AIProvider = 'gemini' | 'deepseek' | 'openrouter' | 'nvidia';
 
 export interface AIModelOption {
   id: string;
@@ -128,13 +128,16 @@ export interface AIModelOption {
   recommendedFor: string;
 }
 
-/** Dynamic OpenRouter free-model entry. */
+/** Dynamic OpenRouter / NVIDIA model entry (same shape). */
 export interface OpenRouterModel {
   id: string;
   label: string;
   contextLength?: number;
   free: boolean;
 }
+
+/** NVIDIA model entry — shares the dynamic-model shape with OpenRouter. */
+export type NvidiaModel = OpenRouterModel;
 
 export interface ProviderKeyStatus {
   provider: AIProvider;
@@ -157,6 +160,8 @@ export interface AISettings {
   allowedModels: AIModelOption[];        // static Gemini + DeepSeek
   openrouterModels: OpenRouterModel[];   // cached free list
   openrouterModelsUpdatedAt: string | null;
+  nvidiaModels: NvidiaModel[];           // cached NVIDIA model list
+  nvidiaModelsUpdatedAt: string | null;
 }
 
 export interface AISettingsPatch {
@@ -189,6 +194,11 @@ export async function deleteStoredAIKey(provider?: AIProvider): Promise<void> {
 /** Refresh OpenRouter's free-model list (persisted server-side). */
 export async function refreshOpenRouterModels(): Promise<{ ok: true; count: number; models: OpenRouterModel[]; updatedAt: string }> {
   return apiFetch('/openrouter-models', { method: 'POST' });
+}
+
+/** Refresh NVIDIA's model list (persisted server-side). Requires a saved key. */
+export async function refreshNvidiaModels(): Promise<{ ok: true; count: number; models: NvidiaModel[]; updatedAt: string }> {
+  return apiFetch('/nvidia-models', { method: 'POST' });
 }
 
 /**

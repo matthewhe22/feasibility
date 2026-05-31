@@ -3,6 +3,8 @@ import {
   toGeminiApiModel,
   toDeepSeekApiModel,
   toOpenRouterApiModel,
+  toNvidiaApiModel,
+  NVIDIA_API_BASE,
   type AIProvider,
 } from './aiSettings';
 
@@ -54,6 +56,7 @@ export interface RunAIResearchInput {
 export async function runAIResearch(input: RunAIResearchInput): Promise<AIResearchResult> {
   if (input.provider === 'deepseek') return runDeepSeek(input);
   if (input.provider === 'openrouter') return runOpenRouter(input);
+  if (input.provider === 'nvidia') return runNvidia(input);
   return runGemini(input);
 }
 
@@ -215,6 +218,46 @@ async function runOpenRouter({ apiKey, model, systemPrompt, userPrompt }: RunAIR
   return { json, groundingSources: [], groundingUsed: false, provider: 'openrouter', model };
 }
 
+/* ── NVIDIA NIM (OpenAI-compatible; hosted models free for dev, no web search) ─ */
+
+async function runNvidia({ apiKey, model, systemPrompt, userPrompt }: RunAIResearchInput): Promise<AIResearchResult> {
+  const apiModelName = toNvidiaApiModel(model);
+  let r: Response;
+  try {
+    r = await fetch(`${NVIDIA_API_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: apiModelName,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        // Most NIM models honour JSON mode; parseJsonResponse covers the rest.
+        response_format: { type: 'json_object' },
+        temperature: 0.2,
+        stream: false,
+      }),
+    });
+  } catch (e) {
+    throw new AIResearchError(`NVIDIA request failed: ${e instanceof Error ? e.message : 'network error'}`, 502);
+  }
+
+  if (!r.ok) {
+    const t = await r.text().catch(() => '');
+    if (r.status === 401) throw new AIResearchError('NVIDIA API key is invalid. Update it in Admin → AI Settings.', 500);
+    if (r.status === 402) throw new AIResearchError('NVIDIA: insufficient credits for this model. Pick another model or top up at build.nvidia.com.', 402);
+    if (r.status === 429) throw new AIResearchError('NVIDIA rate limit reached. Wait a minute, or pick a different model.', 429);
+    if (r.status === 404) throw new AIResearchError(`NVIDIA model "${apiModelName}" not found. Refresh the model list in Admin → AI Settings.`, 502);
+    throw new AIResearchError(`NVIDIA API error ${r.status}: ${t.slice(0, 200)}`, 502);
+  }
+
+  const data = (await r.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const json = parseJsonResponse(data.choices?.[0]?.message?.content ?? '');
+  if (!json) throw new AIResearchError('NVIDIA response did not contain valid JSON. Some models ignore JSON mode — try another.', 502);
+  return { json, groundingSources: [], groundingUsed: false, provider: 'nvidia', model };
+}
+
 /* ── Helpers ───────────────────────────────────────────────────────────────── */
 
 /**
@@ -239,11 +282,17 @@ export async function pingAIProvider(input: { provider: AIProvider; model: strin
     return;
   }
 
-  // OpenAI-compatible providers (DeepSeek / OpenRouter).
+  // OpenAI-compatible providers (DeepSeek / OpenRouter / NVIDIA).
   const url = provider === 'deepseek'
     ? 'https://api.deepseek.com/chat/completions'
-    : 'https://openrouter.ai/api/v1/chat/completions';
-  const apiModelName = provider === 'deepseek' ? toDeepSeekApiModel(model) : toOpenRouterApiModel(model);
+    : provider === 'nvidia'
+      ? `${NVIDIA_API_BASE}/chat/completions`
+      : 'https://openrouter.ai/api/v1/chat/completions';
+  const apiModelName = provider === 'deepseek'
+    ? toDeepSeekApiModel(model)
+    : provider === 'nvidia'
+      ? toNvidiaApiModel(model)
+      : toOpenRouterApiModel(model);
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` };
   if (provider === 'openrouter') { headers['HTTP-Referer'] = 'https://feasibility.app'; headers['X-Title'] = 'Feasibility Model'; }
 

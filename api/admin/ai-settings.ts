@@ -21,9 +21,9 @@ import { pingAIProvider, AIResearchError } from '../_lib/aiClient';
  *
  * Keys are stored per provider and NEVER returned to the client (masked preview only).
  */
-const PROVIDERS: AIProvider[] = ['gemini', 'deepseek', 'openrouter'];
+const PROVIDERS: AIProvider[] = ['gemini', 'deepseek', 'openrouter', 'nvidia'];
 const ENV_KEY: Record<AIProvider, string> = {
-  gemini: 'GEMINI_API_KEY', deepseek: 'DEEPSEEK_API_KEY', openrouter: 'OPENROUTER_API_KEY',
+  gemini: 'GEMINI_API_KEY', deepseek: 'DEEPSEEK_API_KEY', openrouter: 'OPENROUTER_API_KEY', nvidia: 'NVIDIA_API_KEY',
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -63,6 +63,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       allowedModels: ALLOWED_MODELS,
       openrouterModels: stored?.openrouterModels ?? [],
       openrouterModelsUpdatedAt: stored?.openrouterModelsUpdatedAt ?? null,
+      nvidiaModels: stored?.nvidiaModels ?? [],
+      nvidiaModelsUpdatedAt: stored?.nvidiaModelsUpdatedAt ?? null,
     });
   }
 
@@ -136,6 +138,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       keys,
       openrouterModels: existing?.openrouterModels,
       openrouterModelsUpdatedAt: existing?.openrouterModelsUpdatedAt,
+      nvidiaModels: existing?.nvidiaModels,
+      nvidiaModelsUpdatedAt: existing?.nvidiaModelsUpdatedAt,
     };
     await saveAISettings(supabase, next);
 

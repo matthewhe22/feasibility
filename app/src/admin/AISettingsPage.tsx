@@ -4,6 +4,7 @@ import {
   updateAISettings,
   deleteStoredAIKey,
   refreshOpenRouterModels,
+  refreshNvidiaModels,
   testAIProvider,
   type AISettings,
   type AIProvider,
@@ -40,9 +41,19 @@ const PROVIDERS: Record<AIProvider, ProviderInfo> = {
     description: 'One key, hundreds of models incl. many free ones. Use "Update models" to load the current free list. Most free models have no live web search.',
     keyPlaceholder: 'sk-or-v1-...',
   },
+  nvidia: {
+    label: 'NVIDIA',
+    apiKeyUrl: 'https://build.nvidia.com/',
+    apiKeyLabel: 'build.nvidia.com',
+    description: 'Free hosted NIM models (Llama, Nemotron, DeepSeek, Qwen, etc.) for development. Use "Update models" to load the catalogue. No live web search.',
+    keyPlaceholder: 'nvapi-...',
+  },
 };
 
-const PROVIDER_ORDER: AIProvider[] = ['gemini', 'deepseek', 'openrouter'];
+const PROVIDER_ORDER: AIProvider[] = ['gemini', 'deepseek', 'openrouter', 'nvidia'];
+
+/** Providers whose model list is fetched dynamically (vs a static curated set). */
+const DYNAMIC_PROVIDERS: AIProvider[] = ['openrouter', 'nvidia'];
 
 export function AISettingsPage() {
   const [settings, setSettings] = useState<AISettings | null>(null);
@@ -54,7 +65,7 @@ export function AISettingsPage() {
   const [useGrounding, setUseGrounding] = useState(true);
   const [autoFailover, setAutoFailover] = useState(true);
   // Per-provider draft key replacements (blank = keep stored).
-  const [keyInputs, setKeyInputs] = useState<Record<AIProvider, string>>({ gemini: '', deepseek: '', openrouter: '' });
+  const [keyInputs, setKeyInputs] = useState<Record<AIProvider, string>>({ gemini: '', deepseek: '', openrouter: '', nvidia: '' });
   const [showKey, setShowKey] = useState(false);
 
   const [saving, setSaving] = useState(false);
@@ -81,19 +92,23 @@ export function AISettingsPage() {
     return () => { cancelled = true; };
   }, []);
 
+  // Dynamic catalogue (OpenRouter / NVIDIA) for the given provider, else [].
+  const dynamicModelsFor = (s: AISettings, p: AIProvider) =>
+    p === 'openrouter' ? s.openrouterModels : p === 'nvidia' ? s.nvidiaModels : [];
+
   const modelOptions: AIModelOption[] = useMemo(() => {
     if (!settings) return [];
-    if (provider === 'openrouter') {
-      return settings.openrouterModels.map(m => ({
+    if (DYNAMIC_PROVIDERS.includes(provider)) {
+      return dynamicModelsFor(settings, provider).map(m => ({
         id: m.id,
         label: m.label,
-        provider: 'openrouter' as const,
+        provider,
         tier: 'free' as const,
         contextWindow: m.contextLength ? `${Math.round(m.contextLength / 1000)}K` : '—',
         inputPricePerMillion: 0,
         outputPricePerMillion: 0,
         supportsWebSearch: false,
-        recommendedFor: 'OpenRouter free model.',
+        recommendedFor: provider === 'nvidia' ? 'NVIDIA hosted model (free dev tier).' : 'OpenRouter free model.',
       }));
     }
     return settings.allowedModels.filter(m => m.provider === provider);
@@ -103,9 +118,10 @@ export function AISettingsPage() {
   function selectProvider(p: AIProvider) {
     setProvider(p);
     setProviderTest(null);
+    setOrMsg(null);
     if (!settings) return;
-    const opts = p === 'openrouter'
-      ? settings.openrouterModels.map(m => m.id)
+    const opts = DYNAMIC_PROVIDERS.includes(p)
+      ? dynamicModelsFor(settings, p).map(m => m.id)
       : settings.allowedModels.filter(m => m.provider === p).map(m => m.id);
     if (!opts.includes(model)) setModel(opts[0] ?? '');
   }
@@ -121,7 +137,7 @@ export function AISettingsPage() {
       // Refetch to get fresh previews / providers status.
       const fresh = await fetchAISettings();
       setSettings(fresh);
-      setKeyInputs({ gemini: '', deepseek: '', openrouter: '' });
+      setKeyInputs({ gemini: '', deepseek: '', openrouter: '', nvidia: '' });
       setShowKey(false);
       setSaveMsg({ type: 'ok', text: 'Settings saved.' });
     } catch (e) {
@@ -161,17 +177,20 @@ export function AISettingsPage() {
     }
   };
 
-  const handleRefreshOpenRouter = async () => {
+  // Refresh the dynamic model list for the active provider (OpenRouter / NVIDIA).
+  const handleRefreshDynamicModels = async () => {
     setOrRefreshing(true);
     setOrMsg(null);
     try {
-      const r = await refreshOpenRouterModels();
-      setSettings(s => s ? { ...s, openrouterModels: r.models, openrouterModelsUpdatedAt: r.updatedAt } : s);
-      // If on OpenRouter with no valid selection, pick the first.
-      if (provider === 'openrouter' && !r.models.some(m => m.id === model)) {
-        setModel(r.models[0]?.id ?? '');
-      }
-      setOrMsg(`Loaded ${r.count} free models.`);
+      const r = provider === 'nvidia' ? await refreshNvidiaModels() : await refreshOpenRouterModels();
+      setSettings(s => s
+        ? (provider === 'nvidia'
+            ? { ...s, nvidiaModels: r.models, nvidiaModelsUpdatedAt: r.updatedAt }
+            : { ...s, openrouterModels: r.models, openrouterModelsUpdatedAt: r.updatedAt })
+        : s);
+      // If the current selection is no longer valid, pick the first model.
+      if (!r.models.some(m => m.id === model)) setModel(r.models[0]?.id ?? '');
+      setOrMsg(`Loaded ${r.count} models.`);
     } catch (e) {
       setOrMsg(e instanceof Error ? e.message : 'Failed to refresh models.');
     } finally {
@@ -204,6 +223,8 @@ export function AISettingsPage() {
 
   const providerStatus = settings.providers.find(p => p.provider === provider);
   const info = PROVIDERS[provider];
+  const isDynamicProvider = DYNAMIC_PROVIDERS.includes(provider);
+  const dynamicUpdatedAt = provider === 'nvidia' ? settings.nvidiaModelsUpdatedAt : settings.openrouterModelsUpdatedAt;
   const dirty =
     provider !== settings.provider || model !== settings.model || enabled !== settings.enabled ||
     useGrounding !== settings.useGrounding || autoFailover !== settings.autoFailover ||
@@ -221,7 +242,7 @@ export function AISettingsPage() {
             Store a key for each provider once, then switch freely. The active provider + model is used for every
             "Research benchmarks" / RV Research request.
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             {PROVIDER_ORDER.map(p => {
               const st = settings.providers.find(x => x.provider === p);
               const active = provider === p;
@@ -293,13 +314,13 @@ export function AISettingsPage() {
 
         {/* Model selector */}
         <Card title="Model">
-          {provider === 'openrouter' && (
+          {isDynamicProvider && (
             <div className="flex items-center gap-3 mb-3 flex-wrap">
-              <button onClick={handleRefreshOpenRouter} disabled={orRefreshing} className="text-xs bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white px-3 py-1.5 rounded font-medium">
-                {orRefreshing ? 'Updating…' : 'Update models (free)'}
+              <button onClick={handleRefreshDynamicModels} disabled={orRefreshing} className="text-xs bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white px-3 py-1.5 rounded font-medium">
+                {orRefreshing ? 'Updating…' : provider === 'nvidia' ? 'Update models' : 'Update models (free)'}
               </button>
-              {settings.openrouterModelsUpdatedAt && (
-                <span className="text-[10px] text-gray-500">Last updated {new Date(settings.openrouterModelsUpdatedAt).toLocaleString()}</span>
+              {dynamicUpdatedAt && (
+                <span className="text-[10px] text-gray-500">Last updated {new Date(dynamicUpdatedAt).toLocaleString()}</span>
               )}
               {orMsg && <span className="text-[10px] text-gray-300">{orMsg}</span>}
             </div>
@@ -307,11 +328,13 @@ export function AISettingsPage() {
 
           {modelOptions.length === 0 ? (
             <p className="text-xs text-gray-400">
-              {provider === 'openrouter'
-                ? 'No models loaded yet — click "Update models (free)" to fetch OpenRouter\'s current free model list.'
-                : 'No models available.'}
+              {provider === 'nvidia'
+                ? 'No models loaded yet — save an NVIDIA key, then click "Update models" to fetch NVIDIA\'s hosted catalogue.'
+                : provider === 'openrouter'
+                  ? 'No models loaded yet — click "Update models (free)" to fetch OpenRouter\'s current free model list.'
+                  : 'No models available.'}
             </p>
-          ) : provider === 'openrouter' ? (
+          ) : isDynamicProvider ? (
             <select value={model} onChange={e => setModel(e.target.value)}
               className="w-full text-sm bg-gray-700 border border-gray-600 text-white rounded px-3 py-2 focus:outline-none focus:border-blue-500">
               {modelOptions.map(m => <option key={m.id} value={m.id}>{m.label} ({m.contextWindow})</option>)}
@@ -380,7 +403,7 @@ function Header() {
       <h2 className="text-xl font-bold text-white">AI Settings</h2>
       <p className="text-gray-400 text-sm mt-0.5">
         Configure the providers used by the live "Research benchmarks" and RV Research features. Store a key for
-        Google Gemini, DeepSeek and/or OpenRouter, then switch the active provider and model.
+        Google Gemini, DeepSeek, OpenRouter and/or NVIDIA, then switch the active provider and model.
       </p>
     </div>
   );
