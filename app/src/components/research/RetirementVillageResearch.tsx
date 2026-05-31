@@ -358,7 +358,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Meta({ result }: { result: { model?: string; provider?: string; cotality?: CotalityNote; groundingUsed?: boolean } }) {
+function Meta({ result }: { result: { model?: string; provider?: string; cotality?: CotalityNote; groundingUsed?: boolean; tavily?: { used: boolean; results?: number } } }) {
   // groundingUsed is explicitly false when the active model has no live web
   // search (DeepSeek) OR when Gemini's grounding fell back (quota/permission).
   // Without live search the model relies on training data — it can't pull
@@ -374,7 +374,7 @@ function Meta({ result }: { result: { model?: string; provider?: string; cotalit
           </span>
         )}
         {result.groundingUsed
-          ? <span className="text-[10px] bg-purple-50 border border-purple-200 text-purple-700 rounded px-1.5 py-0.5">Live web search</span>
+          ? <span className="text-[10px] bg-purple-50 border border-purple-200 text-purple-700 rounded px-1.5 py-0.5">Live web search{result.tavily?.used ? ` (Tavily${result.tavily.results ? `, ${result.tavily.results} results` : ''})` : ''}</span>
           : <span className="text-[10px] bg-amber-50 border border-amber-300 text-amber-800 rounded px-1.5 py-0.5">No live web search</span>}
         {result.model && <span className="text-[10px] text-gray-400">model: {result.model}</span>}
         {result.cotality && !result.cotality.used && result.cotality.reason && (

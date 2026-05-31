@@ -62,6 +62,8 @@ interface GRVResearch {
   timestamp: string;
   /** Set when the result was grounded in (or attempted against) Cotality data. */
   cotality?: { used: boolean; url?: string; reason?: string };
+  /** Set when grounded in live Tavily web search (non-Gemini providers). */
+  tavily?: { used: boolean; results?: number };
   /** True when served from cache (local or server) rather than a fresh AI call. */
   cached?: boolean;
 }
@@ -605,6 +607,11 @@ function LiveResearchPanel({
           {result.cotality && !result.cotality.used && result.cotality.reason && (
             <div className="mb-2 text-[10px] bg-amber-50 border border-amber-200 text-amber-800 rounded px-1.5 py-0.5">
               {result.cotality.reason}
+            </div>
+          )}
+          {result.tavily?.used && (
+            <div className="mb-2 text-[10px] inline-flex items-center gap-1 bg-purple-100 border border-purple-300 text-purple-900 rounded px-1.5 py-0.5">
+              <span aria-hidden="true">🔎</span> Grounded in live web search (Tavily{result.tavily.results ? `, ${result.tavily.results} results` : ''})
             </div>
           )}
           <p className="text-[11px] text-gray-800 mb-2">{result.summary}</p>

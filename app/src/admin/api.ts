@@ -259,3 +259,44 @@ export async function testCotalityConnection(
 export async function deleteCotalityCredentials(): Promise<void> {
   await apiFetch('/cotality-settings', { method: 'DELETE' });
 }
+
+// ── Tavily Web Search Settings ────────────────────────────────────────────────
+
+export type TavilySearchDepth = 'basic' | 'advanced';
+
+export interface TavilySettings {
+  hasKey: boolean;
+  hasStoredKey: boolean;
+  hasEnvFallback: boolean;
+  source: 'stored' | 'env' | 'none';
+  keyPreview: string;
+  enabled: boolean;
+  maxResults: number;
+  searchDepth: TavilySearchDepth;
+}
+
+export interface TavilySettingsPatch {
+  apiKey?: string;
+  enabled?: boolean;
+  maxResults?: number;
+  searchDepth?: TavilySearchDepth;
+}
+
+export async function fetchTavilySettings(): Promise<TavilySettings> {
+  return apiFetch<TavilySettings>('/tavily-settings');
+}
+
+export async function updateTavilySettings(
+  patch: TavilySettingsPatch,
+): Promise<{ ok: true; hasKey: boolean; keyPreview: string; enabled: boolean; maxResults: number; searchDepth: TavilySearchDepth }> {
+  return apiFetch('/tavily-settings', { method: 'POST', body: JSON.stringify(patch) });
+}
+
+/** Verify the key by running a live throwaway search. */
+export async function testTavilyConnection(patch: TavilySettingsPatch): Promise<{ ok: true; message: string }> {
+  return apiFetch('/tavily-settings', { method: 'POST', body: JSON.stringify({ ...patch, test: true }) });
+}
+
+export async function deleteTavilyKey(): Promise<void> {
+  await apiFetch('/tavily-settings', { method: 'DELETE' });
+}

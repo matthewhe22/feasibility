@@ -4,6 +4,7 @@ import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
 import { resolveProviderChain } from '../_lib/aiSettings';
 import { runAIResearch, mergeSources, AIResearchError, type AIResearchSource } from '../_lib/aiClient';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
+import { resolveTavilySettings, fetchTavilyContext } from '../_lib/tavily';
 import { researchCacheKey, getCachedResearch, setCachedResearch } from '../_lib/researchCache';
 
 /**
@@ -54,6 +55,24 @@ interface CotalityNote {
   url?: string;
   /** Why grounding was skipped (when configured but no data returned). */
   reason?: string;
+}
+
+interface TavilyNote {
+  used: boolean;
+  /** Number of web results injected (when used). */
+  results?: number;
+}
+
+/** Build a concise web-search query from the research request. */
+function buildSearchQuery(req: ResearchRequest): string {
+  if (req.mode === 'grv') {
+    const where = req.suburb ? `${req.suburb} ` : '';
+    return `Australian ${req.assetType ?? 'property'} sale price ${where}${req.state} ${req.locationGrade ?? ''} ${req.targetYear ?? new Date().getFullYear()} median price per sqm`.replace(/\s+/g, ' ').trim();
+  }
+  if (req.mode === 'professional') {
+    return `Australian professional consultant fees percent of construction cost ${req.buildingType ?? ''} ${req.state} 2024 2025`.replace(/\s+/g, ' ').trim();
+  }
+  return `Australian construction cost per m2 ${req.buildingType ?? ''} ${req.state} ${req.finishQuality ?? ''} 2024 2025`.replace(/\s+/g, ' ').trim();
 }
 
 /** Pull a 4-digit Australian postcode out of a free-text address, if present. */
@@ -301,12 +320,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     /* never block AI research on Cotality */
   }
 
-  // ── Response cache (minimise Gemini queries) ──────────────────────────────
-  // An identical request (same profile + provider/model + grounding + Cotality)
-  // returns the prior answer without calling the model at all. Benchmarks are
-  // stable hour-to-hour, so this is the primary lever against the scarce
-  // free-tier search quota. Bypass with { refresh: true } in the body.
+  // ── Optional: Tavily web search for providers without native grounding ─────
+  // Gemini has its own Google-Search grounding, so Tavily applies only when the
+  // active provider is DeepSeek / OpenRouter / NVIDIA. Best-effort: any failure
+  // degrades silently to ungrounded research.
   const head = resolved.chain[0];
+  let tavilyNote: TavilyNote = { used: false };
+  let tavilySources: AIResearchSource[] = [];
+  if (head && head.provider !== 'gemini') {
+    try {
+      const tavily = await resolveTavilySettings(supabase);
+      if (tavily) {
+        const ctx = await fetchTavilyContext(tavily, buildSearchQuery(body));
+        if (ctx) {
+          userPrompt =
+            `${userPrompt}\n\n` +
+            `=== LIVE WEB SEARCH RESULTS (Tavily) — use as the primary current-data source; cite the URLs ===\n` +
+            `${ctx.promptBlock}\n` +
+            `=== END WEB SEARCH RESULTS ===\n` +
+            `Base your figures on these live results where relevant and cite the URLs above in the sources list.`;
+          tavilyNote = { used: true, results: ctx.resultCount };
+          tavilySources = ctx.sources;
+        }
+      }
+    } catch {
+      /* never block AI research on Tavily */
+    }
+  }
+
+  // ── Response cache (minimise Gemini queries) ──────────────────────────────
+  // An identical request (same profile + provider/model + grounding + Cotality
+  // + Tavily) returns the prior answer without calling the model at all.
+  // Benchmarks are stable hour-to-hour, so this is the primary lever against the
+  // scarce free-tier search quota. Bypass with { refresh: true } in the body.
   const cacheKey = researchCacheKey({
     endpoint: 'benchmarks',
     body,
@@ -314,6 +360,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     model: head?.model,
     grounding: resolved.useGrounding,
     cotality: cotalityNote.used,
+    tavily: tavilyNote.used,
   });
   const refresh = (body as ResearchRequest & { refresh?: boolean }).refresh === true;
   if (!refresh) {
@@ -343,12 +390,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const declared = result.json.sources as Array<{ title: string; url: string; snippet?: string }> | undefined;
       const payload: Record<string, unknown> = {
         ...result.json,
-        sources: mergeSources(result.groundingSources, declared as AIResearchSource[] | undefined),
+        sources: mergeSources([...result.groundingSources, ...tavilySources], declared as AIResearchSource[] | undefined),
         model: p.model,
         provider: result.provider,
-        groundingUsed: result.groundingUsed,
+        groundingUsed: result.groundingUsed || tavilyNote.used,
         configSource: p.source,
         cotality: cotalityNote,
+        tavily: tavilyNote,
         timestamp: new Date().toISOString(),
       };
       if (i > 0) {

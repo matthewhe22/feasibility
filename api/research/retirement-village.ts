@@ -3,6 +3,7 @@ import { setCors } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
 import { resolveProviderChain } from '../_lib/aiSettings';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
+import { resolveTavilySettings, fetchTavilyContext } from '../_lib/tavily';
 import { runAIResearch, mergeSources, AIResearchError, type AIResearchSource } from '../_lib/aiClient';
 import { researchCacheKey, getCachedResearch, setCachedResearch } from '../_lib/researchCache';
 
@@ -191,10 +192,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   } catch { /* never block AI research on Cotality */ }
 
+  // Optional Tavily web search for providers without native grounding (DeepSeek
+  // / OpenRouter / NVIDIA). Gemini uses its own grounding, so it's skipped there.
+  const head = resolved.chain[0];
+  let tavilyNote: { used: boolean; results?: number } = { used: false };
+  let tavilySources: AIResearchSource[] = [];
+  if (head && head.provider !== 'gemini') {
+    try {
+      const tavily = await resolveTavilySettings(supabase);
+      if (tavily) {
+        const where = [body.suburb, body.state].filter(Boolean).join(' ');
+        const query = body.mode === 'suburbs'
+          ? `${body.villageName} ${where} surrounding suburbs median house and unit price`.replace(/\s+/g, ' ').trim()
+          : `retirement village near ${body.villageName} ${where} units for sale price recent`.replace(/\s+/g, ' ').trim();
+        const ctx = await fetchTavilyContext(tavily, query);
+        if (ctx) {
+          userPrompt +=
+            `\n\n=== LIVE WEB SEARCH RESULTS (Tavily) — primary current-data source; cite the URLs ===\n` +
+            `${ctx.promptBlock}\n=== END WEB SEARCH RESULTS ===`;
+          tavilyNote = { used: true, results: ctx.resultCount };
+          tavilySources = ctx.sources;
+        }
+      }
+    } catch { /* never block AI research on Tavily */ }
+  }
+
   // Response cache — identical research returns the prior answer without
   // calling the model, sparing the scarce Gemini search quota. Bypass with
   // { refresh: true }.
-  const head = resolved.chain[0];
   const cacheKey = researchCacheKey({
     endpoint: 'retirement-village',
     body,
@@ -202,6 +227,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     model: head?.model,
     grounding: resolved.useGrounding,
     cotality: cotalityNote.used,
+    tavily: tavilyNote.used,
   });
   if ((body as RVRequest & { refresh?: boolean }).refresh !== true) {
     const cached = getCachedResearch(cacheKey);
@@ -226,12 +252,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const declared = (result.json.sources as AIResearchSource[] | undefined);
       const payload: Record<string, unknown> = {
         ...result.json,
-        sources: mergeSources(result.groundingSources, declared),
+        sources: mergeSources([...result.groundingSources, ...tavilySources], declared),
         model: p.model,
         provider: result.provider,
-        groundingUsed: result.groundingUsed,
+        groundingUsed: result.groundingUsed || tavilyNote.used,
         configSource: p.source,
         cotality: cotalityNote,
+        tavily: tavilyNote,
         timestamp: new Date().toISOString(),
       };
       if (i > 0) payload.failoverNote = `Primary provider (${resolved.chain[0].provider}) was rate-limited; served by ${p.provider} instead.`;

@@ -274,6 +274,30 @@ powered by a configurable AI provider, managed in Admin → AI Settings.
   orders the active provider first, then the rest as failover candidates
   (auto-failover defaults ON).
 
+## Tavily Web Search (grounding for non-Gemini providers)
+Gemini is the only provider with native web search. To give live web grounding
+to the providers that lack it (DeepSeek / OpenRouter / NVIDIA), an optional
+**Tavily** (https://tavily.com) integration can be configured in Admin → Tavily
+Search.
+
+- `api/_lib/tavily.ts` — API-key storage (sentinel row `__tavily_settings__`,
+  server-only), `resolveTavilySettings` (stored, else `TAVILY_API_KEY` env),
+  `tavilySearch` (POST `api.tavily.com/search`, Bearer auth), and
+  `fetchTavilyContext` (best-effort prompt-block + sources; never throws).
+  Configurable `maxResults` (1–10) and `searchDepth` (basic/advanced).
+- `api/admin/tavily-settings.ts` — admin GET/POST/DELETE + `{test:true}` (runs a
+  live throwaway search to verify the key/quota).
+- Both research endpoints: when the **active provider is not Gemini**, they run a
+  Tavily search built from the request (`buildSearchQuery`), inject the results
+  into the prompt as the primary current-data source, merge the result URLs into
+  `sources`, set `groundingUsed=true`, and carry a `tavily:{used,results}` note.
+  Gated on the head provider ≠ gemini; Gemini keeps its own grounding. Every
+  Tavily call is best-effort — failure degrades to ungrounded research. The
+  response cache key includes `tavily.used`.
+- UI: Admin page `app/src/admin/TavilySettingsPage.tsx` (nav: **Tavily Search**).
+  The GRV card and RV Research Meta show a "Grounded in live web search (Tavily)"
+  badge when used.
+
 ## Cotality (CoreLogic) Property-Data Integration
 Live AI benchmark research (the "Research benchmarks" buttons on the GRV/cost
 reference cards) can be **grounded in real Cotality property data** when a
