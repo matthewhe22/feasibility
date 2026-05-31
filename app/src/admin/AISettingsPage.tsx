@@ -190,7 +190,10 @@ export function AISettingsPage() {
         : s);
       // If the current selection is no longer valid, pick the first model.
       if (!r.models.some(m => m.id === model)) setModel(r.models[0]?.id ?? '');
-      setOrMsg(`Loaded ${r.count} models.`);
+      const stale = provider === 'nvidia' ? (r as { staleDefaults?: string[] }).staleDefaults ?? [] : [];
+      setOrMsg(stale.length
+        ? `Loaded ${r.count} models. ${stale.length} curated default(s) retired/renamed (now using the live list): ${stale.join(', ')}.`
+        : `Loaded ${r.count} models.`);
     } catch (e) {
       setOrMsg(e instanceof Error ? e.message : 'Failed to refresh models.');
     } finally {

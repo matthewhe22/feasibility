@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
-import { loadAISettings, saveAISettings, fetchNvidiaModels } from '../_lib/aiSettings';
+import { loadAISettings, saveAISettings, fetchNvidiaModels, NVIDIA_DEFAULT_MODELS } from '../_lib/aiSettings';
 
 /**
  * POST /api/admin/nvidia-models
@@ -35,6 +35,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const updatedAt = new Date().toISOString();
 
+  // Verify the curated defaults against the authoritative live catalogue — flag
+  // any that have been renamed/retired so the admin knows to pick a live one.
+  // This is the "verify models" check: it costs no inference, reusing the single
+  // /models call above instead of pinging each curated model individually.
+  const liveIds = new Set(models.map(m => m.id));
+  const staleDefaults = NVIDIA_DEFAULT_MODELS.filter(d => !liveIds.has(d.id)).map(d => d.id);
+
   // Persist the cache when we have a place to store it.
   if (supabase) {
     const base = stored ?? { provider: 'nvidia' as const, model: 'meta/llama-3.1-8b-instruct', enabled: true, useGrounding: true, autoFailover: true, keys: {} };
@@ -43,5 +50,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch { /* non-fatal — still return the freshly fetched list */ }
   }
 
-  return res.status(200).json({ ok: true, count: models.length, models, updatedAt });
+  return res.status(200).json({ ok: true, count: models.length, models, updatedAt, staleDefaults });
 }

@@ -196,8 +196,10 @@ export async function refreshOpenRouterModels(): Promise<{ ok: true; count: numb
   return apiFetch('/openrouter-models', { method: 'POST' });
 }
 
-/** Refresh NVIDIA's model list (persisted server-side). Requires a saved key. */
-export async function refreshNvidiaModels(): Promise<{ ok: true; count: number; models: NvidiaModel[]; updatedAt: string }> {
+/** Refresh NVIDIA's model list (persisted server-side). Requires a saved key.
+ *  `staleDefaults` lists curated default model IDs no longer in NVIDIA's live
+ *  catalogue (the "verify models" cross-check). */
+export async function refreshNvidiaModels(): Promise<{ ok: true; count: number; models: NvidiaModel[]; updatedAt: string; staleDefaults?: string[] }> {
   return apiFetch('/nvidia-models', { method: 'POST' });
 }
 
