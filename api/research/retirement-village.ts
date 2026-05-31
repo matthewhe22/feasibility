@@ -170,68 +170,71 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const systemPrompt = body.mode === 'suburbs' ? SYSTEM_SUBURBS : SYSTEM_COMPETITORS;
   let userPrompt = body.mode === 'suburbs' ? buildSuburbsPrompt(body) : buildCompetitorsPrompt(body);
-
-  // Optional Cotality grounding (best-effort; needs a suburb/postcode key).
-  let cotalityNote: { used: boolean; url?: string; reason?: string } = { used: false };
-  try {
-    const cotality = await resolveCotalitySettings(supabase);
-    if (cotality) {
-      const ctx = await fetchCotalityContext(cotality, {
-        suburb: body.suburb,
-        state: body.state,
-        postcode: body.postcode,
-      });
-      if (ctx) {
-        userPrompt +=
-          `\n\n=== AUTHORITATIVE COTALITY DATA (treat as PRIMARY source; cite as "Cotality") ===\n` +
-          `Source: ${ctx.url}\n${ctx.data}\n=== END COTALITY DATA ===`;
-        cotalityNote = { used: true, url: ctx.url };
-      } else if (cotality.propertyDataPath) {
-        cotalityNote = { used: false, reason: 'Cotality configured but returned no data for the supplied suburb/postcode — used web research only.' };
-      }
-    }
-  } catch { /* never block AI research on Cotality */ }
-
-  // Optional Tavily web search for providers without native grounding (DeepSeek
-  // / OpenRouter / NVIDIA). Gemini uses its own grounding, so it's skipped there.
   const head = resolved.chain[0];
-  let tavilyNote: { used: boolean; results?: number } = { used: false };
-  let tavilySources: AIResearchSource[] = [];
+  const refresh = (body as RVRequest & { refresh?: boolean }).refresh === true;
+
+  // Resolve grounding *config* (cheap reads — no external API calls) so the
+  // cache key can reflect it, WITHOUT performing the paid / rate-limited
+  // Cotality + Tavily lookups. Those run only on a cache miss below — otherwise
+  // an identical (cached) request would still burn a Tavily search.
+  let cotalitySettings: Awaited<ReturnType<typeof resolveCotalitySettings>> = null;
+  try { cotalitySettings = await resolveCotalitySettings(supabase); } catch { /* ignore */ }
+  let tavilySettings: Awaited<ReturnType<typeof resolveTavilySettings>> = null;
   if (head && head.provider !== 'gemini') {
-    try {
-      const tavily = await resolveTavilySettings(supabase);
-      if (tavily) {
-        const where = [body.suburb, body.state].filter(Boolean).join(' ');
-        const query = body.mode === 'suburbs'
-          ? `${body.villageName} ${where} surrounding suburbs median house and unit price`.replace(/\s+/g, ' ').trim()
-          : `retirement village near ${body.villageName} ${where} units for sale price recent`.replace(/\s+/g, ' ').trim();
-        const ctx = await fetchTavilyContext(tavily, query);
-        if (ctx) {
-          userPrompt +=
-            `\n\n=== LIVE WEB SEARCH RESULTS (Tavily) — primary current-data source; cite the URLs ===\n` +
-            `${ctx.promptBlock}\n=== END WEB SEARCH RESULTS ===`;
-          tavilyNote = { used: true, results: ctx.resultCount };
-          tavilySources = ctx.sources;
-        }
-      }
-    } catch { /* never block AI research on Tavily */ }
+    try { tavilySettings = await resolveTavilySettings(supabase); } catch { /* ignore */ }
   }
 
-  // Response cache — identical research returns the prior answer without
-  // calling the model, sparing the scarce Gemini search quota. Bypass with
-  // { refresh: true }.
+  // Response cache — checked BEFORE any model / Cotality / Tavily call, so a
+  // cached request spends no search quota. Bypass with { refresh: true }.
   const cacheKey = researchCacheKey({
     endpoint: 'retirement-village',
     body,
     provider: head?.provider,
     model: head?.model,
     grounding: resolved.useGrounding,
-    cotality: cotalityNote.used,
-    tavily: tavilyNote.used,
+    cotality: Boolean(cotalitySettings),
+    tavily: Boolean(tavilySettings),
   });
-  if ((body as RVRequest & { refresh?: boolean }).refresh !== true) {
+  if (!refresh) {
     const cached = getCachedResearch(cacheKey);
     if (cached) return res.status(200).json(cached);
+  }
+
+  // Cache miss: perform the (paid) grounding lookups, once.
+  let cotalityNote: { used: boolean; url?: string; reason?: string } = { used: false };
+  if (cotalitySettings) {
+    try {
+      const ctx = await fetchCotalityContext(cotalitySettings, { suburb: body.suburb, state: body.state, postcode: body.postcode });
+      if (ctx) {
+        userPrompt +=
+          `\n\n=== AUTHORITATIVE COTALITY DATA (treat as PRIMARY source; cite as "Cotality") ===\n` +
+          `Source: ${ctx.url}\n${ctx.data}\n=== END COTALITY DATA ===`;
+        cotalityNote = { used: true, url: ctx.url };
+      } else if (cotalitySettings.propertyDataPath) {
+        cotalityNote = { used: false, reason: 'Cotality configured but returned no data for the supplied suburb/postcode — used web research only.' };
+      }
+    } catch { /* never block AI research on Cotality */ }
+  }
+
+  // Optional Tavily web search for providers without native grounding (DeepSeek
+  // / OpenRouter / NVIDIA). One search per cache-miss request maximum.
+  let tavilyNote: { used: boolean; results?: number } = { used: false };
+  let tavilySources: AIResearchSource[] = [];
+  if (tavilySettings) {
+    try {
+      const where = [body.suburb, body.state].filter(Boolean).join(' ');
+      const query = body.mode === 'suburbs'
+        ? `${body.villageName} ${where} surrounding suburbs median house and unit price`.replace(/\s+/g, ' ').trim()
+        : `retirement village near ${body.villageName} ${where} units for sale price recent`.replace(/\s+/g, ' ').trim();
+      const ctx = await fetchTavilyContext(tavilySettings, query);
+      if (ctx) {
+        userPrompt +=
+          `\n\n=== LIVE WEB SEARCH RESULTS (Tavily) — primary current-data source; cite the URLs ===\n` +
+          `${ctx.promptBlock}\n=== END WEB SEARCH RESULTS ===`;
+        tavilyNote = { used: true, results: ctx.resultCount };
+        tavilySources = ctx.sources;
+      }
+    } catch { /* never block AI research on Tavily */ }
   }
 
   // Run with auto-failover across configured providers (active first); on a
