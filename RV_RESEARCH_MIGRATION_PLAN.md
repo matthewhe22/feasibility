@@ -1,160 +1,134 @@
-# RV Research → RVVals Migration Plan
+# RV Research → RVVals Migration Plan (env-var-only, RV-only)
 
-Goal: move the **Retirement Village Research** feature (page + UI + backend AI
-setup) out of `matthewhe22/feasibility` and into `matthewhe22/RVVals` as a
-standalone app.
+Goal: add the **Retirement Village Research** feature (one page + its AI
+backend) to the existing `matthewhe22/RVVals` app.
 
-This plan was prepared in a session that could **not** reach RVVals (scope was
-locked to `feasibility`). To execute it, start a new Claude Code web session
-whose environment grants access to **both** repos:
+**Locked decisions (from the user):**
+1. RVVals **already has a scaffold** → add **one new page** to the existing App.
+2. **Env-var-only provider keys — NO database.** Drop Supabase, the admin
+   settings UI, and all `api/admin/*` config endpoints.
+3. **RV only** — do **not** bring `api/benchmarks/research.ts`.
 
-- `matthewhe22/feasibility` (source — read)
-- `matthewhe22/RVVals` (target — write)
-
----
-
-## 1. File inventory (what moves)
-
-### Backend — Vercel serverless API (`api/`)
-
-| Source file | Purpose | Migrate? |
-|---|---|---|
-| `api/research/retirement-village.ts` | **The RV endpoint** (`mode: 'suburbs' \| 'competitors'`) | ✅ required |
-| `api/_lib/aiClient.ts` | Shared Gemini/DeepSeek/OpenRouter/NVIDIA caller + `mergeSources` | ✅ required |
-| `api/_lib/aiSettings.ts` | Provider config, key storage, `resolveProviderChain` | ✅ required |
-| `api/_lib/cotality.ts` | Cotality (CoreLogic) grounding | ✅ required |
-| `api/_lib/tavily.ts` | Tavily web-search grounding | ✅ required |
-| `api/_lib/researchCache.ts` | Response cache (Tavily quota protection) | ✅ required |
-| `api/_lib/auth.ts` | CORS + admin JWT helpers | ✅ required |
-| `api/_lib/supabase.ts` | Service-role Supabase client | ✅ required |
-| `api/admin/ai-settings.ts` | Admin GET/POST AI provider settings | ✅ required (to configure providers) |
-| `api/admin/cotality-settings.ts` | Admin Cotality creds + `{test:true}` | ✅ required |
-| `api/admin/tavily-settings.ts` | Admin Tavily key + `{test:true}` | ✅ required |
-| `api/admin/nvidia-models.ts` | Refresh NVIDIA model catalogue | ✅ required |
-| `api/admin/openrouter-models.ts` | Refresh OpenRouter free-model catalogue | ✅ required |
-| `api/admin/login.ts` | Admin login (issues JWT) | ✅ required |
-| `api/benchmarks/research.ts` | Cost/GRV benchmark research | ⛔ feasibility-specific — **skip** unless RVVals wants it |
-| `api/admin/projects.ts`, `project/`, `stats.ts` | Feaso project CRUD/stats | ⛔ feasibility-specific — **skip** |
-
-### Frontend — React app (`app/src/`)
-
-| Source file | Purpose | Migrate? |
-|---|---|---|
-| `components/research/RetirementVillageResearch.tsx` | **The RV page/UI** (only imports `useState` + `utils.formatCurrency`) | ✅ required |
-| `admin/AdminApp.tsx` | Admin shell + nav (strip feaso-only tabs) | ✅ adapt |
-| `admin/LoginPage.tsx` | Admin login UI | ✅ required |
-| `admin/AISettingsPage.tsx` | AI provider config UI | ✅ required |
-| `admin/CotalitySettingsPage.tsx` | Cotality config UI | ✅ required |
-| `admin/TavilySettingsPage.tsx` | Tavily config UI | ✅ required |
-| `admin/api.ts` | Client helpers for `/api/admin/*` | ✅ adapt (drop project/stats fns) |
-| `admin/BrandingPage.tsx`, `StatsPage.tsx`, `ProjectsPage.tsx`, `ProjectSetupPage.tsx`, `projectSetupValidator.ts` | Feaso admin | ⛔ skip |
-| `utils/` (just `formatCurrency`) | Number formatting | ✅ copy the one helper |
+This plan was written in a session scoped to `feasibility` only (RVVals
+unreachable). Execute it from a new session whose environment grants access to
+**both** `matthewhe22/feasibility` (read source) and `matthewhe22/RVVals`
+(write target). Confirm the git proxy authorizes RVVals for clone/push, not just
+the GitHub MCP API.
 
 ---
 
-## 2. Dependency graph (import-level)
+## 1. Key finding: the resolvers already support env-only
+
+No refactor of the resolution logic is needed — just stop passing a Supabase
+client:
+
+- `aiSettings.resolveProviderChain(supabase: SupabaseClient | null)` — pass
+  **`null`** → it skips `loadAISettings` and resolves from `process.env` keys
+  (`GEMINI_API_KEY` / `DEEPSEEK_API_KEY` / `OPENROUTER_API_KEY` / `NVIDIA_API_KEY`)
+  and env models, ordering the active provider first.
+- `cotality.resolveCotalitySettings(...)` — already falls back to
+  `COTALITY_CLIENT_ID` / `COTALITY_CLIENT_SECRET` / `COTALITY_TOKEN_URL` /
+  `COTALITY_API_BASE_URL` / `COTALITY_REGION` / `COTALITY_DATA_PATH`.
+- `tavily.resolveTavilySettings(...)` — already falls back to `TAVILY_API_KEY`
+  (+ `TAVILY_MAX_RESULTS` / `TAVILY_SEARCH_DEPTH` / `TAVILY_CACHE_TTL_MS`).
+- `researchCache.ts` — pure in-memory `Map`, no DB. Copy as-is.
+- `auth.ts` — only `setCors` is needed (drop the JWT/credential helpers).
+
+The endpoint `api/research/retirement-village.ts` currently calls
+`getAdminSupabase()` / `isSupabaseConfigured()` and passes the client to the
+resolvers. **Edit it to pass `null`** and remove the `supabase` import.
+
+---
+
+## 2. Files to migrate
+
+### Backend → RVVals `api/`
+
+| Source file | Action |
+|---|---|
+| `api/research/retirement-village.ts` | Copy, then **edit**: remove `import ../_lib/supabase`; call resolvers with `null` instead of a client; drop the `isSupabaseConfigured()` gate. |
+| `api/_lib/aiClient.ts` | Copy as-is. |
+| `api/_lib/researchCache.ts` | Copy as-is. |
+| `api/_lib/auth.ts` | Copy, **trim to `setCors`** (drop `validateCredentials`/`signToken`/`verifyToken`/`requireAdmin`), or copy whole — harmless. |
+| `api/_lib/aiSettings.ts` | Copy. Optionally delete `loadAISettings`/`saveAISettings`/`deleteAISettings` (the only `SupabaseClient` consumers) + the model-refresh fetchers if unused. Keep `resolveProviderChain`, `ALLOWED_MODELS`, `defaultModelFor`, helpers. |
+| `api/_lib/cotality.ts` | Copy. Optionally delete `loadCotalitySettings`/`saveCotalitySettings`/`deleteCotalitySettings`. Keep `resolveCotalitySettings`, `fetchCotalityContext`, `getCotalityToken`, types. |
+| `api/_lib/tavily.ts` | Copy. Optionally delete `loadTavilySettings`/`saveTavilySettings`/`deleteTavilySettings`. Keep `resolveTavilySettings`, `fetchTavilyContext`, `tavilySearch`, types. |
+| `api/_lib/supabase.ts` | **Do not copy.** |
+| `api/admin/*` | **Do not copy** (ai-settings, cotality-settings, tavily-settings, nvidia-models, openrouter-models, login, projects, project/, stats). |
+| `api/benchmarks/research.ts` | **Do not copy** (RV-only). |
+
+> **`SupabaseClient` type dangle:** the three `_lib` resolver files import
+> `type { SupabaseClient } from '@supabase/supabase-js'`. Two options:
+> (a) keep `@supabase/supabase-js` as a dep (type-only, simplest), or
+> (b) if you delete the `load/save/delete` fns, also remove the type import and
+> change `resolve*` signatures from `SupabaseClient | null` to `null` (or drop
+> the param). Option (a) is lower-risk for the first migration.
+
+### Frontend → RVVals `app/src/` (or its equivalent)
+
+| Source file | Action |
+|---|---|
+| `components/research/RetirementVillageResearch.tsx` | Copy. Only deps: `useState` + `formatCurrency`. Calls `POST /api/research/retirement-village`. |
+| `utils` → `formatCurrency` | Copy just that helper into RVVals' utils. |
+| `admin/*` pages | **Do not copy** (no admin UI in env-only mode). |
+
+**Wiring:** add it as **one new page** in RVVals' existing scaffold — a new
+route/tab/nav entry, however RVVals structures pages. Do **not** copy
+feasibility's `App.tsx` or `useStore.ts`. Mirror RVVals' own page-registration
+pattern (read its current `App`/router first).
+
+---
+
+## 3. Env vars (set in RVVals' Vercel project)
 
 ```
-RetirementVillageResearch.tsx
-  └─ utils.formatCurrency            (copy 1 fn)
-  └─ POST /api/research/retirement-village
-
-api/research/retirement-village.ts
-  ├─ _lib/auth        (setCors)
-  ├─ _lib/supabase    (getAdminSupabase, isSupabaseConfigured)
-  ├─ _lib/aiSettings  (resolveProviderChain)
-  ├─ _lib/cotality    (resolveCotalitySettings, fetchCotalityContext)
-  ├─ _lib/tavily      (resolveTavilySettings, fetchTavilyContext)
-  ├─ _lib/aiClient    (runAIResearch, mergeSources, AIResearchError, AIResearchSource)
-  └─ _lib/researchCache (researchCacheKey, getCachedResearch, setCachedResearch)
-
-Admin config pages → admin/api.ts → /api/admin/{ai-settings,cotality-settings,tavily-settings,login,nvidia-models,openrouter-models}
-  → _lib/{auth,supabase,aiSettings,cotality,tavily}
-```
-
-No feaso engine/store dependency — the RV feature is cleanly separable.
-
----
-
-## 3. Data store (Supabase)
-
-Admin settings persist as **sentinel rows in the `projects` table**, in an
-`admin` JSONB column:
-
-- `__ai_settings__`     → `admin.aiSettings.keys.{gemini|deepseek|openrouter|nvidia}` + active provider/model
-- `__cotality_settings__` → OAuth2 client id/secret, token/base URLs, region, data-path template
-- `__tavily_settings__`  → api key, enabled, maxResults, searchDepth
-
-**RVVals action:** provision a Supabase project and create a `projects` table
-with at least an identity PK + a `name`/key text column + an `admin jsonb`
-column (the sentinel rows are keyed by `name`). Confirm exact column names by
-reading the `.from('projects')` queries in `aiSettings.ts` / `cotality.ts` /
-`tavily.ts` during migration. There is **no committed SQL schema** in
-feasibility — derive it from the lib queries.
-
----
-
-## 4. Environment variables (Vercel project for RVVals)
-
-Required / used by the migrated code:
-
-```
-# Supabase (server)
-SUPABASE_URL                 (or VITE_SUPABASE_URL)
-SUPABASE_SERVICE_ROLE_KEY
-VITE_SUPABASE_URL            (client, if used)
-
-# Admin auth
-ADMIN_USERNAME
-ADMIN_PASSWORD
-ADMIN_JWT_SECRET
-ADMIN_CORS_ORIGIN
-
-# AI providers (any subset; can also be saved via Admin UI)
-GEMINI_API_KEY
+# AI providers — at least one
+GEMINI_API_KEY            # only provider with native web search
 DEEPSEEK_API_KEY
 OPENROUTER_API_KEY
 NVIDIA_API_KEY
+# optional: ACTIVE_PROVIDER / model env vars — see ENV_MODEL map in aiSettings.ts
 
-# Grounding
+# Grounding (optional)
 TAVILY_API_KEY
+TAVILY_MAX_RESULTS        # 1–10
+TAVILY_SEARCH_DEPTH       # basic | advanced
 TAVILY_CACHE_TTL_MS
-TAVILY_MAX_RESULTS
-TAVILY_SEARCH_DEPTH
 COTALITY_CLIENT_ID
 COTALITY_CLIENT_SECRET
 COTALITY_TOKEN_URL
 COTALITY_API_BASE_URL
-COTALITY_REGION
-COTALITY_DATA_PATH
+COTALITY_REGION           # au | nz
+COTALITY_DATA_PATH        # path template w/ {suburb}{state}{postcode}
 
 # Cache
 RESEARCH_CACHE_TTL_MS
 ```
 
-(Note: `GEMINI_API_KEY` / `DEEPSEEK_API_KEY` referenced in `aiSettings.ts`
-resolution; confirm exact names there.)
+No `SUPABASE_*` / `ADMIN_*` vars needed (DB + admin auth removed). With no AI
+key set, the endpoint returns its no-provider error — that's the expected
+"unconfigured" state.
+
+Confirm exact provider env-var names by reading `ENV_KEY` / `ENV_MODEL` in
+`aiSettings.ts` during migration.
 
 ---
 
-## 5. NPM dependencies
+## 4. NPM deps
 
-**Root (`/package.json` — Vercel API runtime):**
+**Root `api` runtime (`/package.json`):**
 ```json
 "@google/generative-ai": "^0.21.0",
-"@supabase/supabase-js": "^2.103.0",
-"@vercel/node": "^5.0.2",
-"jsonwebtoken": "^9.0.2"
-// devDeps: @types/jsonwebtoken, @types/node, typescript
+"@vercel/node": "^5.0.2"
+// + "@supabase/supabase-js": "^2.103.0"  ONLY if keeping the type import (option a)
+// drop jsonwebtoken (no admin auth)
 ```
 
-**App (`app/package.json`):** RV page itself only needs React + Tailwind. Drop
-feaso-only deps (recharts, exceljs, dexie, file-saver, zustand, @vercel/analytics)
-unless RVVals reuses them. Minimum: `react`, `react-dom`, `tailwindcss`,
-`@tailwindcss/vite`, `@supabase/supabase-js` (if client touches it), plus the
-vite/eslint/ts devDeps.
+**App:** the RV page needs only React + Tailwind — use whatever RVVals' scaffold
+already has; add nothing feaso-specific (no recharts/exceljs/dexie/zustand/etc).
 
-**`vercel.json`** (copy + keep):
+**`vercel.json`:** RVVals likely already has one. Ensure serverless `api/`
+functions are picked up and the SPA rewrite exists. Reference:
 ```json
 {
   "buildCommand": "cd app && npm install && npm run build",
@@ -163,43 +137,38 @@ vite/eslint/ts devDeps.
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }
 ```
+Adapt to RVVals' actual layout (it may not use the `app/` subdir split).
 
 ---
 
-## 6. Frontend wiring to remove (feaso-specific)
+## 5. Execution checklist (next session, both repos accessible)
 
-`RetirementVillageResearch` is registered in `app/src/App.tsx`:
-- import line 18, `TabId` union (line 74), tab list entry (line 85), render (line 375)
-- also in `app/src/store/useStore.ts` `TabId` union (line 34)
-
-In RVVals it should likely be the **primary/standalone page** (or one of a few),
-not a tab buried in the feaso shell — so build a fresh minimal `App.tsx` around
-it rather than copying the feaso `App.tsx`.
-
-`AdminApp.tsx` nav: keep **AI Settings / Cotality Data / Tavily Search**; drop
-**overview/projects/projectSetup/branding** tabs (and their pages).
-
----
-
-## 7. Execution checklist (next session, both repos accessible)
-
-1. `git clone` RVVals; inspect its current structure (may be empty/scaffold).
-2. Decide layout — mirror feasibility's `app/` + `api/` split, or RVVals' own.
-3. Copy the ✅ backend files into `api/` (preserve `_lib/` relative imports).
-4. Copy the ✅ frontend files into `app/src/`; strip feaso-only admin tabs/pages.
-5. Add `formatCurrency` to RVVals `utils`.
-6. Build a minimal `App.tsx` that renders `RetirementVillageResearch` (+ admin route).
-7. Add root + app `package.json` deps; add `vercel.json`.
-8. Provision Supabase `projects` table (sentinel-row schema, §3).
-9. Set Vercel env vars (§4).
-10. `cd app && npm install && npm run build` — green build is the gate.
-11. Commit on RVVals' designated branch; push.
+1. Clone RVVals; read its structure — build tool, `api/` convention, how pages
+   are registered, existing `package.json` / `vercel.json` / tsconfig.
+2. Create `api/_lib/` and copy: `aiClient.ts`, `researchCache.ts`, `auth.ts`
+   (setCors), `aiSettings.ts`, `cotality.ts`, `tavily.ts`.
+3. Copy `api/research/retirement-village.ts` and edit it for env-only (§1):
+   drop supabase import, pass `null` to resolvers, drop `isSupabaseConfigured`.
+4. Copy `RetirementVillageResearch.tsx` into RVVals' components; add
+   `formatCurrency` to utils.
+5. Register it as one new page in RVVals' existing App/nav.
+6. Add deps (§4); set env vars (§3).
+7. Typecheck/build with RVVals' canonical build command (green = gate).
+8. Smoke test: page renders; `POST /api/research/retirement-village`
+   `{mode:'suburbs', village:'...'}` returns JSON (configured) or a clean
+   no-provider error (unconfigured).
+9. Commit on RVVals' designated branch; push. **No PR unless asked.**
 
 ---
 
-## 8. Open questions for the user
+## 6. Notes / risks
 
-- Does RVVals already have a scaffold/structure, or start clean?
-- Keep the admin/Supabase settings layer, or hard-code provider keys via env
-  only (simpler, no DB)? The current code expects the `projects` sentinel rows.
-- Include the cost/GRV `benchmarks/research.ts` endpoint too, or RV-only?
+- `retirement-village.ts` is the only file needing real edits; everything else
+  is copy-or-copy-and-trim.
+- Keep the `cotality:{used,...}` / `tavily:{used,...}` response fields and the
+  grounding badges in the UI — they degrade gracefully when unconfigured.
+- The page's `formatCurrency` import path will change to match RVVals' utils
+  location — fix the one import line.
+- If RVVals isn't a Vercel project with `@vercel/node` serverless functions,
+  the `api/*` handlers (typed `VercelRequest`/`VercelResponse`) must be adapted
+  to its server framework — check before copying.
