@@ -250,11 +250,20 @@ export async function loadAISettings(supabase: SupabaseClient): Promise<StoredAI
 
 export async function saveAISettings(supabase: SupabaseClient, settings: StoredAISettings): Promise<void> {
   const adminPayload = { aiSettings: settings };
-  const { data: existing } = await supabase
+  const { data: existing, error: lookupError } = await supabase
     .from('projects')
     .select('id')
     .eq('name', AI_SETTINGS_SENTINEL)
     .maybeSingle();
+
+  // A FAILED lookup is not the same as "no row yet". Ignoring the error here
+  // made any transient database failure look like a first-time save, sending
+  // an existing-settings write down the INSERT path — which then either
+  // duplicates the sentinel row or fails on the unique constraint, reporting a
+  // misleading error. Surface the read failure as itself.
+  if (lookupError) {
+    throw new Error(`Could not read the AI settings row: ${lookupError.message}`);
+  }
 
   if (existing) {
     const { error } = await supabase

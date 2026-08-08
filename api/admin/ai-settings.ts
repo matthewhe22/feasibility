@@ -144,7 +144,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       nvidiaModels: existing?.nvidiaModels,
       nvidiaModelsUpdatedAt: existing?.nvidiaModelsUpdatedAt,
     };
-    await saveAISettings(supabase, next);
+    try {
+      await saveAISettings(supabase, next);
+    } catch (e) {
+      // An uncaught throw here becomes Vercel's plain-text "A server error has
+      // occurred" page, which the browser then fails to parse as JSON — hiding
+      // the real cause behind a JSON syntax error. Always answer with JSON.
+      const detail = e instanceof Error ? e.message : 'Unknown error';
+      return res.status(502).json({ error: `Could not save AI settings — the database write failed: ${detail}` });
+    }
 
     return res.status(200).json({
       ok: true,
@@ -164,18 +172,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       provider = body.provider;
     } catch { /* no body → delete all */ }
 
-    if (provider && PROVIDERS.includes(provider as AIProvider)) {
-      const existing = await loadAISettings(supabase);
-      if (existing) {
-        const keys = { ...existing.keys };
-        delete keys[provider as AIProvider];
-        await saveAISettings(supabase, { ...existing, keys });
+    try {
+      if (provider && PROVIDERS.includes(provider as AIProvider)) {
+        const existing = await loadAISettings(supabase);
+        if (existing) {
+          const keys = { ...existing.keys };
+          delete keys[provider as AIProvider];
+          await saveAISettings(supabase, { ...existing, keys });
+        }
+        return res.status(200).json({ ok: true, message: `${provider} key removed.` });
       }
-      return res.status(200).json({ ok: true, message: `${provider} key removed.` });
-    }
 
-    await deleteAISettings(supabase);
-    return res.status(200).json({ ok: true, message: 'All stored AI settings removed.' });
+      await deleteAISettings(supabase);
+      return res.status(200).json({ ok: true, message: 'All stored AI settings removed.' });
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : 'Unknown error';
+      return res.status(502).json({ error: `Could not remove AI settings — the database write failed: ${detail}` });
+    }
   }
 
   return res.status(405).json({ error: 'Method not allowed' });

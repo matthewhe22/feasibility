@@ -35,8 +35,33 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
     headers: { ...authHeaders(), ...(options?.headers ?? {}) },
   });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json?.error ?? `Request failed: ${res.status}`);
+
+  // Not every failure comes back as JSON: a crashed serverless function returns
+  // Vercel's plain-text "A server error has occurred" page, and a proxy/timeout
+  // returns HTML. Parsing those blindly threw a JSON syntax error that buried
+  // the actual HTTP status, so read the body as text and decide from there.
+  const body = await res.text();
+  let json: unknown = null;
+  let parsed = false;
+  try {
+    json = body ? JSON.parse(body) : null;
+    parsed = true;
+  } catch { /* non-JSON body — handled below */ }
+
+  if (!res.ok) {
+    const fromJson = parsed ? (json as { error?: string } | null)?.error : undefined;
+    if (fromJson) throw new Error(fromJson);
+    const snippet = body.trim().replace(/\s+/g, ' ').slice(0, 120);
+    throw new Error(
+      snippet
+        ? `Request failed (HTTP ${res.status}): ${snippet}`
+        : `Request failed (HTTP ${res.status})`,
+    );
+  }
+
+  if (!parsed) {
+    throw new Error(`Server returned a non-JSON response (HTTP ${res.status}).`);
+  }
   return json as T;
 }
 
