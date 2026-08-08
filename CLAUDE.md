@@ -249,7 +249,7 @@ powered by a configurable AI provider, managed in Admin → AI Settings.
 
 - **Providers:** Google Gemini (free tier, live Google-Search grounding),
   DeepSeek (low cost, no web search), **OpenRouter** (one key → hundreds of
-  models incl. many free; most free models have no web search), and **NVIDIA**
+  models, free and paid; most have no web search), and **NVIDIA**
   (free hosted NIM models for development; no web search). Gemini is the only
   provider with built-in live web search.
 - **Per-provider keys:** keys are stored per provider in the `__ai_settings__`
@@ -257,10 +257,17 @@ powered by a configurable AI provider, managed in Admin → AI Settings.
   all keys persist and the active provider/model can be switched without
   re-entering anything. Back-compat: the legacy single `apiKey` shape is
   normalised into the keys map on read (`api/_lib/aiSettings.ts:normalizeStored`).
-- **OpenRouter free models** are dynamic: `POST /api/admin/openrouter-models`
-  fetches OpenRouter's public catalogue, filters to free models (price 0 or
-  `:free` id), caches the list in the sentinel, and the Admin "Update models"
-  button populates the model dropdown.
+- **OpenRouter models** are dynamic: `POST /api/admin/openrouter-models`
+  fetches OpenRouter's public catalogue — the **full list, free and paid** —
+  annotates each entry with `free` plus `inputPricePerMillion` /
+  `outputPricePerMillion` (converted from OpenRouter's per-token strings),
+  caches it in the sentinel, and returns `{count, freeCount, paidCount, models}`.
+  The Admin "Update models" button populates the model dropdown, which offers a
+  **search box** and a **"Free models only" checkbox** (off by default) on top of
+  the full list; each option shows context length and price. Variable-priced
+  routes (OpenRouter reports `-1`, e.g. `openrouter/auto`) are labelled
+  "variable pricing". Paid models bill against the OpenRouter credit balance
+  attached to the saved key.
 - **NVIDIA models** are dynamic too: `POST /api/admin/nvidia-models` fetches
   NVIDIA's hosted NIM catalogue (`integrate.api.nvidia.com/v1/models`,
   authenticated — needs a saved key), caches it in the sentinel, and the Admin

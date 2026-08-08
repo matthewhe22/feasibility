@@ -120,12 +120,18 @@ export const ALLOWED_MODELS: AIModelOption[] = [
   },
 ];
 
-/** OpenRouter model entry (dynamic — refreshed via the "Update models" button). */
+/** OpenRouter model entry (dynamic — refreshed via the "Update models" button).
+ *  The cached catalogue holds the FULL model list (free + paid); `free` and the
+ *  per-million prices let the admin UI filter/label them. */
 export interface OpenRouterModel {
   id: string;            // e.g. "meta-llama/llama-3.1-8b-instruct:free"
   label: string;         // human-readable name
   contextLength?: number;
   free: boolean;         // pricing prompt+completion == 0
+  /** USD per 1M prompt tokens (undefined when OpenRouter reports no price). */
+  inputPricePerMillion?: number;
+  /** USD per 1M completion tokens. */
+  outputPricePerMillion?: number;
 }
 
 /** NVIDIA model entry (dynamic — refreshed via the "Update models" button).
@@ -367,7 +373,7 @@ export async function resolveActiveSettings(
   return r ? r.chain[0] : null;
 }
 
-/* ── OpenRouter free-model discovery ───────────────────────────────────────── */
+/* ── OpenRouter model discovery ────────────────────────────────────────────── */
 
 interface OpenRouterApiModel {
   id: string;
@@ -376,28 +382,50 @@ interface OpenRouterApiModel {
   pricing?: { prompt?: string; completion?: string };
 }
 
-/** Parse the OpenRouter /models payload into our free-model list. */
-export function parseOpenRouterFreeModels(payload: unknown): OpenRouterModel[] {
-  const data = (payload as { data?: OpenRouterApiModel[] })?.data;
-  if (!Array.isArray(data)) return [];
-  const isFree = (m: OpenRouterApiModel) => {
-    const p = parseFloat(m.pricing?.prompt ?? '0');
-    const c = parseFloat(m.pricing?.completion ?? '0');
-    return (Number.isFinite(p) ? p : 1) === 0 && (Number.isFinite(c) ? c : 1) === 0;
-  };
-  return data
-    .filter(m => m && typeof m.id === 'string' && (isFree(m) || m.id.endsWith(':free')))
-    .map(m => ({
-      id: m.id,
-      label: m.name || m.id,
-      contextLength: typeof m.context_length === 'number' ? m.context_length : undefined,
-      free: true,
-    }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+/** OpenRouter prices are USD *per token* as strings ("0.000003"). Convert to
+ *  USD per 1M tokens; returns undefined when the field is missing/unparseable
+ *  (e.g. "-1" for variable-priced routes). */
+function pricePerMillion(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const n = parseFloat(raw);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return n * 1_000_000;
 }
 
-/** Fetch + filter OpenRouter's free models. Optional key (the list is public). */
-export async function fetchOpenRouterFreeModels(apiKey?: string): Promise<OpenRouterModel[]> {
+/**
+ * Parse the OpenRouter /models payload into our model list — ALL models, free
+ * and paid. Each entry carries `free` plus per-million prices so the admin UI
+ * can filter and label them.
+ */
+export function parseOpenRouterModels(payload: unknown): OpenRouterModel[] {
+  const data = (payload as { data?: OpenRouterApiModel[] })?.data;
+  if (!Array.isArray(data)) return [];
+  return data
+    .filter(m => m && typeof m.id === 'string')
+    .map(m => {
+      const input = pricePerMillion(m.pricing?.prompt);
+      const output = pricePerMillion(m.pricing?.completion);
+      const free = m.id.endsWith(':free') || (input === 0 && output === 0);
+      return {
+        id: m.id,
+        label: m.name || m.id,
+        contextLength: typeof m.context_length === 'number' ? m.context_length : undefined,
+        free,
+        inputPricePerMillion: input,
+        outputPricePerMillion: output,
+      };
+    })
+    .sort((a, b) => (a.free === b.free ? a.label.localeCompare(b.label) : a.free ? -1 : 1));
+}
+
+/** Back-compat helper: only the free subset of the catalogue. */
+export function parseOpenRouterFreeModels(payload: unknown): OpenRouterModel[] {
+  return parseOpenRouterModels(payload).filter(m => m.free);
+}
+
+/** Fetch OpenRouter's full model catalogue (free + paid). Optional key (the
+ *  list is public). */
+export async function fetchOpenRouterModels(apiKey?: string): Promise<OpenRouterModel[]> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
   const r = await fetch('https://openrouter.ai/api/v1/models', { headers });
@@ -405,7 +433,12 @@ export async function fetchOpenRouterFreeModels(apiKey?: string): Promise<OpenRo
     const t = await r.text().catch(() => '');
     throw new Error(`OpenRouter /models failed (HTTP ${r.status}): ${t.slice(0, 200)}`);
   }
-  return parseOpenRouterFreeModels(await r.json());
+  return parseOpenRouterModels(await r.json());
+}
+
+/** Back-compat wrapper — the free subset only. */
+export async function fetchOpenRouterFreeModels(apiKey?: string): Promise<OpenRouterModel[]> {
+  return (await fetchOpenRouterModels(apiKey)).filter(m => m.free);
 }
 
 /* ── NVIDIA model discovery ────────────────────────────────────────────────── */

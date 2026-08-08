@@ -38,7 +38,7 @@ const PROVIDERS: Record<AIProvider, ProviderInfo> = {
     label: 'OpenRouter',
     apiKeyUrl: 'https://openrouter.ai/keys',
     apiKeyLabel: 'openrouter.ai/keys',
-    description: 'One key, hundreds of models incl. many free ones. Use "Update models" to load the current free list. Most free models have no live web search.',
+    description: 'One key, hundreds of models — free and paid. Use "Update models" to load the full catalogue, then filter/search it below. Most models have no live web search.',
     keyPlaceholder: 'sk-or-v1-...',
   },
   nvidia: {
@@ -54,6 +54,17 @@ const PROVIDER_ORDER: AIProvider[] = ['gemini', 'deepseek', 'openrouter', 'nvidi
 
 /** Providers whose model list is fetched dynamically (vs a static curated set). */
 const DYNAMIC_PROVIDERS: AIProvider[] = ['openrouter', 'nvidia'];
+const isDynamic = (p: AIProvider) => DYNAMIC_PROVIDERS.includes(p);
+
+/** Short price label for a dynamic model, e.g. "free" or "$3.00/M in · $15.00/M out".
+ *  A paid-tier model with no reported price (OpenRouter returns "-1" for
+ *  variable-priced routes such as openrouter/auto) is labelled accordingly. */
+function priceLabel(opt: AIModelOption): string {
+  if (opt.tier === 'free') return 'free';
+  if (opt.inputPricePerMillion === 0 && opt.outputPricePerMillion === 0) return 'variable pricing';
+  const fmt = (n: number) => (n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(3)}`);
+  return `${fmt(opt.inputPricePerMillion)}/M in · ${fmt(opt.outputPricePerMillion)}/M out`;
+}
 
 export function AISettingsPage() {
   const [settings, setSettings] = useState<AISettings | null>(null);
@@ -75,6 +86,9 @@ export function AISettingsPage() {
   const [providerTest, setProviderTest] = useState<{ type: 'ok' | 'err' | 'running'; text: string } | null>(null);
   const [orRefreshing, setOrRefreshing] = useState(false);
   const [orMsg, setOrMsg] = useState<string | null>(null);
+  // Dynamic-catalogue browsing (OpenRouter is hundreds of models).
+  const [modelSearch, setModelSearch] = useState('');
+  const [freeOnly, setFreeOnly] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,22 +117,41 @@ export function AISettingsPage() {
         id: m.id,
         label: m.label,
         provider,
-        tier: 'free' as const,
+        tier: (m.free ? 'free' : 'paid') as 'free' | 'paid',
         contextWindow: m.contextLength ? `${Math.round(m.contextLength / 1000)}K` : '—',
-        inputPricePerMillion: 0,
-        outputPricePerMillion: 0,
+        inputPricePerMillion: m.inputPricePerMillion ?? 0,
+        outputPricePerMillion: m.outputPricePerMillion ?? 0,
         supportsWebSearch: false,
-        recommendedFor: provider === 'nvidia' ? 'NVIDIA hosted model (free dev tier).' : 'OpenRouter free model.',
+        recommendedFor: provider === 'nvidia'
+          ? 'NVIDIA hosted model (free dev tier).'
+          : m.free ? 'OpenRouter free model.' : 'OpenRouter paid model — billed to your OpenRouter credit.',
       }));
     }
     return settings.allowedModels.filter(m => m.provider === provider);
   }, [settings, provider]);
+
+  /** Free/paid + text filter over the dynamic catalogue. The currently selected
+   *  model is always kept in the list so a filter can never silently drop it. */
+  const visibleModelOptions: AIModelOption[] = useMemo(() => {
+    if (!isDynamic(provider)) return modelOptions;
+    const q = modelSearch.trim().toLowerCase();
+    const filtered = modelOptions.filter(m => {
+      if (m.id === model) return true;
+      if (freeOnly && m.tier !== 'free') return false;
+      if (!q) return true;
+      return m.label.toLowerCase().includes(q) || m.id.toLowerCase().includes(q);
+    });
+    return filtered;
+  }, [modelOptions, provider, model, modelSearch, freeOnly]);
+
+  const freeModelCount = useMemo(() => modelOptions.filter(m => m.tier === 'free').length, [modelOptions]);
 
   // When switching provider, snap the model to a valid one for that provider.
   function selectProvider(p: AIProvider) {
     setProvider(p);
     setProviderTest(null);
     setOrMsg(null);
+    setModelSearch('');
     if (!settings) return;
     const opts = DYNAMIC_PROVIDERS.includes(p)
       ? dynamicModelsFor(settings, p).map(m => m.id)
@@ -191,9 +224,13 @@ export function AISettingsPage() {
       // If the current selection is no longer valid, pick the first model.
       if (!r.models.some(m => m.id === model)) setModel(r.models[0]?.id ?? '');
       const stale = provider === 'nvidia' ? (r as { staleDefaults?: string[] }).staleDefaults ?? [] : [];
+      const free = (r as { freeCount?: number }).freeCount;
+      const loaded = provider === 'openrouter' && typeof free === 'number'
+        ? `Loaded ${r.count} models (${free} free, ${r.count - free} paid).`
+        : `Loaded ${r.count} models.`;
       setOrMsg(stale.length
-        ? `Loaded ${r.count} models. ${stale.length} curated default(s) retired/renamed (now using the live list): ${stale.join(', ')}.`
-        : `Loaded ${r.count} models.`);
+        ? `${loaded} ${stale.length} curated default(s) retired/renamed (now using the live list): ${stale.join(', ')}.`
+        : loaded);
     } catch (e) {
       setOrMsg(e instanceof Error ? e.message : 'Failed to refresh models.');
     } finally {
@@ -320,7 +357,7 @@ export function AISettingsPage() {
           {isDynamicProvider && (
             <div className="flex items-center gap-3 mb-3 flex-wrap">
               <button onClick={handleRefreshDynamicModels} disabled={orRefreshing} className="text-xs bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white px-3 py-1.5 rounded font-medium">
-                {orRefreshing ? 'Updating…' : provider === 'nvidia' ? 'Update models' : 'Update models (free)'}
+                {orRefreshing ? 'Updating…' : 'Update models'}
               </button>
               {dynamicUpdatedAt && (
                 <span className="text-[10px] text-gray-500">Last updated {new Date(dynamicUpdatedAt).toLocaleString()}</span>
@@ -334,14 +371,47 @@ export function AISettingsPage() {
               {provider === 'nvidia'
                 ? 'No models loaded yet — save an NVIDIA key, then click "Update models" to fetch NVIDIA\'s hosted catalogue.'
                 : provider === 'openrouter'
-                  ? 'No models loaded yet — click "Update models (free)" to fetch OpenRouter\'s current free model list.'
+                  ? 'No models loaded yet — click "Update models" to fetch OpenRouter\'s full model catalogue (free + paid).'
                   : 'No models available.'}
             </p>
           ) : isDynamicProvider ? (
-            <select value={model} onChange={e => setModel(e.target.value)}
-              className="w-full text-sm bg-gray-700 border border-gray-600 text-white rounded px-3 py-2 focus:outline-none focus:border-blue-500">
-              {modelOptions.map(m => <option key={m.id} value={m.id}>{m.label} ({m.contextWindow})</option>)}
-            </select>
+            <div className="space-y-2">
+              <div className="flex items-center gap-3 flex-wrap">
+                <input
+                  type="search"
+                  value={modelSearch}
+                  onChange={e => setModelSearch(e.target.value)}
+                  placeholder="Search models by name or id…"
+                  autoComplete="off" spellCheck={false}
+                  className="flex-1 min-w-[12rem] text-sm bg-gray-700 border border-gray-600 text-white rounded px-3 py-2 focus:outline-none focus:border-blue-500"
+                />
+                {provider === 'openrouter' && (
+                  <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer whitespace-nowrap">
+                    <input type="checkbox" checked={freeOnly} onChange={e => setFreeOnly(e.target.checked)} className="w-4 h-4" />
+                    Free models only
+                  </label>
+                )}
+              </div>
+              <select value={model} onChange={e => setModel(e.target.value)} size={Math.min(12, Math.max(4, visibleModelOptions.length))}
+                className="w-full text-sm bg-gray-700 border border-gray-600 text-white rounded px-3 py-2 focus:outline-none focus:border-blue-500">
+                {visibleModelOptions.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.label} · {m.contextWindow} · {priceLabel(m)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-gray-500">
+                Showing {visibleModelOptions.length} of {modelOptions.length} models
+                {provider === 'openrouter' && <> ({freeModelCount} free, {modelOptions.length - freeModelCount} paid)</>}.
+                {' '}Selected: <code className="font-mono text-gray-400">{model || '—'}</code>
+                {provider === 'openrouter' && !freeOnly && (
+                  <> · Paid models are billed to your OpenRouter credit balance.</>
+                )}
+              </p>
+              {visibleModelOptions.length === 0 && (
+                <p className="text-[11px] text-amber-300">No models match the current filter.</p>
+              )}
+            </div>
           ) : (
             <div className="space-y-2">
               {modelOptions.map(opt => <ModelOption key={opt.id} option={opt} selected={model === opt.id} onSelect={() => setModel(opt.id)} />)}

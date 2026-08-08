@@ -128,12 +128,18 @@ export interface AIModelOption {
   recommendedFor: string;
 }
 
-/** Dynamic OpenRouter / NVIDIA model entry (same shape). */
+/** Dynamic OpenRouter / NVIDIA model entry (same shape). The OpenRouter
+ *  catalogue holds free AND paid models; `free` + the prices drive the
+ *  dropdown's filter and labels. */
 export interface OpenRouterModel {
   id: string;
   label: string;
   contextLength?: number;
   free: boolean;
+  /** USD per 1M prompt tokens (absent when OpenRouter reports no price). */
+  inputPricePerMillion?: number;
+  /** USD per 1M completion tokens. */
+  outputPricePerMillion?: number;
 }
 
 /** NVIDIA model entry — shares the dynamic-model shape with OpenRouter. */
@@ -158,7 +164,7 @@ export interface AISettings {
   anyKey: boolean;           // any provider has a usable key
   providers: ProviderKeyStatus[];
   allowedModels: AIModelOption[];        // static Gemini + DeepSeek
-  openrouterModels: OpenRouterModel[];   // cached free list
+  openrouterModels: OpenRouterModel[];   // cached full catalogue (free + paid)
   openrouterModelsUpdatedAt: string | null;
   nvidiaModels: NvidiaModel[];           // cached NVIDIA model list
   nvidiaModelsUpdatedAt: string | null;
@@ -191,8 +197,9 @@ export async function deleteStoredAIKey(provider?: AIProvider): Promise<void> {
   });
 }
 
-/** Refresh OpenRouter's free-model list (persisted server-side). */
-export async function refreshOpenRouterModels(): Promise<{ ok: true; count: number; models: OpenRouterModel[]; updatedAt: string }> {
+/** Refresh OpenRouter's full model catalogue — free AND paid (persisted
+ *  server-side). `freeCount` / `paidCount` break down the total. */
+export async function refreshOpenRouterModels(): Promise<{ ok: true; count: number; freeCount?: number; paidCount?: number; models: OpenRouterModel[]; updatedAt: string }> {
   return apiFetch('/openrouter-models', { method: 'POST' });
 }
 

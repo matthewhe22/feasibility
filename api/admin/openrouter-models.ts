@@ -1,15 +1,16 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
-import { loadAISettings, saveAISettings, fetchOpenRouterFreeModels } from '../_lib/aiSettings';
+import { loadAISettings, saveAISettings, fetchOpenRouterModels } from '../_lib/aiSettings';
 
 /**
  * POST /api/admin/openrouter-models
  *
- * Refresh the cached OpenRouter FREE-model list. Fetches OpenRouter's public
- * /models catalogue, filters to free models (prompt+completion price == 0 or
- * an ":free" id), persists the list into the AI-settings sentinel, and returns
- * it so the admin UI can populate the OpenRouter model dropdown.
+ * Refresh the cached OpenRouter model list. Fetches OpenRouter's public /models
+ * catalogue — the FULL list, free and paid — annotates each entry with a `free`
+ * flag and per-million prices, persists it into the AI-settings sentinel, and
+ * returns it so the admin UI can populate the OpenRouter model dropdown (which
+ * offers a free-only filter on top of the full list).
  *
  * Uses the stored OpenRouter key (or OPENROUTER_API_KEY) as a Bearer token if
  * present, but the catalogue is public so a key is not required.
@@ -25,7 +26,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let models;
   try {
-    models = await fetchOpenRouterFreeModels(apiKey);
+    models = await fetchOpenRouterModels(apiKey);
   } catch (e) {
     return res.status(502).json({ error: e instanceof Error ? e.message : 'Failed to fetch OpenRouter models.' });
   }
@@ -40,5 +41,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch { /* non-fatal — still return the freshly fetched list */ }
   }
 
-  return res.status(200).json({ ok: true, count: models.length, models, updatedAt });
+  const freeCount = models.filter(m => m.free).length;
+  return res.status(200).json({
+    ok: true,
+    count: models.length,
+    freeCount,
+    paidCount: models.length - freeCount,
+    models,
+    updatedAt,
+  });
 }
