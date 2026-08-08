@@ -281,11 +281,52 @@ powered by a configurable AI provider, managed in Admin → AI Settings.
   orders the active provider first, then the rest as failover candidates
   (auto-failover defaults ON).
 
-## Tavily Web Search (grounding for non-Gemini providers)
-Gemini is the only provider with native web search. To give live web grounding
-to the providers that lack it (DeepSeek / OpenRouter / NVIDIA), an optional
-**Tavily** (https://tavily.com) integration can be configured in Admin → Tavily
-Search.
+## Web Search Grounding (Firecrawl + Tavily)
+Gemini is the only provider with native web search. For every other provider
+(DeepSeek / OpenRouter / NVIDIA) research is grounded by running a web search
+and injecting the results into the prompt. **Two tools** can do this:
+
+- **Firecrawl** (https://firecrawl.dev) — search + optional full-page scrape.
+  **Default primary.** Because it can return the whole page as markdown, figures
+  buried in a report body reach the model instead of just a search snippet.
+- **Tavily** (https://tavily.com) — LLM-oriented search with a synthesised
+  answer; cheaper per query, snippets only.
+
+**Which one leads is configurable in Admin → AI Settings → "Web search
+grounding"** (`StoredAISettings.webSearchPrimary`, default `'firecrawl'`), with
+`webSearchFallback` (default on) controlling whether the other tool is tried
+when the primary has no key, errors, or returns nothing. Turn the fallback off
+to keep spend on a single service.
+
+`api/_lib/webSearch.ts` is the orchestrator. Its split between
+`resolveWebSearchConfig` (cheap DB reads) and `runWebSearch` (spends credits) is
+load-bearing: config resolution runs BEFORE the response-cache check so the
+cache key can record which tools were in play — `webSearchCacheTag` encodes the
+attempt **order**, so a Firecrawl-first result is never served to a Tavily-first
+request — while the search itself runs only on a cache miss.
+
+Responses carry `webSearch: { used, provider, results, fellBackFrom? }`. The
+legacy `tavily: { used, results }` field is still emitted (only when Tavily was
+the tool that actually ran) for clients that predate the multi-tool field.
+
+### Firecrawl specifics
+- `api/_lib/firecrawl.ts` — sentinel row `__firecrawl_settings__`, server-only
+  key with `FIRECRAWL_API_KEY` env fallback, `firecrawlSearch`,
+  `fetchFirecrawlContext` (best-effort, never throws), 1h query cache
+  (`FIRECRAWL_CACHE_TTL_MS`).
+- `api/admin/firecrawl-settings.ts` — admin GET/POST/DELETE + `{test:true}`.
+- Admin page `app/src/admin/FirecrawlSettingsPage.tsx` (nav: **Firecrawl Search**).
+- **API version tolerance:** the response parser accepts both v1 (`data` as a
+  flat array) and v2 (`data` keyed by category — `web`, `news`, …). The search
+  path is admin-configurable, and a **404 (only)** retries the sibling version
+  once; the Test action reports which path answered so it can be pinned.
+- `scrapeContent` (default off) requests markdown per result — much better
+  grounding, materially more credits.
+- Tests: `npx tsx api/__tests__/webSearch.test.ts` (33 assertions covering both
+  response shapes, the 404-only retry, status propagation, and primary/fallback
+  ordering). Lives under `__tests__` so Vercel's function detection skips it.
+
+### Tavily specifics
 
 - `api/_lib/tavily.ts` — API-key storage (sentinel row `__tavily_settings__`,
   server-only), `resolveTavilySettings` (stored, else `TAVILY_API_KEY` env),
@@ -358,9 +399,17 @@ named retirement village. Two independent tools:
 1. **Surrounding-suburb pricing** — resolves the village location, finds related
    suburbs (≈5–8 km), and returns median house price (MHP), median unit price
    (MUP) and median $/m² per suburb, plus the indicative averages.
-2. **Competitor villages** — lists recently sold / listed units of competing
-   villages within a proximity radius (default 5 km) with price, sold/listing
-   flag, date, beds, baths, study, unit type where available.
+2. **Competitor villages** — lists **every substantiable** past/comparable sale
+   and current listing across competing villages within a proximity radius
+   (default 5 km). Per unit: operator (owner brand), village name, unit number,
+   address/suburb, distance, sold-vs-listing flag, price, date, beds, baths,
+   study, car spaces, internal m² (+ land m² for villas), derived $/m², unit
+   type, tenure (licence / loan-lease / leasehold / strata), DMF summary,
+   recurring levy + period, and the specific source URL. The prompt instructs
+   exhaustive coverage — every village in the radius, every unit found, not one
+   example per village — and requires `null` over invention for any field that
+   cannot be substantiated. $/m² is computed client-side only when both price
+   and internal area are real numbers.
 
 Backend: `POST /api/research/retirement-village` (`mode: 'suburbs' | 'competitors'`),
 sharing `api/_lib/aiClient.ts` (the reusable Gemini-grounded / DeepSeek JSON caller)

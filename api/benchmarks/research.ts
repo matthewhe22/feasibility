@@ -4,7 +4,14 @@ import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
 import { resolveProviderChain } from '../_lib/aiSettings';
 import { runAIResearch, mergeSources, AIResearchError, type AIResearchSource } from '../_lib/aiClient';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
-import { resolveTavilySettings, fetchTavilyContext } from '../_lib/tavily';
+import {
+  resolveWebSearchConfig,
+  runWebSearch,
+  webSearchCacheTag,
+  buildWebSearchPromptBlock,
+  webSearchNote,
+  type WebSearchConfig,
+} from '../_lib/webSearch';
 import { researchCacheKey, getCachedResearch, setCachedResearch } from '../_lib/researchCache';
 
 /**
@@ -57,6 +64,8 @@ interface CotalityNote {
   reason?: string;
 }
 
+/** Legacy response field kept for older clients that read `tavily.used`.
+ *  New clients should read `webSearch`, which names the tool that ran. */
 interface TavilyNote {
   used: boolean;
   /** Number of web results injected (when used). */
@@ -296,9 +305,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // identical (cached) request would still burn a Tavily search + Cotality call.
   let cotalitySettings: Awaited<ReturnType<typeof resolveCotalitySettings>> = null;
   try { cotalitySettings = await resolveCotalitySettings(supabase); } catch { /* ignore */ }
-  let tavilySettings: Awaited<ReturnType<typeof resolveTavilySettings>> = null;
+  // Web-search grounding applies only to providers with no native search —
+  // Gemini keeps its own Google-Search grounding.
+  let webSearch: WebSearchConfig | null = null;
   if (head && head.provider !== 'gemini') {
-    try { tavilySettings = await resolveTavilySettings(supabase); } catch { /* ignore */ }
+    try {
+      webSearch = await resolveWebSearchConfig(supabase, resolved.webSearchPrimary, resolved.webSearchFallback);
+    } catch { /* ignore */ }
   }
 
   // ── Response cache (checked BEFORE any model / Cotality / Tavily call) ──────
@@ -312,7 +325,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     model: head?.model,
     grounding: resolved.useGrounding,
     cotality: Boolean(cotalitySettings),
-    tavily: Boolean(tavilySettings),
+    // Records the tools AND their order, so a request grounded Firecrawl-first
+    // never serves a cache entry built from a Tavily-first grounding.
+    webSearch: webSearch ? webSearchCacheTag(webSearch) : 'none',
   });
   if (!refresh) {
     const cached = getCachedResearch(cacheKey);
@@ -351,27 +366,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  // Optional: Tavily web search for providers without native grounding (Gemini
-  // uses its own grounding). One search per cache-miss request maximum.
-  let tavilyNote: TavilyNote = { used: false };
-  let tavilySources: AIResearchSource[] = [];
-  if (tavilySettings) {
-    try {
-      const ctx = await fetchTavilyContext(tavilySettings, buildSearchQuery(body));
-      if (ctx) {
-        userPrompt =
-          `${userPrompt}\n\n` +
-          `=== LIVE WEB SEARCH RESULTS (Tavily) — use as the primary current-data source; cite the URLs ===\n` +
-          `${ctx.promptBlock}\n` +
-          `=== END WEB SEARCH RESULTS ===\n` +
-          `Base your figures on these live results where relevant and cite the URLs above in the sources list.`;
-        tavilyNote = { used: true, results: ctx.resultCount };
-        tavilySources = ctx.sources;
-      }
-    } catch {
-      /* never block AI research on Tavily */
-    }
+  // Optional: live web search for providers without native grounding (Gemini
+  // uses its own). The configured primary tool runs first, falling back to the
+  // other. One search per tool per cache-miss request maximum.
+  const searchCtx = webSearch ? await runWebSearch(webSearch, buildSearchQuery(body)) : null;
+  const searchNote = webSearchNote(searchCtx);
+  const searchSources: AIResearchSource[] = searchCtx ? searchCtx.sources : [];
+  if (searchCtx) {
+    userPrompt = `${userPrompt}\n\n${buildWebSearchPromptBlock(searchCtx)}`;
   }
+  // Legacy field: only truthy when Tavily was the tool that actually ran.
+  const tavilyNote: TavilyNote = searchCtx && searchCtx.provider === 'tavily'
+    ? { used: true, results: searchCtx.resultCount }
+    : { used: false };
 
   // ── Run with auto-failover across configured providers ────────────────────
   // The active provider is tried first; on a quota/rate-limit (429) the request
@@ -395,12 +402,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const declared = result.json.sources as Array<{ title: string; url: string; snippet?: string }> | undefined;
       const payload: Record<string, unknown> = {
         ...result.json,
-        sources: mergeSources([...result.groundingSources, ...tavilySources], declared as AIResearchSource[] | undefined),
+        sources: mergeSources([...result.groundingSources, ...searchSources], declared as AIResearchSource[] | undefined),
         model: p.model,
         provider: result.provider,
-        groundingUsed: result.groundingUsed || tavilyNote.used,
+        groundingUsed: result.groundingUsed || searchNote.used,
         configSource: p.source,
         cotality: cotalityNote,
+        webSearch: searchNote,
         tavily: tavilyNote,
         timestamp: new Date().toISOString(),
       };

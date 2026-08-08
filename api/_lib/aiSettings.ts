@@ -20,6 +20,13 @@ export const AI_SETTINGS_SENTINEL = '__ai_settings__';
 
 export type AIProvider = 'gemini' | 'deepseek' | 'openrouter' | 'nvidia';
 
+/** Web-search grounding tools, for the providers with no native search.
+ *  Structurally identical to WebSearchProvider in ./webSearch.ts — declared
+ *  here so the settings module stays dependency-free. */
+export type WebSearchProviderId = 'firecrawl' | 'tavily';
+
+export const DEFAULT_WEB_SEARCH_PRIMARY: WebSearchProviderId = 'firecrawl';
+
 export type AIModelId =
   // Google Gemini
   | 'gemini-2-0-flash'
@@ -163,6 +170,12 @@ export interface StoredAISettings {
   /** When true (default), on a quota/rate-limit error the active provider fails
    *  over to the next configured provider. */
   autoFailover: boolean;
+  /** Which web-search tool leads when grounding a non-Gemini provider.
+   *  Default 'firecrawl'; the other tool is the fallback. */
+  webSearchPrimary: WebSearchProviderId;
+  /** When true (default), fall back to the other search tool if the primary is
+   *  unconfigured, errors, or returns no results. */
+  webSearchFallback: boolean;
   /** Per-provider API keys (plaintext, server-only). */
   keys: Partial<Record<AIProvider, string>>;
   /** Cached OpenRouter free-model list (from the last "Update models"). */
@@ -229,6 +242,10 @@ function normalizeStored(raw: unknown): StoredAISettings | null {
     enabled: r.enabled !== false,
     useGrounding: r.useGrounding !== false,   // default ON
     autoFailover: r.autoFailover !== false,   // default ON
+    // Rows written before Firecrawl existed have neither field; both default so
+    // existing installs pick up Firecrawl-first grounding without a migration.
+    webSearchPrimary: r.webSearchPrimary === 'tavily' ? 'tavily' : DEFAULT_WEB_SEARCH_PRIMARY,
+    webSearchFallback: r.webSearchFallback !== false, // default ON
     keys,
     openrouterModels: orModels,
     openrouterModelsUpdatedAt: typeof r.openrouterModelsUpdatedAt === 'string' ? r.openrouterModelsUpdatedAt : undefined,
@@ -322,6 +339,9 @@ export interface ResolvedChain {
   chain: ResolvedProvider[];
   useGrounding: boolean;
   autoFailover: boolean;
+  /** Which web-search tool leads for providers without native search. */
+  webSearchPrimary: WebSearchProviderId;
+  webSearchFallback: boolean;
 }
 
 /**
@@ -368,6 +388,8 @@ export async function resolveProviderChain(supabase: SupabaseClient | null): Pro
     chain,
     useGrounding: stored?.useGrounding !== false,
     autoFailover: stored?.autoFailover !== false,
+    webSearchPrimary: stored?.webSearchPrimary === 'tavily' ? 'tavily' : DEFAULT_WEB_SEARCH_PRIMARY,
+    webSearchFallback: stored?.webSearchFallback !== false,
   };
 }
 

@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
-import { loadAISettings, saveAISettings, fetchNvidiaModels, NVIDIA_DEFAULT_MODELS } from '../_lib/aiSettings';
+import { loadAISettings, saveAISettings, fetchNvidiaModels, NVIDIA_DEFAULT_MODELS, DEFAULT_WEB_SEARCH_PRIMARY } from '../_lib/aiSettings';
 
 /**
  * POST /api/admin/nvidia-models
@@ -44,7 +44,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Persist the cache when we have a place to store it.
   if (supabase) {
-    const base = stored ?? { provider: 'nvidia' as const, model: 'meta/llama-3.1-8b-instruct', enabled: true, useGrounding: true, autoFailover: true, keys: {} };
+    const base = stored ?? {
+      provider: 'nvidia' as const, model: 'meta/llama-3.1-8b-instruct', enabled: true,
+      useGrounding: true, autoFailover: true,
+      webSearchPrimary: DEFAULT_WEB_SEARCH_PRIMARY, webSearchFallback: true,
+      keys: {},
+    };
     try {
       await saveAISettings(supabase, { ...base, nvidiaModels: models, nvidiaModelsUpdatedAt: updatedAt });
     } catch { /* non-fatal — still return the freshly fetched list */ }

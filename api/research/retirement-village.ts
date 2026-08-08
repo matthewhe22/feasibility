@@ -3,7 +3,14 @@ import { setCors } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
 import { resolveProviderChain } from '../_lib/aiSettings';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
-import { resolveTavilySettings, fetchTavilyContext } from '../_lib/tavily';
+import {
+  resolveWebSearchConfig,
+  runWebSearch,
+  webSearchCacheTag,
+  buildWebSearchPromptBlock,
+  webSearchNote,
+  type WebSearchConfig,
+} from '../_lib/webSearch';
 import { runAIResearch, mergeSources, AIResearchError, type AIResearchSource } from '../_lib/aiClient';
 import { researchCacheKey, getCachedResearch, setCachedResearch } from '../_lib/researchCache';
 
@@ -76,16 +83,34 @@ You MUST:
   1. Use your web search capability to find CURRENT data, searching the third-party
      sites above by name (especially villages.com.au and downsizing.com.au) — these
      aggregators are often the best source for retirement-unit listing prices.
-  2. For each unit return: village name, price, whether it is a SOLD price or a current
-     LISTING price, the date (sold date or listing date, ISO yyyy-mm-dd or yyyy-mm if only
-     month known), bedrooms, bathrooms, study (true/false), unit type, address/suburb,
-     and the specific source/listing URL it came from. Use null for any field you cannot
-     substantiate — never invent.
-  3. Sort units by date descending (most recent first).
-  4. Note that retirement-village units are often sold under licence / loan-lease /
-     DMF arrangements — capture the headline ingoing/listing price and note the tenure in
-     the unit's "note" field if known.
-  5. Return ONLY valid JSON matching the requested schema — no preamble.`;
+  2. Be EXHAUSTIVE. List EVERY unit you can substantiate across ALL competing villages
+     in the radius — both past/comparable SALES and current LISTINGS. Do not truncate to
+     a handful of examples, do not stop at the first village, and do not return only one
+     unit per village. Search each competing village individually for its sold history
+     and its current "for sale" / vacancy page. More substantiated rows is better.
+  3. For each unit return every field in the schema you can substantiate:
+       - operator (the owner/operator brand, e.g. Keyton, Aveo, Australian Unity,
+         Levande, RetireAustralia, IRT, Stockland — NOT the village name)
+       - villageName, unitNumber (e.g. "14" or "2/21" — from the listing/address),
+         address, suburb, distanceKm
+       - priceType ("sold" or "listing"), price, date (sold or listing date;
+         ISO yyyy-mm-dd, or yyyy-mm when only the month is known)
+       - bedrooms, bathrooms, study (true/false), carSpaces
+       - internalSqm (internal/living area in m²) and, for villas/land-lease, landSqm
+       - unitType, tenure (licence / loan-lease / leasehold / strata / rental)
+       - dmfSummary (deferred management fee terms, e.g. "30% over 5 years, no capital gain share")
+       - recurringFee + recurringFeePeriod (general services levy, e.g. 487.06 + "month")
+       - note (anything else material: refurbishment liability, capital gain share,
+         exit terms, condition, inclusions)
+       - source (site name) and sourceUrl (the SPECIFIC listing/sold-record URL, not a
+         site homepage)
+     Use null for any field you cannot substantiate — never invent, never estimate a
+     number you did not find. An entry with only some fields populated is still valuable.
+  4. Sort units by date descending (most recent first); undated entries last.
+  5. Retirement-village units are usually sold under licence / loan-lease / DMF
+     arrangements, so the headline figure is an INGOING price, not a freehold price.
+     Capture it as the price and record the arrangement in tenure / dmfSummary.
+  6. Return ONLY valid JSON matching the requested schema — no preamble.`;
 
 function buildSuburbsPrompt(req: RVRequest): string {
   const loc = [req.suburb, req.state, req.postcode].filter(Boolean).join(', ');
@@ -121,19 +146,28 @@ function buildCompetitorsPrompt(req: RVRequest): string {
     `Find retirement villages competing with "${req.villageName}" within ${radius} km.`,
     loc ? `Known location context: ${loc}.` : `Resolve the subject village's location from its name.`,
     ``,
-    `For each competing village within ${radius} km, list its recently SOLD or currently`,
-    `LISTED units with price, date, bedrooms, bathrooms, study, unit type, and address/suburb`,
-    `where available. Most recent first.`,
+    `List EVERY unit you can substantiate for EVERY competing village within ${radius} km —`,
+    `both past/comparable SALES and current LISTINGS. Check each village's own "for sale"`,
+    `page as well as the aggregators and portals, and include the sold-price history where`,
+    `published. Do not limit the list to a few examples or to one unit per village.`,
+    `Most recent first.`,
     ``,
     `Return JSON only, matching this schema:`,
     `{`,
     `  "subject": { "name": "...", "suburb": "...", "state": "...", "postcode": "..." },`,
     `  "proximityKm": ${radius},`,
     `  "units": [`,
-    `    { "villageName": "...", "address": "<or null>", "suburb": "<or null>", "distanceKm": <number|null>,`,
+    `    { "operator": "<owner/operator brand | null>", "villageName": "...",`,
+    `      "unitNumber": "<e.g. 14 or 2/21 | null>", "address": "<or null>", "suburb": "<or null>",`,
+    `      "distanceKm": <number|null>,`,
     `      "priceType": "sold" | "listing", "price": <number|null>, "date": "<yyyy-mm-dd|yyyy-mm|null>",`,
     `      "bedrooms": <number|null>, "bathrooms": <number|null>, "study": <true|false|null>,`,
-    `      "unitType": "<e.g. ILU villa / apartment / serviced apartment | null>", "note": "<tenure/DMF note | null>",`,
+    `      "carSpaces": <number|null>, "internalSqm": <number|null>, "landSqm": <number|null>,`,
+    `      "unitType": "<e.g. ILU villa / apartment / serviced apartment | null>",`,
+    `      "tenure": "<licence | loan-lease | leasehold | strata | rental | null>",`,
+    `      "dmfSummary": "<deferred management fee terms | null>",`,
+    `      "recurringFee": <number|null>, "recurringFeePeriod": "<week | month | quarter | year | null>",`,
+    `      "note": "<other material detail | null>",`,
     `      "source": "<site name e.g. villages.com.au | null>", "sourceUrl": "<the specific listing/source URL | null>" }`,
     `  ],`,
     `  "summary": "2-4 sentences incl. how many villages/units found, date range, and source names (e.g. villages.com.au, downsizing.com.au)",`,
@@ -175,17 +209,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Resolve grounding *config* (cheap reads — no external API calls) so the
   // cache key can reflect it, WITHOUT performing the paid / rate-limited
-  // Cotality + Tavily lookups. Those run only on a cache miss below — otherwise
-  // an identical (cached) request would still burn a Tavily search.
+  // Cotality + web-search lookups. Those run only on a cache miss below —
+  // otherwise an identical (cached) request would still burn a search.
   let cotalitySettings: Awaited<ReturnType<typeof resolveCotalitySettings>> = null;
   try { cotalitySettings = await resolveCotalitySettings(supabase); } catch { /* ignore */ }
-  let tavilySettings: Awaited<ReturnType<typeof resolveTavilySettings>> = null;
+  let webSearch: WebSearchConfig | null = null;
   if (head && head.provider !== 'gemini') {
-    try { tavilySettings = await resolveTavilySettings(supabase); } catch { /* ignore */ }
+    try {
+      webSearch = await resolveWebSearchConfig(supabase, resolved.webSearchPrimary, resolved.webSearchFallback);
+    } catch { /* ignore */ }
   }
 
-  // Response cache — checked BEFORE any model / Cotality / Tavily call, so a
-  // cached request spends no search quota. Bypass with { refresh: true }.
+  // Response cache — checked BEFORE any model / Cotality / web-search call, so
+  // a cached request spends no search quota. Bypass with { refresh: true }.
   const cacheKey = researchCacheKey({
     endpoint: 'retirement-village',
     body,
@@ -193,7 +229,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     model: head?.model,
     grounding: resolved.useGrounding,
     cotality: Boolean(cotalitySettings),
-    tavily: Boolean(tavilySettings),
+    webSearch: webSearch ? webSearchCacheTag(webSearch) : 'none',
   });
   if (!refresh) {
     const cached = getCachedResearch(cacheKey);
@@ -216,26 +252,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch { /* never block AI research on Cotality */ }
   }
 
-  // Optional Tavily web search for providers without native grounding (DeepSeek
-  // / OpenRouter / NVIDIA). One search per cache-miss request maximum.
-  let tavilyNote: { used: boolean; results?: number } = { used: false };
-  let tavilySources: AIResearchSource[] = [];
-  if (tavilySettings) {
-    try {
-      const where = [body.suburb, body.state].filter(Boolean).join(' ');
-      const query = body.mode === 'suburbs'
-        ? `${body.villageName} ${where} surrounding suburbs median house and unit price`.replace(/\s+/g, ' ').trim()
-        : `retirement village near ${body.villageName} ${where} units for sale price recent`.replace(/\s+/g, ' ').trim();
-      const ctx = await fetchTavilyContext(tavilySettings, query);
-      if (ctx) {
-        userPrompt +=
-          `\n\n=== LIVE WEB SEARCH RESULTS (Tavily) — primary current-data source; cite the URLs ===\n` +
-          `${ctx.promptBlock}\n=== END WEB SEARCH RESULTS ===`;
-        tavilyNote = { used: true, results: ctx.resultCount };
-        tavilySources = ctx.sources;
-      }
-    } catch { /* never block AI research on Tavily */ }
+  // Optional live web search for providers without native grounding (DeepSeek /
+  // OpenRouter / NVIDIA). The configured primary tool runs first, falling back
+  // to the other. One search per tool per cache-miss request maximum.
+  let searchCtx: Awaited<ReturnType<typeof runWebSearch>> = null;
+  if (webSearch) {
+    const where = [body.suburb, body.state].filter(Boolean).join(' ');
+    const query = body.mode === 'suburbs'
+      ? `${body.villageName} ${where} surrounding suburbs median house and unit price`.replace(/\s+/g, ' ').trim()
+      : `retirement village near ${body.villageName} ${where} units for sale price recent`.replace(/\s+/g, ' ').trim();
+    searchCtx = await runWebSearch(webSearch, query);
   }
+  const searchNote = webSearchNote(searchCtx);
+  const searchSources: AIResearchSource[] = searchCtx ? searchCtx.sources : [];
+  if (searchCtx) {
+    userPrompt += `\n\n${buildWebSearchPromptBlock(searchCtx)}`;
+  }
+  // Legacy field: only truthy when Tavily was the tool that actually ran.
+  const tavilyNote: { used: boolean; results?: number } = searchCtx && searchCtx.provider === 'tavily'
+    ? { used: true, results: searchCtx.resultCount }
+    : { used: false };
 
   // Run with auto-failover across configured providers (active first); on a
   // quota 429 fall through to the next provider when enabled.
@@ -255,12 +291,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const declared = (result.json.sources as AIResearchSource[] | undefined);
       const payload: Record<string, unknown> = {
         ...result.json,
-        sources: mergeSources([...result.groundingSources, ...tavilySources], declared),
+        sources: mergeSources([...result.groundingSources, ...searchSources], declared),
         model: p.model,
         provider: result.provider,
-        groundingUsed: result.groundingUsed || tavilyNote.used,
+        groundingUsed: result.groundingUsed || searchNote.used,
         configSource: p.source,
         cotality: cotalityNote,
+        webSearch: searchNote,
         tavily: tavilyNote,
         timestamp: new Date().toISOString(),
       };

@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
-import { loadAISettings, saveAISettings, fetchOpenRouterModels } from '../_lib/aiSettings';
+import { loadAISettings, saveAISettings, fetchOpenRouterModels, DEFAULT_WEB_SEARCH_PRIMARY } from '../_lib/aiSettings';
 
 /**
  * POST /api/admin/openrouter-models
@@ -35,7 +35,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Persist the cache when we have a place to store it.
   if (supabase) {
-    const base = stored ?? { provider: 'openrouter' as const, model: 'openrouter/auto', enabled: true, useGrounding: true, autoFailover: true, keys: {} };
+    const base = stored ?? {
+      provider: 'openrouter' as const, model: 'openrouter/auto', enabled: true,
+      useGrounding: true, autoFailover: true,
+      webSearchPrimary: DEFAULT_WEB_SEARCH_PRIMARY, webSearchFallback: true,
+      keys: {},
+    };
     try {
       await saveAISettings(supabase, { ...base, openrouterModels: models, openrouterModelsUpdatedAt: updatedAt });
     } catch { /* non-fatal — still return the freshly fetched list */ }

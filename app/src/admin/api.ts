@@ -179,12 +179,17 @@ export interface ProviderKeyStatus {
   keyPreview: string;
 }
 
+/** Web-search grounding tools available to providers without native search. */
+export type WebSearchProvider = 'firecrawl' | 'tavily';
+
 export interface AISettings {
   provider: AIProvider;
   model: string;
   enabled: boolean;
   useGrounding: boolean;     // Gemini Google-Search grounding on/off
   autoFailover: boolean;     // fail over to another provider on quota 429
+  webSearchPrimary: WebSearchProvider;  // which search tool leads
+  webSearchFallback: boolean;           // try the other tool if the primary yields nothing
   hasKey: boolean;            // active provider has a usable key
   anyKey: boolean;           // any provider has a usable key
   providers: ProviderKeyStatus[];
@@ -201,6 +206,8 @@ export interface AISettingsPatch {
   enabled?: boolean;
   useGrounding?: boolean;
   autoFailover?: boolean;
+  webSearchPrimary?: WebSearchProvider;
+  webSearchFallback?: boolean;
   keys?: Partial<Record<AIProvider, string>>;
 }
 
@@ -331,4 +338,49 @@ export async function testTavilyConnection(patch: TavilySettingsPatch): Promise<
 
 export async function deleteTavilyKey(): Promise<void> {
   await apiFetch('/tavily-settings', { method: 'DELETE' });
+}
+
+// ── Firecrawl Web Search Settings ─────────────────────────────────────────────
+
+export interface FirecrawlSettings {
+  hasKey: boolean;
+  hasStoredKey: boolean;
+  hasEnvFallback: boolean;
+  source: 'stored' | 'env' | 'none';
+  keyPreview: string;
+  enabled: boolean;
+  maxResults: number;
+  apiBaseUrl: string;
+  searchPath: string;
+  /** Scrape each result to markdown (richer grounding, more credits). */
+  scrapeContent: boolean;
+}
+
+export interface FirecrawlSettingsPatch {
+  apiKey?: string;
+  enabled?: boolean;
+  maxResults?: number;
+  apiBaseUrl?: string;
+  searchPath?: string;
+  scrapeContent?: boolean;
+}
+
+export async function fetchFirecrawlSettings(): Promise<FirecrawlSettings> {
+  return apiFetch<FirecrawlSettings>('/firecrawl-settings');
+}
+
+export async function updateFirecrawlSettings(
+  patch: FirecrawlSettingsPatch,
+): Promise<{ ok: true; hasKey: boolean; keyPreview: string; enabled: boolean; maxResults: number; apiBaseUrl: string; searchPath: string; scrapeContent: boolean }> {
+  return apiFetch('/firecrawl-settings', { method: 'POST', body: JSON.stringify(patch) });
+}
+
+/** Verify the key by running a live throwaway search. `pathUsed` reports which
+ *  API path answered, so a v1/v2 mismatch is visible. */
+export async function testFirecrawlConnection(patch: FirecrawlSettingsPatch): Promise<{ ok: true; message: string; pathUsed?: string }> {
+  return apiFetch('/firecrawl-settings', { method: 'POST', body: JSON.stringify({ ...patch, test: true }) });
+}
+
+export async function deleteFirecrawlKey(): Promise<void> {
+  await apiFetch('/firecrawl-settings', { method: 'DELETE' });
 }

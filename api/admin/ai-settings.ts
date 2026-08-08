@@ -8,10 +8,12 @@ import {
   deleteAISettings,
   ALLOWED_MODELS,
   NVIDIA_DEFAULT_MODELS,
+  DEFAULT_WEB_SEARCH_PRIMARY,
   maskKey,
   defaultModelFor,
   type AIProvider,
   type StoredAISettings,
+  type WebSearchProviderId,
 } from '../_lib/aiSettings';
 import { pingAIProvider, AIResearchError } from '../_lib/aiClient';
 
@@ -58,6 +60,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       enabled: stored?.enabled ?? true,
       useGrounding: stored?.useGrounding ?? true,
       autoFailover: stored?.autoFailover ?? true,
+      webSearchPrimary: stored?.webSearchPrimary ?? DEFAULT_WEB_SEARCH_PRIMARY,
+      webSearchFallback: stored?.webSearchFallback ?? true,
       hasKey: activeHasKey,
       anyKey,
       providers,
@@ -75,6 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let body: {
       provider?: string; model?: string; enabled?: boolean;
       useGrounding?: boolean; autoFailover?: boolean;
+      webSearchPrimary?: string; webSearchFallback?: boolean;
       keys?: Partial<Record<AIProvider, string>>;
       test?: boolean; key?: string;
     };
@@ -111,6 +116,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (body.provider !== undefined && !PROVIDERS.includes(body.provider as AIProvider)) {
       return res.status(400).json({ error: `Invalid provider. Allowed: ${PROVIDERS.join(', ')}` });
     }
+    if (body.webSearchPrimary !== undefined && body.webSearchPrimary !== 'firecrawl' && body.webSearchPrimary !== 'tavily') {
+      return res.status(400).json({ error: 'Invalid webSearchPrimary. Allowed: firecrawl, tavily' });
+    }
     // Validate model only for static providers; OpenRouter models are dynamic.
     if (body.model !== undefined && (body.provider === 'gemini' || body.provider === 'deepseek')) {
       if (!ALLOWED_MODELS.some(m => m.id === body.model && m.provider === body.provider)) {
@@ -138,6 +146,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       enabled: body.enabled ?? existing?.enabled ?? true,
       useGrounding: body.useGrounding ?? existing?.useGrounding ?? true,
       autoFailover: body.autoFailover ?? existing?.autoFailover ?? true,
+      webSearchPrimary: (body.webSearchPrimary as WebSearchProviderId | undefined)
+        ?? existing?.webSearchPrimary ?? DEFAULT_WEB_SEARCH_PRIMARY,
+      webSearchFallback: body.webSearchFallback ?? existing?.webSearchFallback ?? true,
       keys,
       openrouterModels: existing?.openrouterModels,
       openrouterModelsUpdatedAt: existing?.openrouterModelsUpdatedAt,
@@ -161,6 +172,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       enabled: next.enabled,
       useGrounding: next.useGrounding,
       autoFailover: next.autoFailover,
+      webSearchPrimary: next.webSearchPrimary,
+      webSearchFallback: next.webSearchFallback,
       providers: PROVIDERS.map(p => ({ provider: p, hasStoredKey: Boolean(keys[p]), keyPreview: keys[p] ? maskKey(keys[p]!) : '' })),
     });
   }

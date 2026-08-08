@@ -62,13 +62,34 @@ interface GRVResearch {
   timestamp: string;
   /** Set when the result was grounded in (or attempted against) Cotality data. */
   cotality?: { used: boolean; url?: string; reason?: string };
-  /** Set when grounded in live Tavily web search (non-Gemini providers). */
+  /** Set when grounded in a live web search (non-Gemini providers), naming the
+   *  tool that ran. Supersedes `tavily`, which older responses used. */
+  webSearch?: { used: boolean; provider?: 'firecrawl' | 'tavily'; results?: number; fellBackFrom?: 'firecrawl' | 'tavily' };
+  /** @deprecated Legacy field — only set when Tavily was the tool that ran. */
   tavily?: { used: boolean; results?: number };
   /** True when served from cache (local or server) rather than a fresh AI call. */
   cached?: boolean;
 }
 
 const CURRENT_YEAR = new Date().getFullYear();
+
+/**
+ * Name the search tool that grounded a result, with its result count.
+ * Falls back to the legacy `tavily` field for responses cached before the
+ * multi-tool `webSearch` field existed.
+ */
+function webSearchToolLabel(result: {
+  webSearch?: { used: boolean; provider?: 'firecrawl' | 'tavily'; results?: number };
+  tavily?: { used: boolean; results?: number };
+}): string {
+  const ws = result.webSearch;
+  const tool = ws?.provider === 'firecrawl' ? 'Firecrawl'
+    : ws?.provider === 'tavily' ? 'Tavily'
+    : result.tavily?.used ? 'Tavily'
+    : 'web search';
+  const count = ws?.results ?? result.tavily?.results;
+  return count ? `${tool}, ${count} results` : tool;
+}
 
 /**
  * GRV (Gross Realisable Value) sales-price benchmark / reference card.
@@ -609,9 +630,9 @@ function LiveResearchPanel({
               {result.cotality.reason}
             </div>
           )}
-          {result.tavily?.used && (
+          {(result.webSearch?.used || result.tavily?.used) && (
             <div className="mb-2 text-[10px] inline-flex items-center gap-1 bg-purple-100 border border-purple-300 text-purple-900 rounded px-1.5 py-0.5">
-              <span aria-hidden="true">🔎</span> Grounded in live web search (Tavily{result.tavily.results ? `, ${result.tavily.results} results` : ''})
+              <span aria-hidden="true">🔎</span> Grounded in live web search ({webSearchToolLabel(result)})
             </div>
           )}
           <p className="text-[11px] text-gray-800 mb-2">{result.summary}</p>

@@ -9,6 +9,7 @@ import {
   type AISettings,
   type AIProvider,
   type AIModelOption,
+  type WebSearchProvider,
 } from './api';
 
 interface ProviderInfo {
@@ -75,6 +76,8 @@ export function AISettingsPage() {
   const [enabled, setEnabled] = useState(true);
   const [useGrounding, setUseGrounding] = useState(true);
   const [autoFailover, setAutoFailover] = useState(true);
+  const [webSearchPrimary, setWebSearchPrimary] = useState<WebSearchProvider>('firecrawl');
+  const [webSearchFallback, setWebSearchFallback] = useState(true);
   // Per-provider draft key replacements (blank = keep stored).
   const [keyInputs, setKeyInputs] = useState<Record<AIProvider, string>>({ gemini: '', deepseek: '', openrouter: '', nvidia: '' });
   const [showKey, setShowKey] = useState(false);
@@ -101,6 +104,8 @@ export function AISettingsPage() {
         setEnabled(s.enabled);
         setUseGrounding(s.useGrounding);
         setAutoFailover(s.autoFailover);
+        setWebSearchPrimary(s.webSearchPrimary ?? 'firecrawl');
+        setWebSearchFallback(s.webSearchFallback ?? true);
       })
       .catch((e: Error) => !cancelled && setLoadError(e.message));
     return () => { cancelled = true; };
@@ -165,7 +170,7 @@ export function AISettingsPage() {
     try {
       const keys: Partial<Record<AIProvider, string>> = {};
       for (const p of PROVIDER_ORDER) if (keyInputs[p].trim()) keys[p] = keyInputs[p].trim();
-      const patch = { provider, model, enabled, useGrounding, autoFailover, ...(Object.keys(keys).length ? { keys } : {}) };
+      const patch = { provider, model, enabled, useGrounding, autoFailover, webSearchPrimary, webSearchFallback, ...(Object.keys(keys).length ? { keys } : {}) };
       await updateAISettings(patch);
       // Refetch to get fresh previews / providers status.
       const fresh = await fetchAISettings();
@@ -268,6 +273,7 @@ export function AISettingsPage() {
   const dirty =
     provider !== settings.provider || model !== settings.model || enabled !== settings.enabled ||
     useGrounding !== settings.useGrounding || autoFailover !== settings.autoFailover ||
+    webSearchPrimary !== settings.webSearchPrimary || webSearchFallback !== settings.webSearchFallback ||
     PROVIDER_ORDER.some(p => keyInputs[p].trim() !== '');
 
   return (
@@ -417,6 +423,48 @@ export function AISettingsPage() {
               {modelOptions.map(opt => <ModelOption key={opt.id} option={opt} selected={model === opt.id} onSelect={() => setModel(opt.id)} />)}
             </div>
           )}
+        </Card>
+
+        {/* Web search grounding */}
+        <Card title="Web search grounding">
+          <p className="text-xs text-gray-400 mb-3">
+            Gemini is the only provider with its own live web search. For every other provider
+            (DeepSeek / OpenRouter / NVIDIA) research is grounded by running a web search and injecting the results into
+            the prompt. Choose which tool runs first — keys are configured under
+            {' '}<strong className="text-gray-300">Firecrawl Search</strong> and <strong className="text-gray-300">Tavily Search</strong>.
+          </p>
+
+          <label className="block text-xs font-semibold text-gray-300 mb-1">Primary search tool</label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+            {(['firecrawl', 'tavily'] as WebSearchProvider[]).map(p => {
+              const active = webSearchPrimary === p;
+              const meta = p === 'firecrawl'
+                ? { label: 'Firecrawl', blurb: 'Search + optional full-page scrape — richer grounding for figures buried in report bodies.' }
+                : { label: 'Tavily', blurb: 'LLM-oriented search with a synthesised answer. Cheaper per query, snippets only.' };
+              return (
+                <button key={p} type="button" onClick={() => setWebSearchPrimary(p)}
+                  className={`text-left p-3 rounded border transition-colors ${active ? 'bg-blue-900/40 border-blue-500 ring-2 ring-blue-500/40' : 'bg-gray-900/40 border-gray-700 hover:bg-gray-800'}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-white">{meta.label}</span>
+                    {p === 'firecrawl' && <span className="text-[10px] px-1.5 py-0.5 rounded border bg-emerald-900/40 border-emerald-700 text-emerald-300">default</span>}
+                  </div>
+                  <span className="block text-[11px] text-gray-400 mt-0.5">{meta.blurb}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input type="checkbox" checked={webSearchFallback} onChange={e => setWebSearchFallback(e.target.checked)} className="w-4 h-4 mt-0.5" />
+            <span className="text-sm text-gray-200">Fall back to the other tool
+              <span className="block text-xs text-gray-500 mt-0.5">
+                When the primary tool has no key, errors, or returns no results, retry the search with
+                {' '}{webSearchPrimary === 'firecrawl' ? 'Tavily' : 'Firecrawl'}. Turn off to use
+                {' '}{webSearchPrimary === 'firecrawl' ? 'Firecrawl' : 'Tavily'} exclusively — research then runs ungrounded
+                if it fails, rather than spending credits on the other service.
+              </span>
+            </span>
+          </label>
         </Card>
 
         {/* Quota & reliability */}

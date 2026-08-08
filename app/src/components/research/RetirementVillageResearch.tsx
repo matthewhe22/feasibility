@@ -41,7 +41,10 @@ interface SuburbsResult {
 }
 
 interface UnitRow {
+  /** Owner/operator brand (Keyton, Aveo, Australian Unity…), not the village. */
+  operator?: string | null;
   villageName: string;
+  unitNumber?: string | null;
   address?: string | null;
   suburb?: string | null;
   distanceKm?: number | null;
@@ -51,7 +54,16 @@ interface UnitRow {
   bedrooms?: number | null;
   bathrooms?: number | null;
   study?: boolean | null;
+  carSpaces?: number | null;
+  /** Internal/living area, m². `landSqm` is populated for villas / land-lease. */
+  internalSqm?: number | null;
+  landSqm?: number | null;
   unitType?: string | null;
+  /** licence / loan-lease / leasehold / strata / rental — RV units rarely sell freehold. */
+  tenure?: string | null;
+  dmfSummary?: string | null;
+  recurringFee?: number | null;
+  recurringFeePeriod?: string | null;
   note?: string | null;
   source?: string | null;
   sourceUrl?: string | null;
@@ -75,6 +87,29 @@ const avg = (xs: Array<number | null | undefined>) => {
   const v = xs.filter((x): x is number => typeof x === 'number' && isFinite(x));
   return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null;
 };
+
+/** Area cell: internal m², with land m² beneath it for villas / land-lease. */
+function area(u: UnitRow): React.ReactNode {
+  const internal = typeof u.internalSqm === 'number' && isFinite(u.internalSqm) ? u.internalSqm : null;
+  const land = typeof u.landSqm === 'number' && isFinite(u.landSqm) ? u.landSqm : null;
+  if (internal == null && land == null) return '—';
+  return (
+    <>
+      {internal ?? '—'}
+      {land != null && <span className="block text-[10px] text-gray-500">{land} land</span>}
+    </>
+  );
+}
+
+/** Price per internal m² — the comparison that makes units of different sizes
+ *  comparable. Only shown when both figures are real; never estimated. */
+function dollarsPerSqm(u: UnitRow): string {
+  const p = u.price;
+  const a = u.internalSqm;
+  if (typeof p !== 'number' || !isFinite(p) || p <= 0) return '—';
+  if (typeof a !== 'number' || !isFinite(a) || a <= 0) return '—';
+  return formatCurrency(Math.round(p / a));
+}
 
 export function RetirementVillageResearch() {
   const [villageName, setVillageName] = useState('');
@@ -227,7 +262,7 @@ export function RetirementVillageResearch() {
       {/* Section 2 — Competitor villages */}
       <Section
         title="2. Competitor retirement villages"
-        subtitle="Recently sold / listed units within the proximity radius (price, date, beds, baths, study), sourced from villages.com.au, downsizing.com.au, operator sites & portals."
+        subtitle="All substantiable past sales and current listings within the proximity radius — operator, village, unit, beds/baths/study/car, m², price, $/m², date and tenure/DMF terms — sourced from villages.com.au, downsizing.com.au, operator sites & portals."
         onRun={runCompetitors}
         running={compLoading}
         runLabel="Research competitors"
@@ -250,25 +285,43 @@ export function RetirementVillageResearch() {
               <table className="w-full text-xs border-collapse">
                 <thead>
                   <tr className="bg-gray-100 text-left">
-                    <Th>Village</Th><Th>Type</Th><Th className="text-right">Beds</Th>
-                    <Th className="text-right">Baths</Th><Th className="text-center">Study</Th>
-                    <Th className="text-right">Price</Th><Th>Sold / Listing</Th><Th>Date</Th><Th className="text-right">Dist</Th><Th>Source</Th>
+                    <Th>Operator</Th><Th>Village</Th><Th>Unit</Th><Th>Type</Th>
+                    <Th className="text-right">Beds</Th><Th className="text-right">Baths</Th>
+                    <Th className="text-center">Study</Th><Th className="text-right">Car</Th>
+                    <Th className="text-right">m²</Th>
+                    <Th className="text-right">Price</Th><Th className="text-right">$/m²</Th>
+                    <Th>Sold / Listing</Th><Th>Date</Th><Th>Tenure / DMF</Th>
+                    <Th className="text-right">Dist</Th><Th>Source</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {compResult.units?.length ? compResult.units.map((u, i) => (
                     <tr key={i} className="border-b border-gray-100 align-top">
+                      <Td className="text-gray-700">{u.operator ?? '—'}</Td>
                       <Td className="font-medium">{u.villageName}
                         {(u.suburb || u.address) && <span className="block text-[10px] text-gray-500">{u.address || u.suburb}</span>}
                         {u.note && <span className="block text-[10px] text-gray-400 italic">{u.note}</span>}
                       </Td>
+                      <Td className="font-mono text-gray-700">{u.unitNumber ?? '—'}</Td>
                       <Td>{u.unitType ?? '—'}</Td>
                       <Td className="text-right">{num(u.bedrooms)}</Td>
                       <Td className="text-right">{num(u.bathrooms)}</Td>
                       <Td className="text-center">{u.study == null ? '—' : u.study ? 'Yes' : 'No'}</Td>
+                      <Td className="text-right">{num(u.carSpaces)}</Td>
+                      <Td className="text-right">{area(u)}</Td>
                       <Td className="text-right font-mono">{money(u.price)}</Td>
+                      <Td className="text-right font-mono text-gray-600">{dollarsPerSqm(u)}</Td>
                       <Td>{u.priceType ? <Badge type={u.priceType} /> : '—'}</Td>
                       <Td className="text-gray-600">{u.date ?? '—'}</Td>
+                      <Td className="text-gray-600">
+                        {u.tenure ?? '—'}
+                        {u.dmfSummary && <span className="block text-[10px] text-gray-500">{u.dmfSummary}</span>}
+                        {typeof u.recurringFee === 'number' && (
+                          <span className="block text-[10px] text-gray-500">
+                            Levy {money(u.recurringFee)}{u.recurringFeePeriod ? `/${u.recurringFeePeriod}` : ''}
+                          </span>
+                        )}
+                      </Td>
                       <Td className="text-right">{num(u.distanceKm)}</Td>
                       <Td>
                         {u.sourceUrl
@@ -358,7 +411,27 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Meta({ result }: { result: { model?: string; provider?: string; cotality?: CotalityNote; groundingUsed?: boolean; tavily?: { used: boolean; results?: number } } }) {
+/** " (Firecrawl, 5 results)" — empty when no search tool was recorded, e.g.
+ *  Gemini grounding its own results or a response cached before this field. */
+function searchToolSuffix(result: {
+  webSearch?: { used: boolean; provider?: 'firecrawl' | 'tavily'; results?: number };
+  tavily?: { used: boolean; results?: number };
+}): string {
+  const ws = result.webSearch;
+  const tool = ws?.used
+    ? (ws.provider === 'firecrawl' ? 'Firecrawl' : ws.provider === 'tavily' ? 'Tavily' : null)
+    : result.tavily?.used ? 'Tavily' : null;
+  if (!tool) return '';
+  const count = ws?.results ?? result.tavily?.results;
+  return count ? ` (${tool}, ${count} results)` : ` (${tool})`;
+}
+
+function Meta({ result }: { result: {
+  model?: string; provider?: string; cotality?: CotalityNote; groundingUsed?: boolean;
+  /** Names the search tool that ran; `tavily` is the legacy equivalent. */
+  webSearch?: { used: boolean; provider?: 'firecrawl' | 'tavily'; results?: number };
+  tavily?: { used: boolean; results?: number };
+} }) {
   // groundingUsed is explicitly false when the active model has no live web
   // search (DeepSeek) OR when Gemini's grounding fell back (quota/permission).
   // Without live search the model relies on training data — it can't pull
@@ -374,7 +447,7 @@ function Meta({ result }: { result: { model?: string; provider?: string; cotalit
           </span>
         )}
         {result.groundingUsed
-          ? <span className="text-[10px] bg-purple-50 border border-purple-200 text-purple-700 rounded px-1.5 py-0.5">Live web search{result.tavily?.used ? ` (Tavily${result.tavily.results ? `, ${result.tavily.results} results` : ''})` : ''}</span>
+          ? <span className="text-[10px] bg-purple-50 border border-purple-200 text-purple-700 rounded px-1.5 py-0.5">Live web search{searchToolSuffix(result)}</span>
           : <span className="text-[10px] bg-amber-50 border border-amber-300 text-amber-800 rounded px-1.5 py-0.5">No live web search</span>}
         {result.model && <span className="text-[10px] text-gray-400">model: {result.model}</span>}
         {result.cotality && !result.cotality.used && result.cotality.reason && (
