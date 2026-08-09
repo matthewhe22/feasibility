@@ -13,7 +13,15 @@
  * `api/_lib/*` from becoming endpoints.
  */
 import { firecrawlSearch, FirecrawlError, FIRECRAWL_DEFAULT_SETTINGS } from '../_lib/firecrawl';
-import { runWebSearch, webSearchCacheTag, type WebSearchConfig } from '../_lib/webSearch';
+import {
+  runWebSearch,
+  webSearchCacheTag,
+  createWebSearchRunner,
+  needsWebSearchGrounding,
+  providerHasNativeSearch,
+  type WebSearchConfig,
+} from '../_lib/webSearch';
+import { quotaFailoverHint, type ResolvedChain, type ResolvedProvider } from '../_lib/aiSettings';
 
 // Disable the per-tool query caches so each case starts clean.
 process.env.FIRECRAWL_CACHE_TTL_MS = '0';
@@ -222,7 +230,82 @@ async function run() {
   check('blank query → null', ctx === null);
   eq('blank query performs no search', hosts2.length, 0);
 
+  console.log('\nGROUNDING ELIGIBILITY (which providers need injected results)');
+
+  check('gemini searches natively', providerHasNativeSearch('gemini'));
+  check('deepseek does not', !providerHasNativeSearch('deepseek'));
+  check('openrouter does not', !providerHasNativeSearch('openrouter'));
+  check('nvidia does not', !providerHasNativeSearch('nvidia'));
+
+  check('deepseek needs grounding even with native grounding on', needsWebSearchGrounding('deepseek', true));
+  check('gemini skips grounding while native grounding is on', !needsWebSearchGrounding('gemini', true));
+  // With Google-Search grounding switched off, Gemini would otherwise run blind;
+  // Firecrawl/Tavily results are strictly better and cost no Gemini quota.
+  check('gemini needs grounding when native grounding is off', needsWebSearchGrounding('gemini', false));
+
+  console.log('\nLAZY SEARCH RUNNER');
+
+  // A Gemini-only request must not spend a Firecrawl credit: the runner is
+  // created but never `ensure()`d, so no HTTP call happens at all.
+  let calls = 0;
+  stubFetch(() => {
+    calls++;
+    return { status: 200, body: { data: [{ url: 'https://fc.example', title: 'FC', description: 'snip' }] } };
+  });
+  const unused = createWebSearchRunner(cfg({}), 'never needed');
+  eq('runner performs no search until ensure()', calls, 0);
+  check('runner reports it has not run', !unused.ran);
+  check('context is null before ensure()', unused.context === null);
+
+  // Failover: two providers both need grounding, but only ONE search is spent.
+  calls = 0;
+  const shared = createWebSearchRunner(cfg({}), 'shared query');
+  const first = await shared.ensure();
+  const second = await shared.ensure();
+  eq('repeated ensure() spends one search', calls, 1);
+  check('second ensure() returns the same context', first === second);
+  check('runner exposes the context after running', shared.context === first);
+  check('runner reports it has run', shared.ran);
+
+  // Concurrent ensure() calls must not race into two searches.
+  calls = 0;
+  const concurrent = createWebSearchRunner(cfg({}), 'concurrent query');
+  const [a, b] = await Promise.all([concurrent.ensure(), concurrent.ensure()]);
+  eq('concurrent ensure() spends one search', calls, 1);
+  check('concurrent ensure() returns the same context', a === b);
+
+  // No search tool configured → ensure() is a no-op, never an error.
+  calls = 0;
+  const none = createWebSearchRunner(null, 'no tools');
+  check('null config → ensure() yields null', (await none.ensure()) === null);
+  eq('null config performs no search', calls, 0);
+
   restoreFetch();
+
+  console.log('\nQUOTA FAILOVER HINT');
+
+  const provider = (p: ResolvedProvider['provider']): ResolvedProvider =>
+    ({ apiKey: 'k', model: 'm', provider: p, source: 'stored' });
+  const chain = (over: Partial<ResolvedChain>): ResolvedChain => ({
+    chain: [provider('gemini')],
+    useGrounding: true,
+    autoFailover: true,
+    webSearchPrimary: 'firecrawl',
+    webSearchFallback: true,
+    ...over,
+  });
+
+  // The whole point: a single-provider chain must say WHY nothing else ran, and
+  // that a configured search tool is not a substitute for model capacity.
+  const soloHint = quotaFailoverHint(chain({}));
+  check('solo provider hint names Admin → AI Settings', soloHint.includes('Admin → AI Settings'));
+  check('solo provider hint rules out Firecrawl/Tavily as a stand-in', /Firecrawl \/ Tavily/.test(soloHint));
+
+  const offHint = quotaFailoverHint(chain({ chain: [provider('gemini'), provider('nvidia')], autoFailover: false }));
+  check('failover-off hint says to turn it on', offHint.includes('Auto-failover is off'));
+
+  eq('nothing to add when failover already tried everything',
+    quotaFailoverHint(chain({ chain: [provider('gemini'), provider('nvidia')] })), '');
 
   console.log(`\n${'═'.repeat(60)}`);
   console.log(`WEB SEARCH TESTS: ${passed} passed, ${failed} failed (${passed + failed} total)`);

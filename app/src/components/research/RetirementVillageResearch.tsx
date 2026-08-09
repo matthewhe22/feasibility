@@ -458,9 +458,10 @@ function Meta({ result }: { result: {
         <div className="mt-1.5 text-[10px] bg-amber-50 border border-amber-300 text-amber-800 rounded px-2 py-1">
           ⚠ The active model{result.provider ? ` (${result.provider})` : ''} ran <strong>without live web search</strong>, so these
           figures come from the model's training data — they may be stale and won't reflect current
-          villages.com.au / downsizing.com.au listings. For live, sourced results switch to a
-          <strong> Gemini</strong> model in <span className="font-mono">Admin → AI Settings</span>
-          {result.provider === 'gemini' ? ' (Gemini grounding fell back — likely a quota/permission limit; wait and retry or enable billing).' : '.'}
+          villages.com.au / downsizing.com.au listings. For live, sourced results add a
+          <strong> Firecrawl</strong> (or Tavily) key in <span className="font-mono">Admin → Firecrawl Search</span> — it grounds
+          every provider — or use a <strong>Gemini</strong> model, which searches natively
+          {result.provider === 'gemini' ? '. Gemini grounding fell back here — likely a quota/permission limit; Firecrawl grounding avoids that quota entirely.' : '.'}
         </div>
       )}
     </div>

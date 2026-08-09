@@ -1,15 +1,17 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { setCors } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
-import { resolveProviderChain } from '../_lib/aiSettings';
+import { resolveProviderChain, quotaFailoverHint, type ResolvedProvider } from '../_lib/aiSettings';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
 import {
   resolveWebSearchConfig,
-  runWebSearch,
+  createWebSearchRunner,
+  needsWebSearchGrounding,
   webSearchCacheTag,
   buildWebSearchPromptBlock,
   webSearchNote,
   type WebSearchConfig,
+  type WebSearchContext,
 } from '../_lib/webSearch';
 import { runAIResearch, mergeSources, AIResearchError, type AIResearchSource } from '../_lib/aiClient';
 import { researchCacheKey, getCachedResearch, setCachedResearch } from '../_lib/researchCache';
@@ -213,8 +215,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // otherwise an identical (cached) request would still burn a search.
   let cotalitySettings: Awaited<ReturnType<typeof resolveCotalitySettings>> = null;
   try { cotalitySettings = await resolveCotalitySettings(supabase); } catch { /* ignore */ }
+
+  // Grounding is resolved for the WHOLE chain, not just the head. A Gemini head
+  // grounds itself, but the providers behind it (reached when Gemini 429s) do
+  // not — gating on the head alone meant a Firecrawl key was ignored on exactly
+  // the requests that needed it, and every failover ran ungrounded.
+  const needsSearch = (p: ResolvedProvider) => needsWebSearchGrounding(p.provider, resolved.useGrounding);
   let webSearch: WebSearchConfig | null = null;
-  if (head && head.provider !== 'gemini') {
+  if (resolved.chain.some(needsSearch)) {
     try {
       webSearch = await resolveWebSearchConfig(supabase, resolved.webSearchPrimary, resolved.webSearchFallback);
     } catch { /* ignore */ }
@@ -252,41 +260,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch { /* never block AI research on Cotality */ }
   }
 
-  // Optional live web search for providers without native grounding (DeepSeek /
-  // OpenRouter / NVIDIA). The configured primary tool runs first, falling back
-  // to the other. One search per tool per cache-miss request maximum.
-  let searchCtx: Awaited<ReturnType<typeof runWebSearch>> = null;
-  if (webSearch) {
-    const where = [body.suburb, body.state].filter(Boolean).join(' ');
-    const query = body.mode === 'suburbs'
-      ? `${body.villageName} ${where} surrounding suburbs median house and unit price`.replace(/\s+/g, ' ').trim()
-      : `retirement village near ${body.villageName} ${where} units for sale price recent`.replace(/\s+/g, ' ').trim();
-    searchCtx = await runWebSearch(webSearch, query);
-  }
-  const searchNote = webSearchNote(searchCtx);
-  const searchSources: AIResearchSource[] = searchCtx ? searchCtx.sources : [];
-  if (searchCtx) {
-    userPrompt += `\n\n${buildWebSearchPromptBlock(searchCtx)}`;
-  }
-  // Legacy field: only truthy when Tavily was the tool that actually ran.
-  const tavilyNote: { used: boolean; results?: number } = searchCtx && searchCtx.provider === 'tavily'
-    ? { used: true, results: searchCtx.resultCount }
-    : { used: false };
+  // Live web search for the providers that need it. Lazy: the search only runs
+  // once a provider that actually needs grounding is about to be called, and its
+  // result is reused across failover attempts (one search per request maximum).
+  const where = [body.suburb, body.state].filter(Boolean).join(' ');
+  const searchQuery = body.mode === 'suburbs'
+    ? `${body.villageName} ${where} surrounding suburbs median house and unit price`.replace(/\s+/g, ' ').trim()
+    : `retirement village near ${body.villageName} ${where} units for sale price recent`.replace(/\s+/g, ' ').trim();
+  const search = createWebSearchRunner(webSearch, searchQuery);
 
   // Run with auto-failover across configured providers (active first); on a
   // quota 429 fall through to the next provider when enabled.
   const errors: string[] = [];
   for (let i = 0; i < resolved.chain.length; i++) {
     const p = resolved.chain[i];
+    const searchCtx = needsSearch(p) ? await search.ensure() : null;
+    const prompt = searchCtx ? `${userPrompt}\n\n${buildWebSearchPromptBlock(searchCtx)}` : userPrompt;
+    // Set when Gemini's own grounding was refused mid-call and the injected
+    // results stood in for it — tracked per attempt so the response reports
+    // what THIS provider actually saw.
+    let fallbackCtx: WebSearchContext | null = null;
+
     try {
       const result = await runAIResearch({
         provider: p.provider,
         model: p.model,
         apiKey: p.apiKey,
         systemPrompt,
-        userPrompt,
+        userPrompt: prompt,
         useGrounding: resolved.useGrounding,
+        groundingFallback: webSearch && !searchCtx
+          ? async () => {
+              fallbackCtx = await search.ensure();
+              return fallbackCtx ? buildWebSearchPromptBlock(fallbackCtx) : null;
+            }
+          : undefined,
       });
+
+      const usedCtx: WebSearchContext | null = searchCtx ?? fallbackCtx;
+      const searchNote = webSearchNote(usedCtx);
+      const searchSources: AIResearchSource[] = usedCtx ? usedCtx.sources : [];
+      // Legacy field: only truthy when Tavily was the tool that actually ran.
+      const tavilyNote: { used: boolean; results?: number } = usedCtx && usedCtx.provider === 'tavily'
+        ? { used: true, results: usedCtx.resultCount }
+        : { used: false };
 
       const declared = (result.json.sources as AIResearchSource[] | undefined);
       const payload: Record<string, unknown> = {
@@ -309,7 +326,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const msg = e instanceof Error ? e.message : 'Research failed.';
       errors.push(`${p.provider}: ${msg}`);
       if (status === 429 && resolved.autoFailover && i < resolved.chain.length - 1) continue;
-      return res.status(status).json({ error: msg, ...(errors.length > 1 ? { attempted: errors } : {}) });
+      return res.status(status).json({
+        error: status === 429 ? `${msg}${quotaFailoverHint(resolved)}` : msg,
+        ...(errors.length > 1 ? { attempted: errors } : {}),
+      });
     }
   }
   return res.status(429).json({ error: `All configured AI providers are rate-limited. ${errors.join(' | ')}`, attempted: errors });

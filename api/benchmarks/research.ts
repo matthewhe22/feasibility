@@ -1,16 +1,18 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { setCors } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
-import { resolveProviderChain } from '../_lib/aiSettings';
+import { resolveProviderChain, quotaFailoverHint, type ResolvedProvider } from '../_lib/aiSettings';
 import { runAIResearch, mergeSources, AIResearchError, type AIResearchSource } from '../_lib/aiClient';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
 import {
   resolveWebSearchConfig,
-  runWebSearch,
+  createWebSearchRunner,
+  needsWebSearchGrounding,
   webSearchCacheTag,
   buildWebSearchPromptBlock,
   webSearchNote,
   type WebSearchConfig,
+  type WebSearchContext,
 } from '../_lib/webSearch';
 import { researchCacheKey, getCachedResearch, setCachedResearch } from '../_lib/researchCache';
 
@@ -305,10 +307,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // identical (cached) request would still burn a Tavily search + Cotality call.
   let cotalitySettings: Awaited<ReturnType<typeof resolveCotalitySettings>> = null;
   try { cotalitySettings = await resolveCotalitySettings(supabase); } catch { /* ignore */ }
-  // Web-search grounding applies only to providers with no native search —
-  // Gemini keeps its own Google-Search grounding.
+  // Web-search grounding is resolved for the WHOLE failover chain, not just the
+  // head. Gemini grounds itself, but the providers reached after a Gemini 429 do
+  // not — gating on the head alone ignored a configured Firecrawl/Tavily key on
+  // exactly the requests that needed it, so every failover ran ungrounded.
+  const needsSearch = (p: ResolvedProvider) => needsWebSearchGrounding(p.provider, resolved.useGrounding);
   let webSearch: WebSearchConfig | null = null;
-  if (head && head.provider !== 'gemini') {
+  if (resolved.chain.some(needsSearch)) {
     try {
       webSearch = await resolveWebSearchConfig(supabase, resolved.webSearchPrimary, resolved.webSearchFallback);
     } catch { /* ignore */ }
@@ -366,38 +371,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  // Optional: live web search for providers without native grounding (Gemini
-  // uses its own). The configured primary tool runs first, falling back to the
-  // other. One search per tool per cache-miss request maximum.
-  const searchCtx = webSearch ? await runWebSearch(webSearch, buildSearchQuery(body)) : null;
-  const searchNote = webSearchNote(searchCtx);
-  const searchSources: AIResearchSource[] = searchCtx ? searchCtx.sources : [];
-  if (searchCtx) {
-    userPrompt = `${userPrompt}\n\n${buildWebSearchPromptBlock(searchCtx)}`;
-  }
-  // Legacy field: only truthy when Tavily was the tool that actually ran.
-  const tavilyNote: TavilyNote = searchCtx && searchCtx.provider === 'tavily'
-    ? { used: true, results: searchCtx.resultCount }
-    : { used: false };
+  // Optional: live web search for the providers that need it. Lazy — the search
+  // runs only when a provider requiring grounding is about to be called, and the
+  // one result is reused across failover attempts (one search per request max).
+  const search = createWebSearchRunner(webSearch, buildSearchQuery(body));
 
   // ── Run with auto-failover across configured providers ────────────────────
   // The active provider is tried first; on a quota/rate-limit (429) the request
   // fails over to the next configured provider (when autoFailover is on). The
   // Gemini Google-Search grounding is skipped entirely when useGrounding is off
-  // (avoids the scarce free-tier grounding quota).
+  // (avoids the scarce free-tier grounding quota) — Firecrawl/Tavily grounding
+  // takes over in that case.
   const errors: string[] = [];
   let failoverNote: string | undefined;
   for (let i = 0; i < resolved.chain.length; i++) {
     const p = resolved.chain[i];
+    const searchCtx = needsSearch(p) ? await search.ensure() : null;
+    const prompt = searchCtx ? `${userPrompt}\n\n${buildWebSearchPromptBlock(searchCtx)}` : userPrompt;
+    // Set when Gemini's own grounding was refused mid-call and the injected
+    // results stood in for it — tracked per attempt so the response reports what
+    // THIS provider actually saw.
+    let fallbackCtx: WebSearchContext | null = null;
+
     try {
       const result = await runAIResearch({
         provider: p.provider,
         model: p.model,
         apiKey: p.apiKey,
         systemPrompt,
-        userPrompt,
+        userPrompt: prompt,
         useGrounding: resolved.useGrounding,
+        groundingFallback: webSearch && !searchCtx
+          ? async () => {
+              fallbackCtx = await search.ensure();
+              return fallbackCtx ? buildWebSearchPromptBlock(fallbackCtx) : null;
+            }
+          : undefined,
       });
+
+      const usedCtx: WebSearchContext | null = searchCtx ?? fallbackCtx;
+      const searchNote = webSearchNote(usedCtx);
+      const searchSources: AIResearchSource[] = usedCtx ? usedCtx.sources : [];
+      // Legacy field: only truthy when Tavily was the tool that actually ran.
+      const tavilyNote: TavilyNote = usedCtx && usedCtx.provider === 'tavily'
+        ? { used: true, results: usedCtx.resultCount }
+        : { used: false };
 
       const declared = result.json.sources as Array<{ title: string; url: string; snippet?: string }> | undefined;
       const payload: Record<string, unknown> = {
@@ -428,7 +446,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const hasNext = i < resolved.chain.length - 1;
       if (isQuota && resolved.autoFailover && hasNext) continue;
       return res.status(status).json({
-        error: msg,
+        // A quota failure gets the remedy appended — the bare provider message
+        // gives no clue that a configured Firecrawl key can't substitute for
+        // model capacity, or that no second provider was available to try.
+        error: isQuota ? `${msg}${quotaFailoverHint(resolved)}` : msg,
         ...(errors.length > 1 ? { attempted: errors } : {}),
       });
     }

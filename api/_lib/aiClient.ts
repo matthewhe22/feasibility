@@ -51,6 +51,16 @@ export interface RunAIResearchInput {
   /** Gemini only: use Google Search grounding (default true). Set false to skip
    *  the scarce free-tier grounding quota and run plain (no live web search). */
   useGrounding?: boolean;
+  /**
+   * Gemini only: supplies a prompt block to append when native Google-Search
+   * grounding is REFUSED (quota / permission) and the request is retried without
+   * it. Without this the retry runs blind on training data even where a search
+   * tool is configured. Called at most once, and only on that path — so a
+   * request Gemini grounds itself spends nothing.
+   *
+   * Return null when no results are available; the retry then runs ungrounded.
+   */
+  groundingFallback?: () => Promise<string | null>;
 }
 
 export async function runAIResearch(input: RunAIResearchInput): Promise<AIResearchResult> {
@@ -62,21 +72,30 @@ export async function runAIResearch(input: RunAIResearchInput): Promise<AIResear
 
 /* ── Gemini (with Google Search grounding + quota fallback) ─────────────────── */
 
-async function runGemini({ apiKey, model, systemPrompt, userPrompt, useGrounding = true }: RunAIResearchInput): Promise<AIResearchResult> {
+async function runGemini({ apiKey, model, systemPrompt, userPrompt, useGrounding = true, groundingFallback }: RunAIResearchInput): Promise<AIResearchResult> {
   const client = new GoogleGenerativeAI(apiKey);
   const apiModelName = toGeminiApiModel(model);
   const isGen2 = apiModelName.startsWith('gemini-2');
   const groundingTool = isGen2 ? { googleSearch: {} } : { googleSearchRetrieval: {} };
 
-  const call = async (grounding: boolean) => {
+  const call = async (grounding: boolean, prompt: string = userPrompt) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const config: any = { model: apiModelName, systemInstruction: systemPrompt };
     if (grounding) config.tools = [groundingTool];
-    return client.getGenerativeModel(config).generateContent(userPrompt);
+    return client.getGenerativeModel(config).generateContent(prompt);
+  };
+
+  /** Retry without the Google-Search tool, substituting injected search results
+   *  when a search tool is configured — better than falling back to nothing. */
+  const callUngrounded = async () => {
+    const block = groundingFallback ? await groundingFallback() : null;
+    return call(false, block ? `${userPrompt}\n\n${block}` : userPrompt);
   };
 
   // When grounding is disabled by the admin, skip it entirely — this avoids the
   // scarce free-tier Google-Search grounding quota that 429s even on light use.
+  // The caller grounds the prompt with Firecrawl/Tavily instead in that case, so
+  // no fallback block is needed here.
   let groundingUsed = useGrounding;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let response: any;
@@ -94,7 +113,7 @@ async function runGemini({ apiKey, model, systemPrompt, userPrompt, useGrounding
         m.includes('PERMISSION_DENIED') || /\b403\b/.test(m) || c === 403;
       if (!quotaOrPerm) throw err;
       groundingUsed = false;
-      response = await call(false);
+      response = await callUngrounded();
     }
   } catch (err) {
     throw mapGeminiError(err, apiModelName);

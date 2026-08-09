@@ -305,6 +305,36 @@ cache key can record which tools were in play — `webSearchCacheTag` encodes th
 attempt **order**, so a Firecrawl-first result is never served to a Tavily-first
 request — while the search itself runs only on a cache miss.
 
+### Which requests get grounded (chain-wide, lazily)
+Grounding eligibility is decided per **provider attempt**, for the whole failover
+chain — not from the active provider alone:
+
+- `providerHasNativeSearch(p)` — true only for Gemini.
+- `needsWebSearchGrounding(p, nativeGroundingEnabled)` — true when the provider
+  has no search of its own, **or** it is Gemini with `useGrounding` switched off
+  (injected results beat running blind, and cost none of the scarce free-tier
+  Google-Search grounding quota).
+- `createWebSearchRunner(cfg, query)` runs the search **lazily and once**: the
+  first attempt that needs grounding triggers it, later attempts reuse the
+  result. A Gemini request that grounds itself therefore spends zero Firecrawl /
+  Tavily credits, while a failover to DeepSeek / OpenRouter / NVIDIA still
+  arrives grounded.
+- `runAIResearch({ groundingFallback })` covers the mid-call case: when Gemini's
+  Google-Search tool is refused (429/403 on its own quota) the retry without the
+  tool now carries the injected search block instead of running on training
+  data. Responses report what that attempt actually saw, so `webSearch.used`
+  stays accurate.
+
+**Firecrawl/Tavily are grounding, not model capacity.** They cannot rescue a
+rate-limited model — only another provider key can. When a 429 ends the chain the
+error now says so (`quotaFailoverHint` in `api/_lib/aiSettings.ts`): add a second
+provider key (OpenRouter / NVIDIA have free models) to enable auto-failover, or
+turn auto-failover back on if it was disabled.
+
+Tests: `npx tsx api/__tests__/aiClient.test.ts` (18 assertions; stubs the Gemini
+SDK's HTTP layer to force a grounding-quota 429 and assert the retry carries the
+injected block).
+
 Responses carry `webSearch: { used, provider, results, fellBackFrom? }`. The
 legacy `tavily: { used, results }` field is still emitted (only when Tavily was
 the tool that actually ran) for clients that predate the multi-tool field.
@@ -322,9 +352,10 @@ the tool that actually ran) for clients that predate the multi-tool field.
   once; the Test action reports which path answered so it can be pinned.
 - `scrapeContent` (default off) requests markdown per result — much better
   grounding, materially more credits.
-- Tests: `npx tsx api/__tests__/webSearch.test.ts` (33 assertions covering both
-  response shapes, the 404-only retry, status propagation, and primary/fallback
-  ordering). Lives under `__tests__` so Vercel's function detection skips it.
+- Tests: `npx tsx api/__tests__/webSearch.test.ts` (55 assertions covering both
+  response shapes, the 404-only retry, status propagation, primary/fallback
+  ordering, grounding eligibility, the lazy one-shot runner, and the quota
+  hint). Lives under `__tests__` so Vercel's function detection skips it.
 
 ### Tavily specifics
 

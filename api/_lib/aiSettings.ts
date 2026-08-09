@@ -394,6 +394,29 @@ export async function resolveProviderChain(supabase: SupabaseClient | null): Pro
 }
 
 /**
+ * Actionable tail appended to a quota / rate-limit (429) error.
+ *
+ * The bare provider message ("Google Gemini quota / rate limit reached…") never
+ * says why nothing else was tried, which reads as a bug when a web-search tool
+ * IS configured — Firecrawl and Tavily supply grounding, not model capacity, so
+ * they cannot cover for a rate-limited model. Name the actual remedy instead.
+ * Returns '' when the chain already did everything it could.
+ */
+export function quotaFailoverHint(resolved: ResolvedChain): string {
+  if (resolved.chain.length < 2) {
+    return ' No second AI provider is configured, so there was nothing to fail over to —'
+      + ' add a DeepSeek, OpenRouter or NVIDIA key in Admin → AI Settings (OpenRouter and NVIDIA'
+      + ' have free models). Firecrawl / Tavily only supply web-search grounding, so they cannot'
+      + ' stand in for a rate-limited model.';
+  }
+  if (!resolved.autoFailover) {
+    return ' Auto-failover is off — turn it on in Admin → AI Settings to fall through to the'
+      + ' other configured providers automatically.';
+  }
+  return '';
+}
+
+/**
  * Resolve the single active key + model + provider (back-compat thin wrapper
  * over resolveProviderChain — returns the first/active entry).
  */

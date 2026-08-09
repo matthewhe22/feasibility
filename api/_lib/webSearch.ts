@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { AIProvider } from './aiSettings';
 import { resolveFirecrawlSettings, fetchFirecrawlContext } from './firecrawl';
 import { resolveTavilySettings, fetchTavilyContext } from './tavily';
 
@@ -31,6 +32,29 @@ export const DEFAULT_WEB_SEARCH_PRIMARY: WebSearchProvider = 'firecrawl';
 
 export function isWebSearchProvider(v: unknown): v is WebSearchProvider {
   return v === 'firecrawl' || v === 'tavily';
+}
+
+/**
+ * True when the AI provider can search the web on its own. Gemini is the only
+ * one (Google Search grounding); DeepSeek / OpenRouter / NVIDIA all depend on
+ * Firecrawl or Tavily results being injected into the prompt.
+ */
+export function providerHasNativeSearch(provider: AIProvider): boolean {
+  return provider === 'gemini';
+}
+
+/**
+ * True when a request routed to `provider` should be grounded by Firecrawl /
+ * Tavily.
+ *
+ * Two cases qualify:
+ *   - the provider has no search of its own; or
+ *   - it is Gemini but native Google-Search grounding is switched off, in which
+ *     case injected results beat running blind (and cost none of the scarce
+ *     free-tier grounding quota that makes Gemini 429 in the first place).
+ */
+export function needsWebSearchGrounding(provider: AIProvider, nativeGroundingEnabled: boolean): boolean {
+  return !providerHasNativeSearch(provider) || !nativeGroundingEnabled;
 }
 
 type ResolvedFirecrawl = Awaited<ReturnType<typeof resolveFirecrawlSettings>>;
@@ -128,6 +152,48 @@ export async function runWebSearch(cfg: WebSearchConfig, query: string): Promise
     }
   }
   return null;
+}
+
+/**
+ * A one-shot, lazily-executed web search.
+ *
+ * The research endpoints try providers in a failover chain, and only some links
+ * in that chain need injected search results (see `needsWebSearchGrounding`).
+ * Searching eagerly would spend credits on requests a natively-grounded Gemini
+ * answers on its own; searching per attempt would spend them twice on failover.
+ * The runner does neither: the search runs on the first `ensure()` that actually
+ * needs it, and every later call reuses that one result.
+ */
+export interface WebSearchRunner {
+  /** Run the search if it hasn't run yet; returns the (possibly null) context. */
+  ensure(): Promise<WebSearchContext | null>;
+  /** The result of the search if it has run, else null. Never triggers one. */
+  readonly context: WebSearchContext | null;
+  /** Whether a search was actually performed. */
+  readonly ran: boolean;
+}
+
+export function createWebSearchRunner(cfg: WebSearchConfig | null, query: string): WebSearchRunner {
+  let ran = false;
+  let ctx: WebSearchContext | null = null;
+  let inFlight: Promise<WebSearchContext | null> | null = null;
+
+  return {
+    async ensure() {
+      if (ran) return ctx;
+      if (!cfg) return null;
+      if (!inFlight) {
+        inFlight = runWebSearch(cfg, query).then(r => {
+          ran = true;
+          ctx = r;
+          return r;
+        });
+      }
+      return inFlight;
+    },
+    get context() { return ctx; },
+    get ran() { return ran; },
+  };
 }
 
 /** Human-readable tool name for prompt text and UI badges. */
