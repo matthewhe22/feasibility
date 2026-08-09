@@ -273,6 +273,21 @@ powered by a configurable AI provider, managed in Admin → AI Settings.
   authenticated — needs a saved key), caches it in the sentinel, and the Admin
   "Update models" button populates the dropdown. A curated `NVIDIA_DEFAULT_MODELS`
   list seeds the dropdown before the first refresh.
+- **Gemini Google-Search grounding is OFF by default** (`useGrounding`). Its
+  free-tier grounding quota 429s under light use and was the most common cause of
+  failed research; with it off, Gemini is grounded by Firecrawl/Tavily instead —
+  same live data, none of that quota. Turn it on in Admin → AI Settings only when
+  no web-search tool is configured. The default applies to stored rows that never
+  set the field, so existing installs pick it up without a migration.
+- **Failover models:** the settings row stores one `model`, belonging to the
+  active provider, so failover candidates need a default. `failoverModelFor`
+  supplies it — and deliberately avoids OpenRouter's `openrouter/auto`, a
+  variable-priced paid route that 402s on a credit-less backup key. With a
+  catalogue cached it picks the widest-context **free** model; an explicitly
+  selected model (OpenRouter as the active provider) is never second-guessed.
+- **Capacity failures fail over:** `isCapacityFailure` covers 429 (rate limit)
+  **and** 402 (out of credits / balance). A bad key (401) or unknown model (404)
+  returns immediately — it would fail identically on the next provider.
 - **Resolution:** `resolveActiveSettings` returns the selected provider's key
   (stored, else env: `GEMINI_API_KEY` / `DEEPSEEK_API_KEY` / `OPENROUTER_API_KEY`
   / `NVIDIA_API_KEY`), falling back to any provider that has a key. Both research
@@ -333,7 +348,8 @@ turn auto-failover back on if it was disabled.
 
 Tests: `npx tsx api/__tests__/aiClient.test.ts` (18 assertions; stubs the Gemini
 SDK's HTTP layer to force a grounding-quota 429 and assert the retry carries the
-injected block).
+injected block) and `npx tsx api/__tests__/aiSettings.test.ts` (16 assertions
+covering the grounding-off default, chain order, and failover model selection).
 
 Responses carry `webSearch: { used, provider, results, fellBackFrom? }`. The
 legacy `tavily: { used, results }` field is still emitted (only when Tavily was

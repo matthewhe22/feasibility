@@ -48,8 +48,10 @@ export interface RunAIResearchInput {
   apiKey: string;
   systemPrompt: string;
   userPrompt: string;
-  /** Gemini only: use Google Search grounding (default true). Set false to skip
-   *  the scarce free-tier grounding quota and run plain (no live web search). */
+  /** Gemini only: use Google Search grounding. **Defaults to false** — the tool
+   *  draws on a scarce free-tier quota that 429s under light use, so the prompt
+   *  is grounded with Firecrawl/Tavily results instead. Set true to let Gemini
+   *  search for itself (the right call when no search tool is configured). */
   useGrounding?: boolean;
   /**
    * Gemini only: supplies a prompt block to append when native Google-Search
@@ -72,7 +74,7 @@ export async function runAIResearch(input: RunAIResearchInput): Promise<AIResear
 
 /* ── Gemini (with Google Search grounding + quota fallback) ─────────────────── */
 
-async function runGemini({ apiKey, model, systemPrompt, userPrompt, useGrounding = true, groundingFallback }: RunAIResearchInput): Promise<AIResearchResult> {
+async function runGemini({ apiKey, model, systemPrompt, userPrompt, useGrounding = false, groundingFallback }: RunAIResearchInput): Promise<AIResearchResult> {
   const client = new GoogleGenerativeAI(apiKey);
   const apiModelName = toGeminiApiModel(model);
   const isGen2 = apiModelName.startsWith('gemini-2');

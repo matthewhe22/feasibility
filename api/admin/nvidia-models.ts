@@ -46,7 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (supabase) {
     const base = stored ?? {
       provider: 'nvidia' as const, model: 'meta/llama-3.1-8b-instruct', enabled: true,
-      useGrounding: true, autoFailover: true,
+      useGrounding: false, autoFailover: true,
       webSearchPrimary: DEFAULT_WEB_SEARCH_PRIMARY, webSearchFallback: true,
       keys: {},
     };

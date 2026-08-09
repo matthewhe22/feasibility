@@ -74,7 +74,9 @@ export function AISettingsPage() {
   const [provider, setProvider] = useState<AIProvider>('gemini');
   const [model, setModel] = useState<string>('gemini-2-0-flash');
   const [enabled, setEnabled] = useState(true);
-  const [useGrounding, setUseGrounding] = useState(true);
+  // Default OFF: Gemini's Google-Search tool has a small free-tier quota that
+  // 429s under light use. Firecrawl / Tavily ground it instead.
+  const [useGrounding, setUseGrounding] = useState(false);
   const [autoFailover, setAutoFailover] = useState(true);
   const [webSearchPrimary, setWebSearchPrimary] = useState<WebSearchProvider>('firecrawl');
   const [webSearchFallback, setWebSearchFallback] = useState(true);
@@ -473,10 +475,12 @@ export function AISettingsPage() {
             <input type="checkbox" checked={useGrounding} onChange={e => setUseGrounding(e.target.checked)} className="w-4 h-4 mt-0.5" />
             <span className="text-sm text-gray-200">Use Google Search grounding (Gemini)
               <span className="block text-xs text-gray-500 mt-0.5">
-                ON = Gemini searches the live web (best for current data), but uses the small free-tier
-                <strong className="text-gray-400"> grounding quota</strong> that can hit "quota / rate limit" even on light use.
-                Turn OFF to run Gemini without web search (answers from training data) and avoid that quota.
-                No effect on DeepSeek / OpenRouter.
+                <strong className="text-gray-400">Off by default.</strong> Gemini's own search tool draws on a small
+                free-tier <strong className="text-gray-400">grounding quota</strong> that returns "quota / rate limit
+                reached" even on light use. While it is off, Gemini is grounded by the web-search tool above
+                ({webSearchPrimary === 'firecrawl' ? 'Firecrawl' : 'Tavily'}) — same live web data, none of that quota.
+                Turn it ON only if no search tool is configured, so Gemini can search for itself instead of
+                answering from training data. No effect on DeepSeek / OpenRouter / NVIDIA.
               </span>
             </span>
           </label>
@@ -484,8 +488,11 @@ export function AISettingsPage() {
             <input type="checkbox" checked={autoFailover} onChange={e => setAutoFailover(e.target.checked)} className="w-4 h-4 mt-0.5" />
             <span className="text-sm text-gray-200">Auto-failover on rate limit
               <span className="block text-xs text-gray-500 mt-0.5">
-                When the active provider is rate-limited (429), automatically retry the request on the next
-                provider that has a key (e.g. Gemini → DeepSeek). The result notes when a fallback was used.
+                When the active provider is rate-limited (429) or out of credits (402), automatically retry the
+                request on the next provider that has a key (e.g. Gemini → OpenRouter). The fallback provider is
+                grounded by the web-search tool above, and the result notes when a fallback was used. An
+                OpenRouter key with no selected model falls over to a free model from its catalogue — click
+                "Update models" so one is cached.
               </span>
             </span>
           </label>

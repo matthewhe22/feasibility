@@ -21,7 +21,7 @@ import {
   providerHasNativeSearch,
   type WebSearchConfig,
 } from '../_lib/webSearch';
-import { quotaFailoverHint, type ResolvedChain, type ResolvedProvider } from '../_lib/aiSettings';
+import { quotaFailoverHint, isCapacityFailure, type ResolvedChain, type ResolvedProvider } from '../_lib/aiSettings';
 
 // Disable the per-tool query caches so each case starts clean.
 process.env.FIRECRAWL_CACHE_TTL_MS = '0';
@@ -306,6 +306,16 @@ async function run() {
 
   eq('nothing to add when failover already tried everything',
     quotaFailoverHint(chain({ chain: [provider('gemini'), provider('nvidia')] })), '');
+
+  console.log('\nCAPACITY FAILURES (which statuses fail over)');
+
+  check('429 rate limit fails over', isCapacityFailure(429));
+  // A key added purely as a backup often has no credit balance; 402 means the
+  // same thing as 429 for our purposes — this provider can't serve, try the next.
+  check('402 out of credits fails over', isCapacityFailure(402));
+  check('401 bad key does not fail over', !isCapacityFailure(401));
+  check('404 unknown model does not fail over', !isCapacityFailure(404));
+  check('502 upstream error does not fail over', !isCapacityFailure(502));
 
   console.log(`\n${'═'.repeat(60)}`);
   console.log(`WEB SEARCH TESTS: ${passed} passed, ${failed} failed (${passed + failed} total)`);

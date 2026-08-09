@@ -58,7 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       provider: activeProvider,
       model: stored?.model ?? 'gemini-2-0-flash',
       enabled: stored?.enabled ?? true,
-      useGrounding: stored?.useGrounding ?? true,
+      useGrounding: stored?.useGrounding ?? false,
       autoFailover: stored?.autoFailover ?? true,
       webSearchPrimary: stored?.webSearchPrimary ?? DEFAULT_WEB_SEARCH_PRIMARY,
       webSearchFallback: stored?.webSearchFallback ?? true,
@@ -144,7 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       provider: (body.provider as AIProvider) ?? existing?.provider ?? 'gemini',
       model: body.model ?? existing?.model ?? 'gemini-2-0-flash',
       enabled: body.enabled ?? existing?.enabled ?? true,
-      useGrounding: body.useGrounding ?? existing?.useGrounding ?? true,
+      useGrounding: body.useGrounding ?? existing?.useGrounding ?? false,
       autoFailover: body.autoFailover ?? existing?.autoFailover ?? true,
       webSearchPrimary: (body.webSearchPrimary as WebSearchProviderId | undefined)
         ?? existing?.webSearchPrimary ?? DEFAULT_WEB_SEARCH_PRIMARY,

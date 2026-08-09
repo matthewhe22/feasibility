@@ -164,8 +164,16 @@ export interface StoredAISettings {
   provider: AIProvider;
   model: string;
   enabled: boolean;
-  /** When true (default), Gemini requests use Google Search grounding. Turn off
-   *  to avoid the scarce free-tier grounding quota (no live web search). */
+  /**
+   * Whether Gemini requests use Google Search grounding. **Default OFF.**
+   *
+   * The Google-Search tool draws on a small free-tier grounding quota that 429s
+   * ("quota / rate limit reached") even under light use, and it is the single
+   * most common cause of failed research. With it off, Gemini is grounded by
+   * Firecrawl / Tavily instead — same live web data, none of that quota. Turn it
+   * back on only when no web-search tool is configured and Gemini must search
+   * for itself.
+   */
   useGrounding: boolean;
   /** When true (default), on a quota/rate-limit error the active provider fails
    *  over to the next configured provider. */
@@ -240,7 +248,10 @@ function normalizeStored(raw: unknown): StoredAISettings | null {
     provider,
     model: model || DEFAULT_MODEL_FOR[provider],
     enabled: r.enabled !== false,
-    useGrounding: r.useGrounding !== false,   // default ON
+    // Default OFF — see StoredAISettings.useGrounding. Rows written before this
+    // default flipped, and rows that never set it, both fall back to Firecrawl /
+    // Tavily grounding rather than Gemini's rate-limited Google-Search tool.
+    useGrounding: r.useGrounding === true,
     autoFailover: r.autoFailover !== false,   // default ON
     // Rows written before Firecrawl existed have neither field; both default so
     // existing installs pick up Firecrawl-first grounding without a migration.
@@ -345,9 +356,33 @@ export interface ResolvedChain {
 }
 
 /**
+ * Pick the model for a provider that is only in the chain as a FAILOVER
+ * candidate — the settings row stores one `model`, and it belongs to the active
+ * provider, so these have nothing selected.
+ *
+ * OpenRouter needs care here. Its default, `openrouter/auto`, is a
+ * variable-priced paid route: a key added purely to back up a rate-limited
+ * Gemini would 402 ("insufficient credits") the first time it was actually
+ * needed, turning one dead end into another. So prefer a free model from the
+ * cached catalogue — widest context first, since research prompts are long —
+ * and fall back to the default only when no catalogue has been fetched.
+ */
+function failoverModelFor(p: AIProvider, stored: StoredAISettings | null): string {
+  const env = process.env[ENV_MODEL[p]]?.trim();
+  if (env) return env;
+  if (p === 'openrouter') {
+    const free = (stored?.openrouterModels ?? [])
+      .filter(m => m.free)
+      .sort((a, b) => (b.contextLength ?? 0) - (a.contextLength ?? 0))[0];
+    if (free) return free.id;
+  }
+  return DEFAULT_MODEL_FOR[p];
+}
+
+/**
  * Build the ordered list of usable providers. The active (stored-selected)
  * provider comes first with its selected model; remaining providers that have a
- * key follow with their default model, so the caller can fail over on quota.
+ * key follow with a failover-safe model, so the caller can fail over on quota.
  */
 export async function resolveProviderChain(supabase: SupabaseClient | null): Promise<ResolvedChain | null> {
   const stored = supabase ? await loadAISettings(supabase) : null;
@@ -376,8 +411,7 @@ export async function resolveProviderChain(supabase: SupabaseClient | null): Pro
     if (seen.has(p)) continue;
     const k = keyFor(p);
     if (k) {
-      const m = (stored?.provider === p && stored.model) ? stored.model
-        : (process.env[ENV_MODEL[p]]?.trim() || DEFAULT_MODEL_FOR[p]);
+      const m = (stored?.provider === p && stored.model) ? stored.model : failoverModelFor(p, stored);
       chain.push({ apiKey: k.key, model: m, provider: p, source: k.source });
       seen.add(p);
     }
@@ -386,7 +420,9 @@ export async function resolveProviderChain(supabase: SupabaseClient | null): Pro
   if (chain.length === 0) return null;
   return {
     chain,
-    useGrounding: stored?.useGrounding !== false,
+    // Default OFF — Firecrawl / Tavily ground Gemini instead of its own
+    // rate-limited Google-Search tool.
+    useGrounding: stored?.useGrounding === true,
     autoFailover: stored?.autoFailover !== false,
     webSearchPrimary: stored?.webSearchPrimary === 'tavily' ? 'tavily' : DEFAULT_WEB_SEARCH_PRIMARY,
     webSearchFallback: stored?.webSearchFallback !== false,
@@ -394,7 +430,16 @@ export async function resolveProviderChain(supabase: SupabaseClient | null): Pro
 }
 
 /**
- * Actionable tail appended to a quota / rate-limit (429) error.
+ * Statuses that mean "this provider cannot serve the request right now, but
+ * another one could": rate limits (429) and an exhausted credit / balance (402).
+ * Both are capacity failures, so both should fail over rather than dead-end.
+ */
+export function isCapacityFailure(status: number): boolean {
+  return status === 429 || status === 402;
+}
+
+/**
+ * Actionable tail appended to a capacity (429 / 402) error.
  *
  * The bare provider message ("Google Gemini quota / rate limit reached…") never
  * says why nothing else was tried, which reads as a bug when a web-search tool

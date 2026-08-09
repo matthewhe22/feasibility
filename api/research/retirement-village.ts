@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { setCors } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
-import { resolveProviderChain, quotaFailoverHint, type ResolvedProvider } from '../_lib/aiSettings';
+import { resolveProviderChain, quotaFailoverHint, isCapacityFailure, type ResolvedProvider } from '../_lib/aiSettings';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
 import {
   resolveWebSearchConfig,
@@ -325,12 +325,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const status = e instanceof AIResearchError ? e.status : 500;
       const msg = e instanceof Error ? e.message : 'Research failed.';
       errors.push(`${p.provider}: ${msg}`);
-      if (status === 429 && resolved.autoFailover && i < resolved.chain.length - 1) continue;
+      // Fail over on a capacity failure (429 rate limit, 402 exhausted credits);
+      // other errors would fail identically on the next provider.
+      const capacity = isCapacityFailure(status);
+      if (capacity && resolved.autoFailover && i < resolved.chain.length - 1) continue;
       return res.status(status).json({
-        error: status === 429 ? `${msg}${quotaFailoverHint(resolved)}` : msg,
+        error: capacity ? `${msg}${quotaFailoverHint(resolved)}` : msg,
         ...(errors.length > 1 ? { attempted: errors } : {}),
       });
     }
   }
-  return res.status(429).json({ error: `All configured AI providers are rate-limited. ${errors.join(' | ')}`, attempted: errors });
+  return res.status(429).json({ error: `All configured AI providers are rate-limited or out of credits. ${errors.join(' | ')}`, attempted: errors });
 }

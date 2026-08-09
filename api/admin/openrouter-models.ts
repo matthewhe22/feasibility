@@ -37,7 +37,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (supabase) {
     const base = stored ?? {
       provider: 'openrouter' as const, model: 'openrouter/auto', enabled: true,
-      useGrounding: true, autoFailover: true,
+      useGrounding: false, autoFailover: true,
       webSearchPrimary: DEFAULT_WEB_SEARCH_PRIMARY, webSearchFallback: true,
       keys: {},
     };

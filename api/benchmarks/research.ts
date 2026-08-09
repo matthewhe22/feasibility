@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { setCors } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
-import { resolveProviderChain, quotaFailoverHint, type ResolvedProvider } from '../_lib/aiSettings';
+import { resolveProviderChain, quotaFailoverHint, isCapacityFailure, type ResolvedProvider } from '../_lib/aiSettings';
 import { runAIResearch, mergeSources, AIResearchError, type AIResearchSource } from '../_lib/aiClient';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
 import {
@@ -440,23 +440,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const status = e instanceof AIResearchError ? e.status : 500;
       const msg = e instanceof Error ? e.message : 'Unknown error';
       errors.push(`${p.provider}: ${msg}`);
-      // Only fail over on quota / rate-limit (429) when enabled and another
-      // provider remains. Any other error is returned immediately.
-      const isQuota = status === 429;
+      // Fail over on a capacity failure (429 rate limit, 402 exhausted credits)
+      // when enabled and another provider remains. Any other error — a bad key,
+      // an unknown model — would fail identically elsewhere, so it returns now.
+      const capacity = isCapacityFailure(status);
       const hasNext = i < resolved.chain.length - 1;
-      if (isQuota && resolved.autoFailover && hasNext) continue;
+      if (capacity && resolved.autoFailover && hasNext) continue;
       return res.status(status).json({
-        // A quota failure gets the remedy appended — the bare provider message
+        // A capacity failure gets the remedy appended — the bare provider message
         // gives no clue that a configured Firecrawl key can't substitute for
         // model capacity, or that no second provider was available to try.
-        error: isQuota ? `${msg}${quotaFailoverHint(resolved)}` : msg,
+        error: capacity ? `${msg}${quotaFailoverHint(resolved)}` : msg,
         ...(errors.length > 1 ? { attempted: errors } : {}),
       });
     }
   }
-  // Exhausted the chain (all 429).
+  // Exhausted the chain (every provider hit a capacity failure).
   return res.status(429).json({
-    error: `All configured AI providers are rate-limited. ${errors.join(' | ')}`,
+    error: `All configured AI providers are rate-limited or out of credits. ${errors.join(' | ')}`,
     attempted: errors,
   });
 }
