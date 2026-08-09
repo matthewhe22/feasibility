@@ -162,6 +162,59 @@ async function run() {
   eq('exhausted quota maps to 429', status, 429);
   check('429 message names the quota', /quota|rate limit/i.test(message), message);
 
+  console.log('\nQUOTA DIAGNOSTICS (which limit tripped)');
+
+  /** Fail every call with a 429 carrying Google's structured quota details. */
+  function stubQuota(details: unknown[]): void {
+    globalThis.fetch = (async () => {
+      const payload = { error: { code: 429, message: 'You exceeded your current quota', status: 'RESOURCE_EXHAUSTED', details } };
+      return { ok: false, status: 429, statusText: 'Too Many Requests', json: async () => payload, text: async () => JSON.stringify(payload) } as Response;
+    }) as typeof fetch;
+  }
+
+  async function quotaMessage(details: unknown[]): Promise<string> {
+    stubQuota(details);
+    try {
+      await runAIResearch({ ...base, useGrounding: true });
+      return '(no error thrown)';
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // A quota of zero: the model is not on the free tier for this project at all,
+  // so "wait and retry" is the wrong advice — it will never succeed.
+  message = await quotaMessage([{
+    '@type': 'type.googleapis.com/google.rpc.QuotaFailure',
+    violations: [{ quotaMetric: 'generativelanguage.googleapis.com/generate_content_free_tier_requests', quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', quotaValue: '0' }],
+  }]);
+  check('zero quota is called out as permanent', /ZERO|no matter how few/.test(message), message);
+  check('zero quota suggests a different model', /2\.0 Flash|enable billing/.test(message), message);
+
+  // A per-day cap that is already spent — waiting a minute achieves nothing, so
+  // the message must not say to wait a minute.
+  message = await quotaMessage([{
+    '@type': 'type.googleapis.com/google.rpc.QuotaFailure',
+    violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', quotaValue: '50' }],
+  }]);
+  check('per-day cap is named as daily', /PER-DAY/.test(message), message);
+  check('per-day cap reports the limit value', message.includes('50'), message);
+  check('per-day cap says a single request still fails', /including a single one/.test(message), message);
+  check('per-day cap does not advise waiting a minute', !/[Ww]ait a minute/.test(message), message);
+
+  // A per-minute burst — here waiting genuinely is the fix, and Google says how long.
+  message = await quotaMessage([
+    { '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', quotaValue: '15' }] },
+    { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '27s' },
+  ]);
+  check('per-minute cap is named as a burst', /per-minute burst/.test(message), message);
+  check('per-minute cap surfaces the retry delay', message.includes('27s'), message);
+
+  // No structured details → falls back to the generic advice rather than
+  // inventing a cause.
+  message = await quotaMessage([]);
+  check('missing details fall back to generic advice', /Wait a minute, switch model, or enable billing/.test(message), message);
+
   restoreFetch();
 
   console.log(`\n${'═'.repeat(60)}`);

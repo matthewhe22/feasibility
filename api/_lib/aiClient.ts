@@ -139,6 +139,82 @@ async function runGemini({ apiKey, model, systemPrompt, userPrompt, useGrounding
   return { json, groundingSources, groundingUsed, provider: 'gemini', model };
 }
 
+/* ── Gemini quota diagnostics ──────────────────────────────────────────────── */
+
+/** One entry of Google's `error.details[]` on a 429. */
+interface GoogleErrorDetail {
+  '@type'?: string;
+  retryDelay?: string;
+  violations?: Array<{ quotaMetric?: string; quotaId?: string; quotaValue?: string }>;
+}
+
+/**
+ * Pull Google's structured quota details off a Gemini error.
+ *
+ * The SDK exposes them as `errorDetails` AND appends them to the message as
+ * JSON, so both are tried — the second path also covers errors that reach us
+ * having lost their prototype (serialised across a boundary).
+ */
+function extractErrorDetails(err: unknown): GoogleErrorDetail[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const direct = (err as any)?.errorDetails;
+  if (Array.isArray(direct)) return direct as GoogleErrorDetail[];
+
+  const msg = err instanceof Error ? err.message : '';
+  const m = msg.match(/\[\s*\{[\s\S]*\}\s*\]/);
+  if (m) {
+    try {
+      const parsed = JSON.parse(m[0]);
+      if (Array.isArray(parsed)) return parsed as GoogleErrorDetail[];
+    } catch { /* not the details array */ }
+  }
+  return [];
+}
+
+/**
+ * Turn a Gemini 429 into a sentence that says WHICH limit tripped.
+ *
+ * "Quota reached" on the very first query of the day looks like a bug, and the
+ * three causes need completely different responses:
+ *   - a per-DAY cap already spent  → nothing works until it resets, waiting a
+ *     minute achieves nothing;
+ *   - a per-MINUTE burst cap       → genuinely just wait;
+ *   - a quota of literally ZERO    → the model is not on the free tier for this
+ *     project at all (Gemini 1.5 on newer keys), so every request fails forever.
+ * Google names the case in `error.details`; this reports it instead of guessing.
+ */
+function geminiQuotaDetail(err: unknown): string {
+  const details = extractErrorDetails(err);
+  const violation = details
+    .flatMap(d => d.violations ?? [])
+    .find(v => v.quotaId || v.quotaMetric || v.quotaValue);
+  const retryDelay = details.find(d => d.retryDelay)?.retryDelay;
+
+  const id = violation?.quotaId || violation?.quotaMetric || '';
+  const value = violation?.quotaValue;
+  const scope = `${id}`.toLowerCase();
+
+  if (value === '0') {
+    return ` The key's Google project has a free-tier quota of ZERO for this model${id ? ` (${id})` : ''},`
+      + ` so every request fails no matter how few you send — this is not a burst limit. Gemini 1.5 models`
+      + ` are no longer on the free tier for newer API keys: switch to Gemini 2.0 Flash in Admin → AI Settings,`
+      + ` or enable billing on that Google Cloud project.`;
+  }
+  if (/day/.test(scope)) {
+    return ` This is a PER-DAY cap${value ? ` of ${value} requests` : ''}${id ? ` (${id})` : ''} that is already spent,`
+      + ` so every further request fails — including a single one — until it resets at midnight US Pacific.`
+      + ` Waiting a minute will not help; use another provider, or enable billing.`;
+  }
+  if (/minute|per_min/.test(scope)) {
+    return ` This is a per-minute burst cap${value ? ` of ${value} requests` : ''}${id ? ` (${id})` : ''}`
+      + `${retryDelay ? ` — retry in ${retryDelay}` : ' — wait a moment and retry'}.`;
+  }
+  if (id) {
+    return ` Limit reported by Google: ${id}${value ? ` = ${value}` : ''}${retryDelay ? `, retry in ${retryDelay}` : ''}.`;
+  }
+  return ' Wait a minute, switch model, or enable billing.';
+}
+
 function mapGeminiError(err: unknown, apiModelName: string): AIResearchError {
   const msg = err instanceof Error ? err.message : 'Unknown error';
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -150,7 +226,7 @@ function mapGeminiError(err: unknown, apiModelName: string): AIResearchError {
     return new AIResearchError(`Gemini model "${apiModelName}" not found. Pick another model in Admin → AI Settings.`, 502);
   }
   if (msg.includes('RESOURCE_EXHAUSTED') || /\bquota\b/i.test(msg) || /\b429\b/.test(msg) || code === 429) {
-    return new AIResearchError('Google Gemini quota / rate limit reached. Wait a minute, switch model, or enable billing.', 429);
+    return new AIResearchError(`Google Gemini quota / rate limit reached.${geminiQuotaDetail(err)}`, 429);
   }
   return new AIResearchError(`AI research failed: ${msg}`, 500);
 }
