@@ -63,12 +63,13 @@ for (const v of ['GEMINI_API_KEY', 'DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY', 'NV
 }
 
 async function run() {
-  console.log('\nGEMINI GROUNDING DEFAULT (off)');
+  console.log('\nGEMINI GROUNDING DEFAULT (on)');
 
-  // The headline default: a row that never mentions useGrounding must NOT use
-  // Gemini's rate-limited Google-Search tool.
+  // The headline default: a row that never mentions useGrounding DOES use
+  // Gemini's own Google-Search tool — Google's index reflects rendered page
+  // content, which grounds better than a Firecrawl/Tavily snippet.
   let r = await resolveProviderChain(fakeSupabase(stored()));
-  check('unset useGrounding defaults to off', r?.useGrounding === false);
+  check('unset useGrounding defaults to on', r?.useGrounding === true);
 
   r = await resolveProviderChain(fakeSupabase(stored({ useGrounding: false })));
   check('explicit false stays off', r?.useGrounding === false);
@@ -78,7 +79,7 @@ async function run() {
 
   // No settings row at all (env-only install) — same default.
   r = await resolveProviderChain(fakeSupabase(null));
-  check('no stored row → grounding off', r === null || r.useGrounding === false);
+  check('no stored row → grounding on', r === null || r.useGrounding === true);
 
   console.log('\nFAILOVER CHAIN ORDER');
 

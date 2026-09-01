@@ -40,32 +40,70 @@ interface RVRequest {
   suburb?: string;
   postcode?: string;
   proximityKm?: number;
+  /**
+   * Suburbs within the proximity radius, supplied by the client from a prior
+   * "suburbs" mode result. Lets "competitors" mode search each one directly
+   * (villages.com.au publishes a directory page per suburb) instead of relying
+   * on one generic radius query to somehow surface every nearby suburb.
+   */
+  nearbySuburbs?: string[];
+}
+
+/** "Bateau Bay" → "bateau-bay", matching villages.com.au's directory slug. */
+function slugify(s: string): string {
+  return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '');
+}
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 const SYSTEM_SUBURBS = `You are an Australian residential property research analyst.
+Today's date is ${todayIsoDate()}. You have no other sense of "now" — use this date,
+not your training cutoff, to judge how current any figure is.
+
 Given a retirement village, you (1) identify its location (suburb, state, postcode),
 (2) determine the surrounding / related suburbs (the village's own suburb plus
 adjacent suburbs within roughly 5–8 km), and (3) report current median dwelling
 prices for each.
 
 You MUST:
-  1. Use your web search capability to find CURRENT (latest available) data.
+  1. Use your web search capability to find CURRENT (latest available) data —
+     prefer whichever supplied result carries the most recent "as of" date, even
+     if it is a smaller portal, over an older figure from a bigger name.
   2. Prefer CoreLogic / Cotality, Domain, PropTrack (REA), and ABS suburb pages.
   3. For each suburb return: median HOUSE price, median UNIT/apartment price, and
      median $/m² of living area where available (else null).
-  4. Compute the simple average of the per-suburb medians (ignoring nulls).
-  5. State all prices in AUD. If a figure is unavailable, use null — never invent.
-  6. Return ONLY valid JSON matching the requested schema — no preamble.
+  4. Set "asOf" to the actual period the figure is reported for (e.g. rolling
+     12-month window ending in a stated month, or a stated quarter) — read it off
+     the source, never guess or default to a plausible-sounding recent quarter.
+  5. If the most recent figure you can substantiate is more than 2 quarters old
+     relative to today (${todayIsoDate()}), still report it but say so plainly in
+     "summary" (e.g. "data is N months old; no more recent figure was found").
+  6. Compute the simple average of the per-suburb medians (ignoring nulls).
+  7. State all prices in AUD. If a figure is unavailable, use null — never invent.
+  8. Return ONLY valid JSON matching the requested schema — no preamble.
 If a Cotality data block is supplied, treat it as the PRIMARY source and reconcile
 web figures against it.`;
 
 const SYSTEM_COMPETITORS = `You are an Australian retirement-living market analyst.
+Today's date is ${todayIsoDate()}. Use this date, not your training cutoff, to judge
+how current a listing or sale is, and to sort/label results accurately.
 Given a retirement village and a proximity radius, you identify COMPETING
 retirement villages within that radius and list their unit sale / listing evidence.
 
+villages.com.au publishes ONE directory page per suburb, of the form
+https://www.villages.com.au/retirement-villages/{state}/{suburb-slug} (e.g.
+https://www.villages.com.au/retirement-villages/nsw/bateau-bay), listing every
+village in that suburb with unit availability and pricing. When live search
+results below include one of these pages, treat it as a primary source and pull
+every unit/listing it shows — don't stop at a search-snippet summary of it.
+
 Trusted sources you should search DIRECTLY and prefer (in roughly this order):
   Third-party retirement-living aggregators / listing portals
-   - villages.com.au (DCM Media retirement village directory + listings)
+   - villages.com.au (DCM Media retirement village directory + listings) —
+     check the SUBJECT village's own suburb page AND every suburb within the
+     proximity radius, not just one
    - downsizing.com.au (retirement & over-50s listings)
    - seniorshousingonline.com.au
    - agedcareguide.com.au / agedcareonline.com.au (village directories)
@@ -144,9 +182,16 @@ function buildSuburbsPrompt(req: RVRequest): string {
 function buildCompetitorsPrompt(req: RVRequest): string {
   const loc = [req.suburb, req.state, req.postcode].filter(Boolean).join(', ');
   const radius = req.proximityKm && req.proximityKm > 0 ? req.proximityKm : 5;
+  const nearby = (req.nearbySuburbs ?? []).map(s => s.trim()).filter(Boolean);
   return [
     `Find retirement villages competing with "${req.villageName}" within ${radius} km.`,
     loc ? `Known location context: ${loc}.` : `Resolve the subject village's location from its name.`,
+    nearby.length
+      ? `Suburbs already confirmed within the radius (from prior research) — check the villages.com.au ` +
+        `directory page for EACH of these individually, plus the subject's own suburb, not just one: ` +
+        `${nearby.join(', ')}.`
+      : `First identify which suburbs fall within ${radius} km, then check villages.com.au's directory page ` +
+        `for each of those suburbs individually, not just the subject's own suburb.`,
     ``,
     `List EVERY unit you can substantiate for EVERY competing village within ${radius} km —`,
     `both past/comparable SALES and current LISTINGS. Check each village's own "for sale"`,
@@ -263,11 +308,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Live web search for the providers that need it. Lazy: the search only runs
   // once a provider that actually needs grounding is about to be called, and its
   // result is reused across failover attempts (one search per request maximum).
+  //
+  // Suburbs mode asks for medians across ~8 suburbs at once. A single generic
+  // query only returns `maxResults` (default 5) URLs total for the WHOLE set,
+  // so most suburbs never get a source page — one query can't cover 8 targets.
+  // Firing a few queries in parallel — one generic, plus two aimed directly at
+  // the two portals that actually publish per-suburb median-price pages
+  // (realestate.com.au / domain.com.au) for the village's own (known) suburb —
+  // meaningfully improves odds of landing a real price-guide page rather than
+  // just a generic snippet.
   const where = [body.suburb, body.state].filter(Boolean).join(' ');
-  const searchQuery = body.mode === 'suburbs'
-    ? `${body.villageName} ${where} surrounding suburbs median house and unit price`.replace(/\s+/g, ' ').trim()
-    : `retirement village near ${body.villageName} ${where} units for sale price recent`.replace(/\s+/g, ' ').trim();
-  const search = createWebSearchRunner(webSearch, searchQuery);
+
+  // Competitors mode has the same one-query-can't-cover-it problem, for the
+  // proximity radius rather than a fixed suburb list: villages.com.au serves one
+  // directory page PER SUBURB, so a single generic "villages near X" query
+  // surfaces at most a couple of those pages. When the client has already run
+  // "suburbs" mode it passes the confirmed nearby suburbs back in
+  // `nearbySuburbs`; a site-targeted query is built for each (capped — every
+  // query is a paid search call) so the radius is actually covered rather than
+  // just the subject village's own suburb.
+  const stateSlug = (body.state || '').toLowerCase();
+  const competitorSuburbs = [body.suburb, ...(body.nearbySuburbs ?? [])]
+    .filter((s): s is string => Boolean(s && s.trim()))
+    .slice(0, 6); // cap: each entry costs one Firecrawl query
+  const villagesDotComQueries = competitorSuburbs.map(sub => {
+    const slug = slugify(sub);
+    return stateSlug && slug
+      ? `site:villages.com.au/retirement-villages/${stateSlug}/${slug}`
+      : `site:villages.com.au ${sub} ${body.state ?? ''} retirement village`;
+  });
+
+  const searchQueries = body.mode === 'suburbs'
+    ? [
+        `${body.villageName} ${where} surrounding suburbs median house and unit price`,
+        where ? `site:realestate.com.au ${where} median house price` : '',
+        where ? `site:domain.com.au ${where} median house price` : '',
+      ].filter(Boolean).map(q => q.replace(/\s+/g, ' ').trim())
+    : [
+        `retirement village near ${body.villageName} ${where} units for sale price recent`,
+        ...villagesDotComQueries,
+        where ? `site:downsizing.com.au ${where} retirement village` : '',
+      ].filter(Boolean).map(q => q.replace(/\s+/g, ' ').trim());
+
+  // Force scraping (full rendered page → markdown) for this endpoint's Firecrawl
+  // calls: suburb median prices on realestate.com.au / domain.com.au, and unit
+  // listings on villages.com.au, are rendered client-side and never appear in a
+  // plain search snippet/meta-description — without scraping, a returned URL
+  // still carries no usable figure. Also lift the per-query result cap so the
+  // several parallel queries fired per request still surface enough distinct
+  // pages.
+  const groundingConfig: WebSearchConfig | null = webSearch && webSearch.firecrawl
+    ? { ...webSearch, firecrawl: { ...webSearch.firecrawl, scrapeContent: true, maxResults: Math.max(webSearch.firecrawl.maxResults, 8) } }
+    : webSearch;
+  const search = createWebSearchRunner(groundingConfig, searchQueries.length === 1 ? searchQueries[0] : searchQueries);
 
   // Run with auto-failover across configured providers (active first); on a
   // quota 429 fall through to the next provider when enabled.
