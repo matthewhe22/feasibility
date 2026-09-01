@@ -67,10 +67,14 @@ adjacent suburbs within roughly 5–8 km), and (3) report current median dwellin
 prices for each.
 
 You MUST:
-  1. Use your web search capability to find CURRENT (latest available) data —
-     prefer whichever supplied result carries the most recent "as of" date, even
-     if it is a smaller portal, over an older figure from a bigger name.
-  2. Prefer CoreLogic / Cotality, Domain, PropTrack (REA), and ABS suburb pages.
+  1. Use ONLY realestate.com.au (REA) suburb profile pages as your price source —
+     do not search or cite Domain, CoreLogic, ABS, or any other portal for these
+     figures. Every supplied live-search result below is already scoped to
+     realestate.com.au; use whichever of those carries the most recent "as of"
+     date. If realestate.com.au has no published figure for a suburb, return
+     null for it rather than substituting another source.
+  2. (Exception: a supplied Cotality data block, if present, is the one other
+     PRIMARY source — see below.)
   3. For each suburb return: median HOUSE price, median UNIT/apartment price, and
      median $/m² of living area where available (else null). Quote the figure
      EXACTLY as published by the single source you cite for it — never average
@@ -127,14 +131,21 @@ You MUST:
   1. Use your web search capability to find CURRENT data, searching the third-party
      sites above by name (especially villages.com.au and downsizing.com.au) — these
      aggregators are often the best source for retirement-unit listing prices.
-  2. Be EXHAUSTIVE. List EVERY unit you can substantiate across ALL competing villages
-     in the radius — both past/comparable SALES and current LISTINGS. Do not truncate to
-     a handful of examples, do not stop at the first village, and do not return only one
-     unit per village. Search each competing village individually for its sold history
-     and its current "for sale" / vacancy page. More substantiated rows is better. If a
-     villages.com.au (or similar directory) page listing multiple villages is supplied
-     below, it is the full page content, not a snippet — enumerate EVERY village named
-     on it, and every unit/price shown for each, not just the first one or two.
+     SALES: include every sale dated within the past 12 months from today
+     (${todayIsoDate()}) that you can substantiate — do not stop at the first few
+     found. LISTINGS: include every current listing you find, with no time bound.
+  2. Be EXHAUSTIVE — this is the most important instruction. List EVERY unit you can
+     substantiate across ALL competing villages in the radius — both past-12-months
+     SALES and current LISTINGS. Do not truncate to a handful of examples, do not
+     stop at the first village, and do not return only one unit per village. Search
+     each competing village individually for its sold history and its current
+     "for sale" / vacancy page. There is NO maximum row count and no target count —
+     if the supplied live search results substantiate 20 units, return 20 units, not
+     a subset of them; returning fewer than what's substantiated is a failure, not a
+     safe default. If a villages.com.au (or similar directory) page listing multiple
+     villages is supplied below, it is the full page content, not a snippet —
+     enumerate EVERY village named on it, and every unit/price shown for each, not
+     just the first one or two.
   3. For each unit return every field in the schema you can substantiate:
        - operator (the owner/operator brand, e.g. Keyton, Aveo, Australian Unity,
          Levande, RetireAustralia, IRT, Stockland — NOT the village name)
@@ -168,7 +179,8 @@ function buildSuburbsPrompt(req: RVRequest): string {
     `1. Identify the village's suburb, state and postcode.`,
     `2. List the village's own suburb plus the surrounding/related suburbs (≈5–8 km).`,
     `3. For each suburb provide the current median house price, median unit price, and`,
-    `   median $/m² (living area) where published.`,
+    `   median $/m² (living area) where published — sourced from realestate.com.au ONLY,`,
+    `   no other portal.`,
     `4. Compute the average of the per-suburb medians.`,
     ``,
     `Return JSON only, matching this schema:`,
@@ -201,10 +213,12 @@ function buildCompetitorsPrompt(req: RVRequest): string {
         `for each of those suburbs individually, not just the subject's own suburb.`,
     ``,
     `List EVERY unit you can substantiate for EVERY competing village within ${radius} km —`,
-    `both past/comparable SALES and current LISTINGS. Check each village's own "for sale"`,
-    `page as well as the aggregators and portals, and include the sold-price history where`,
-    `published. Do not limit the list to a few examples or to one unit per village.`,
-    `Most recent first.`,
+    `SALES from the past 12 months (today is ${todayIsoDate()}) and ALL current LISTINGS`,
+    `(no time bound on listings). Check each village's own "for sale" page as well as the`,
+    `aggregators and portals, and include the full sold-price history from the last 12`,
+    `months where published. Do not limit the list to a few examples or to one unit per`,
+    `village — if 20 units are substantiated by the live search results, return all 20,`,
+    `not a shorter subset. Most recent first.`,
     ``,
     `Return JSON only, matching this schema:`,
     `{`,
@@ -352,14 +366,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Separate house/unit queries: a combined "house and unit price" query mostly
   // surfaces the house price-guide page (units are usually a distinct tab/URL on
-  // the same portal), which is why unit medians kept coming back null.
+  // the same portal), which is why unit medians kept coming back null. All three
+  // queries are `site:realestate.com.au`-scoped — suburb pricing is sourced from
+  // realestate.com.au only, no other portal.
   const searchQueries = body.mode === 'suburbs'
     ? [
-        `${body.villageName} ${where} surrounding suburbs median house and unit price`,
+        `site:realestate.com.au ${body.villageName} ${where} surrounding suburbs median house and unit price`,
         where ? `site:realestate.com.au ${where} median house price` : '',
         where ? `site:realestate.com.au ${where} median unit price` : '',
-        where ? `site:domain.com.au ${where} median house price` : '',
-        where ? `site:domain.com.au ${where} median unit price` : '',
       ].filter(Boolean).map(q => q.replace(/\s+/g, ' ').trim())
     : [
         `retirement village near ${body.villageName} ${where} units for sale price recent`,
@@ -368,8 +382,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ].filter(Boolean).map(q => q.replace(/\s+/g, ' ').trim());
 
   // Force scraping (full rendered page → markdown) for this endpoint's Firecrawl
-  // calls: suburb median prices on realestate.com.au / domain.com.au, and unit
-  // listings on villages.com.au, are rendered client-side and never appear in a
+  // calls: suburb median prices on realestate.com.au, and unit listings on
+  // villages.com.au, are rendered client-side and never appear in a
   // plain search snippet/meta-description — without scraping, a returned URL
   // still carries no usable figure. Also lift the per-query result cap so the
   // several parallel queries fired per request still surface enough distinct
