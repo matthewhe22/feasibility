@@ -1,12 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { setCors } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
-import { resolveProviderChain, quotaFailoverHint, isCapacityFailure, type ResolvedProvider } from '../_lib/aiSettings';
+import { resolveProviderChain, quotaFailoverHint, isCapacityFailure } from '../_lib/aiSettings';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
 import {
   resolveWebSearchConfig,
   createWebSearchRunner,
-  needsWebSearchGrounding,
   webSearchCacheTag,
   buildWebSearchPromptBlock,
   webSearchNote,
@@ -73,7 +72,12 @@ You MUST:
      if it is a smaller portal, over an older figure from a bigger name.
   2. Prefer CoreLogic / Cotality, Domain, PropTrack (REA), and ABS suburb pages.
   3. For each suburb return: median HOUSE price, median UNIT/apartment price, and
-     median $/m² of living area where available (else null).
+     median $/m² of living area where available (else null). Quote the figure
+     EXACTLY as published by the single source you cite for it — never average
+     or blend numbers from two different portals into a new figure that matches
+     neither. If the supplied results disagree by more than a few percent, pick
+     the one from the most authoritative/most recent source and say which portal
+     it came from in "summary"; don't split the difference.
   4. Set "asOf" to the actual period the figure is reported for (e.g. rolling
      12-month window ending in a stated month, or a stated quarter) — read it off
      the source, never guess or default to a plausible-sounding recent quarter.
@@ -127,7 +131,10 @@ You MUST:
      in the radius — both past/comparable SALES and current LISTINGS. Do not truncate to
      a handful of examples, do not stop at the first village, and do not return only one
      unit per village. Search each competing village individually for its sold history
-     and its current "for sale" / vacancy page. More substantiated rows is better.
+     and its current "for sale" / vacancy page. More substantiated rows is better. If a
+     villages.com.au (or similar directory) page listing multiple villages is supplied
+     below, it is the full page content, not a snippet — enumerate EVERY village named
+     on it, and every unit/price shown for each, not just the first one or two.
   3. For each unit return every field in the schema you can substantiate:
        - operator (the owner/operator brand, e.g. Keyton, Aveo, Australian Unity,
          Levande, RetireAustralia, IRT, Stockland — NOT the village name)
@@ -261,17 +268,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let cotalitySettings: Awaited<ReturnType<typeof resolveCotalitySettings>> = null;
   try { cotalitySettings = await resolveCotalitySettings(supabase); } catch { /* ignore */ }
 
-  // Grounding is resolved for the WHOLE chain, not just the head. A Gemini head
-  // grounds itself, but the providers behind it (reached when Gemini 429s) do
-  // not — gating on the head alone meant a Firecrawl key was ignored on exactly
-  // the requests that needed it, and every failover ran ungrounded.
-  const needsSearch = (p: ResolvedProvider) => needsWebSearchGrounding(p.provider, resolved.useGrounding);
+  // This endpoint always resolves web-search config and, when configured, injects
+  // its results into the prompt for EVERY provider — including a natively-
+  // grounded Gemini. Gemini's own Google-Search tool is adaptive (it can issue
+  // its own follow-up queries) but only returns short grounding snippets; our
+  // Firecrawl queries are narrower but scrape full page content (up to 8000
+  // chars — see contentBudget in firecrawl.ts). Combining both gives Gemini a
+  // guaranteed, deeply-scraped starting point (villages.com.au directory pages,
+  // realestate.com.au/domain.com.au price guides) AND lets it search further on
+  // its own — better coverage than either alone. This does mean a Gemini request
+  // with grounding on now also spends Firecrawl credits, which the mutually-
+  // exclusive design before this avoided; that trade was made deliberately for
+  // this endpoint's accuracy needs.
   let webSearch: WebSearchConfig | null = null;
-  if (resolved.chain.some(needsSearch)) {
-    try {
-      webSearch = await resolveWebSearchConfig(supabase, resolved.webSearchPrimary, resolved.webSearchFallback);
-    } catch { /* ignore */ }
-  }
+  try {
+    webSearch = await resolveWebSearchConfig(supabase, resolved.webSearchPrimary, resolved.webSearchFallback);
+  } catch { /* ignore */ }
 
   // Response cache — checked BEFORE any model / Cotality / web-search call, so
   // a cached request spends no search quota. Bypass with { refresh: true }.
@@ -338,11 +350,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : `site:villages.com.au ${sub} ${body.state ?? ''} retirement village`;
   });
 
+  // Separate house/unit queries: a combined "house and unit price" query mostly
+  // surfaces the house price-guide page (units are usually a distinct tab/URL on
+  // the same portal), which is why unit medians kept coming back null.
   const searchQueries = body.mode === 'suburbs'
     ? [
         `${body.villageName} ${where} surrounding suburbs median house and unit price`,
         where ? `site:realestate.com.au ${where} median house price` : '',
+        where ? `site:realestate.com.au ${where} median unit price` : '',
         where ? `site:domain.com.au ${where} median house price` : '',
+        where ? `site:domain.com.au ${where} median unit price` : '',
       ].filter(Boolean).map(q => q.replace(/\s+/g, ' ').trim())
     : [
         `retirement village near ${body.villageName} ${where} units for sale price recent`,
@@ -367,7 +384,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const errors: string[] = [];
   for (let i = 0; i < resolved.chain.length; i++) {
     const p = resolved.chain[i];
-    const searchCtx = needsSearch(p) ? await search.ensure() : null;
+    // Always injected when configured — for EVERY provider, Gemini (with its own
+    // native grounding tool still attached below) included. See the comment
+    // above `webSearch` for why the two are combined rather than mutually
+    // exclusive on this endpoint.
+    const searchCtx = webSearch ? await search.ensure() : null;
     const prompt = searchCtx ? `${userPrompt}\n\n${buildWebSearchPromptBlock(searchCtx)}` : userPrompt;
     // Set when Gemini's own grounding was refused mid-call and the injected
     // results stood in for it — tracked per attempt so the response reports
@@ -405,6 +426,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         model: p.model,
         provider: result.provider,
         groundingUsed: result.groundingUsed || searchNote.used,
+        // Raw Gemini-native flag, kept separate from the merged `groundingUsed`
+        // above so the UI can tell "Gemini searched live AND Firecrawl was
+        // injected" apart from either one alone.
+        geminiNativeSearchUsed: result.provider === 'gemini' ? result.groundingUsed : undefined,
         configSource: p.source,
         cotality: cotalityNote,
         webSearch: searchNote,

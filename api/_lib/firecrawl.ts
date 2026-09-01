@@ -315,9 +315,16 @@ function ctxTtlMs(): number {
 
 /** How much of each result's text to inject. Scraped markdown is far longer
  *  than a snippet, so it gets a bigger budget — but still bounded so a handful
- *  of pages can't crowd out the rest of the prompt. */
+ *  of pages can't crowd out the rest of the prompt.
+ *
+ *  2000 chars was too tight for a directory/listing page: a villages.com.au
+ *  suburb page or a realestate.com.au price-guide page carries nav/header
+ *  markup before the actual content, so a 2000-char cap often cut off before
+ *  reaching the units/prices at all. Firecrawl already charged for the full
+ *  scrape regardless of how much of it we use, so raising this costs no extra
+ *  credits — only more of the LLM's (much larger) context window. */
 function contentBudget(scrapeContent: boolean): number {
-  return scrapeContent ? 2000 : 600;
+  return scrapeContent ? 8000 : 600;
 }
 
 /**
