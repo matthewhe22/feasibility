@@ -419,19 +419,23 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** " (Firecrawl, 5 results)" — empty when no search tool was recorded, e.g.
- *  Gemini grounding its own results or a response cached before this field. */
+/** " (Firecrawl, 5 results)", " (Gemini native + Firecrawl, 5 results)" when both
+ *  ran — empty when no search tool was recorded, e.g. a response cached before
+ *  this field existed. */
 function searchToolSuffix(result: {
   webSearch?: { used: boolean; provider?: 'firecrawl' | 'tavily'; results?: number };
   tavily?: { used: boolean; results?: number };
+  geminiNativeSearchUsed?: boolean;
 }): string {
   const ws = result.webSearch;
   const tool = ws?.used
     ? (ws.provider === 'firecrawl' ? 'Firecrawl' : ws.provider === 'tavily' ? 'Tavily' : null)
     : result.tavily?.used ? 'Tavily' : null;
-  if (!tool) return '';
+  const combined = result.geminiNativeSearchUsed && tool;
+  const label = combined ? `Gemini native + ${tool}` : tool;
+  if (!label) return '';
   const count = ws?.results ?? result.tavily?.results;
-  return count ? ` (${tool}, ${count} results)` : ` (${tool})`;
+  return count ? ` (${label}, ${count} results)` : ` (${label})`;
 }
 
 function Meta({ result }: { result: {
@@ -439,6 +443,9 @@ function Meta({ result }: { result: {
   /** Names the search tool that ran; `tavily` is the legacy equivalent. */
   webSearch?: { used: boolean; provider?: 'firecrawl' | 'tavily'; results?: number };
   tavily?: { used: boolean; results?: number };
+  /** Gemini's own Google-Search tool, tracked separately so the badge can show
+   *  "combined" when Firecrawl was ALSO injected into the same request. */
+  geminiNativeSearchUsed?: boolean;
 } }) {
   // groundingUsed is explicitly false when the active model has no live web
   // search (DeepSeek) OR when Gemini's grounding fell back (quota/permission).

@@ -1,12 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { setCors } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
-import { resolveProviderChain, quotaFailoverHint, isCapacityFailure, type ResolvedProvider } from '../_lib/aiSettings';
+import { resolveProviderChain, quotaFailoverHint, isCapacityFailure } from '../_lib/aiSettings';
 import { resolveCotalitySettings, fetchCotalityContext } from '../_lib/cotality';
 import {
   resolveWebSearchConfig,
   createWebSearchRunner,
-  needsWebSearchGrounding,
   webSearchCacheTag,
   buildWebSearchPromptBlock,
   webSearchNote,
@@ -269,17 +268,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let cotalitySettings: Awaited<ReturnType<typeof resolveCotalitySettings>> = null;
   try { cotalitySettings = await resolveCotalitySettings(supabase); } catch { /* ignore */ }
 
-  // Grounding is resolved for the WHOLE chain, not just the head. A Gemini head
-  // grounds itself, but the providers behind it (reached when Gemini 429s) do
-  // not — gating on the head alone meant a Firecrawl key was ignored on exactly
-  // the requests that needed it, and every failover ran ungrounded.
-  const needsSearch = (p: ResolvedProvider) => needsWebSearchGrounding(p.provider, resolved.useGrounding);
+  // This endpoint always resolves web-search config and, when configured, injects
+  // its results into the prompt for EVERY provider — including a natively-
+  // grounded Gemini. Gemini's own Google-Search tool is adaptive (it can issue
+  // its own follow-up queries) but only returns short grounding snippets; our
+  // Firecrawl queries are narrower but scrape full page content (up to 8000
+  // chars — see contentBudget in firecrawl.ts). Combining both gives Gemini a
+  // guaranteed, deeply-scraped starting point (villages.com.au directory pages,
+  // realestate.com.au/domain.com.au price guides) AND lets it search further on
+  // its own — better coverage than either alone. This does mean a Gemini request
+  // with grounding on now also spends Firecrawl credits, which the mutually-
+  // exclusive design before this avoided; that trade was made deliberately for
+  // this endpoint's accuracy needs.
   let webSearch: WebSearchConfig | null = null;
-  if (resolved.chain.some(needsSearch)) {
-    try {
-      webSearch = await resolveWebSearchConfig(supabase, resolved.webSearchPrimary, resolved.webSearchFallback);
-    } catch { /* ignore */ }
-  }
+  try {
+    webSearch = await resolveWebSearchConfig(supabase, resolved.webSearchPrimary, resolved.webSearchFallback);
+  } catch { /* ignore */ }
 
   // Response cache — checked BEFORE any model / Cotality / web-search call, so
   // a cached request spends no search quota. Bypass with { refresh: true }.
@@ -380,7 +384,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const errors: string[] = [];
   for (let i = 0; i < resolved.chain.length; i++) {
     const p = resolved.chain[i];
-    const searchCtx = needsSearch(p) ? await search.ensure() : null;
+    // Always injected when configured — for EVERY provider, Gemini (with its own
+    // native grounding tool still attached below) included. See the comment
+    // above `webSearch` for why the two are combined rather than mutually
+    // exclusive on this endpoint.
+    const searchCtx = webSearch ? await search.ensure() : null;
     const prompt = searchCtx ? `${userPrompt}\n\n${buildWebSearchPromptBlock(searchCtx)}` : userPrompt;
     // Set when Gemini's own grounding was refused mid-call and the injected
     // results stood in for it — tracked per attempt so the response reports
@@ -418,6 +426,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         model: p.model,
         provider: result.provider,
         groundingUsed: result.groundingUsed || searchNote.used,
+        // Raw Gemini-native flag, kept separate from the merged `groundingUsed`
+        // above so the UI can tell "Gemini searched live AND Firecrawl was
+        // injected" apart from either one alone.
+        geminiNativeSearchUsed: result.provider === 'gemini' ? result.groundingUsed : undefined,
         configSource: p.source,
         cotality: cotalityNote,
         webSearch: searchNote,
