@@ -73,7 +73,12 @@ You MUST:
      if it is a smaller portal, over an older figure from a bigger name.
   2. Prefer CoreLogic / Cotality, Domain, PropTrack (REA), and ABS suburb pages.
   3. For each suburb return: median HOUSE price, median UNIT/apartment price, and
-     median $/m² of living area where available (else null).
+     median $/m² of living area where available (else null). Quote the figure
+     EXACTLY as published by the single source you cite for it — never average
+     or blend numbers from two different portals into a new figure that matches
+     neither. If the supplied results disagree by more than a few percent, pick
+     the one from the most authoritative/most recent source and say which portal
+     it came from in "summary"; don't split the difference.
   4. Set "asOf" to the actual period the figure is reported for (e.g. rolling
      12-month window ending in a stated month, or a stated quarter) — read it off
      the source, never guess or default to a plausible-sounding recent quarter.
@@ -127,7 +132,10 @@ You MUST:
      in the radius — both past/comparable SALES and current LISTINGS. Do not truncate to
      a handful of examples, do not stop at the first village, and do not return only one
      unit per village. Search each competing village individually for its sold history
-     and its current "for sale" / vacancy page. More substantiated rows is better.
+     and its current "for sale" / vacancy page. More substantiated rows is better. If a
+     villages.com.au (or similar directory) page listing multiple villages is supplied
+     below, it is the full page content, not a snippet — enumerate EVERY village named
+     on it, and every unit/price shown for each, not just the first one or two.
   3. For each unit return every field in the schema you can substantiate:
        - operator (the owner/operator brand, e.g. Keyton, Aveo, Australian Unity,
          Levande, RetireAustralia, IRT, Stockland — NOT the village name)
@@ -338,11 +346,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : `site:villages.com.au ${sub} ${body.state ?? ''} retirement village`;
   });
 
+  // Separate house/unit queries: a combined "house and unit price" query mostly
+  // surfaces the house price-guide page (units are usually a distinct tab/URL on
+  // the same portal), which is why unit medians kept coming back null.
   const searchQueries = body.mode === 'suburbs'
     ? [
         `${body.villageName} ${where} surrounding suburbs median house and unit price`,
         where ? `site:realestate.com.au ${where} median house price` : '',
+        where ? `site:realestate.com.au ${where} median unit price` : '',
         where ? `site:domain.com.au ${where} median house price` : '',
+        where ? `site:domain.com.au ${where} median unit price` : '',
       ].filter(Boolean).map(q => q.replace(/\s+/g, ' ').trim())
     : [
         `retirement village near ${body.villageName} ${where} units for sale price recent`,
