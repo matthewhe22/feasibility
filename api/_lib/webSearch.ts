@@ -155,6 +155,45 @@ export async function runWebSearch(cfg: WebSearchConfig, query: string): Promise
 }
 
 /**
+ * Run several queries against the configured tool(s) and merge the results into
+ * one context — for requests where a single query can't cover the ground needed
+ * (e.g. one generic query trying to surface price data for 8 different suburbs).
+ * Queries run in parallel; results are deduped by URL. Still "at most one search
+ * per tool per query", same credit accounting as `runWebSearch`, just repeated
+ * per query.
+ */
+async function runWebSearchMulti(cfg: WebSearchConfig, queries: string[]): Promise<WebSearchContext | null> {
+  const results = await Promise.all(queries.map(q => runWebSearch(cfg, q)));
+  const nonNull = results.filter((r): r is WebSearchContext => r !== null);
+  if (nonNull.length === 0) return null;
+
+  const seen = new Set<string>();
+  const sources: WebSearchContext['sources'] = [];
+  const blocks: string[] = [];
+  let resultCount = 0;
+  let fellBackFrom: WebSearchProvider | undefined;
+  for (const ctx of nonNull) {
+    blocks.push(ctx.promptBlock);
+    resultCount += ctx.resultCount;
+    if (ctx.fellBackFrom) fellBackFrom = ctx.fellBackFrom;
+    for (const s of ctx.sources) {
+      if (!seen.has(s.url)) {
+        seen.add(s.url);
+        sources.push(s);
+      }
+    }
+  }
+
+  return {
+    promptBlock: blocks.join('\n\n'),
+    sources,
+    resultCount,
+    provider: nonNull[0].provider,
+    ...(fellBackFrom ? { fellBackFrom } : {}),
+  };
+}
+
+/**
  * A one-shot, lazily-executed web search.
  *
  * The research endpoints try providers in a failover chain, and only some links
@@ -163,6 +202,9 @@ export async function runWebSearch(cfg: WebSearchConfig, query: string): Promise
  * answers on its own; searching per attempt would spend them twice on failover.
  * The runner does neither: the search runs on the first `ensure()` that actually
  * needs it, and every later call reuses that one result.
+ *
+ * `query` may be an array — each entry runs as its own search (in parallel) and
+ * the results are merged, for requests one query can't cover on its own.
  */
 export interface WebSearchRunner {
   /** Run the search if it hasn't run yet; returns the (possibly null) context. */
@@ -173,7 +215,7 @@ export interface WebSearchRunner {
   readonly ran: boolean;
 }
 
-export function createWebSearchRunner(cfg: WebSearchConfig | null, query: string): WebSearchRunner {
+export function createWebSearchRunner(cfg: WebSearchConfig | null, query: string | string[]): WebSearchRunner {
   let ran = false;
   let ctx: WebSearchContext | null = null;
   let inFlight: Promise<WebSearchContext | null> | null = null;
@@ -183,7 +225,8 @@ export function createWebSearchRunner(cfg: WebSearchConfig | null, query: string
       if (ran) return ctx;
       if (!cfg) return null;
       if (!inFlight) {
-        inFlight = runWebSearch(cfg, query).then(r => {
+        const run = Array.isArray(query) ? runWebSearchMulti(cfg, query) : runWebSearch(cfg, query);
+        inFlight = run.then(r => {
           ran = true;
           ctx = r;
           return r;

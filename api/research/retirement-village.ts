@@ -42,24 +42,41 @@ interface RVRequest {
   proximityKm?: number;
 }
 
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 const SYSTEM_SUBURBS = `You are an Australian residential property research analyst.
+Today's date is ${todayIsoDate()}. You have no other sense of "now" — use this date,
+not your training cutoff, to judge how current any figure is.
+
 Given a retirement village, you (1) identify its location (suburb, state, postcode),
 (2) determine the surrounding / related suburbs (the village's own suburb plus
 adjacent suburbs within roughly 5–8 km), and (3) report current median dwelling
 prices for each.
 
 You MUST:
-  1. Use your web search capability to find CURRENT (latest available) data.
+  1. Use your web search capability to find CURRENT (latest available) data —
+     prefer whichever supplied result carries the most recent "as of" date, even
+     if it is a smaller portal, over an older figure from a bigger name.
   2. Prefer CoreLogic / Cotality, Domain, PropTrack (REA), and ABS suburb pages.
   3. For each suburb return: median HOUSE price, median UNIT/apartment price, and
      median $/m² of living area where available (else null).
-  4. Compute the simple average of the per-suburb medians (ignoring nulls).
-  5. State all prices in AUD. If a figure is unavailable, use null — never invent.
-  6. Return ONLY valid JSON matching the requested schema — no preamble.
+  4. Set "asOf" to the actual period the figure is reported for (e.g. rolling
+     12-month window ending in a stated month, or a stated quarter) — read it off
+     the source, never guess or default to a plausible-sounding recent quarter.
+  5. If the most recent figure you can substantiate is more than 2 quarters old
+     relative to today (${todayIsoDate()}), still report it but say so plainly in
+     "summary" (e.g. "data is N months old; no more recent figure was found").
+  6. Compute the simple average of the per-suburb medians (ignoring nulls).
+  7. State all prices in AUD. If a figure is unavailable, use null — never invent.
+  8. Return ONLY valid JSON matching the requested schema — no preamble.
 If a Cotality data block is supplied, treat it as the PRIMARY source and reconcile
 web figures against it.`;
 
 const SYSTEM_COMPETITORS = `You are an Australian retirement-living market analyst.
+Today's date is ${todayIsoDate()}. Use this date, not your training cutoff, to judge
+how current a listing or sale is, and to sort/label results accurately.
 Given a retirement village and a proximity radius, you identify COMPETING
 retirement villages within that radius and list their unit sale / listing evidence.
 
@@ -263,11 +280,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Live web search for the providers that need it. Lazy: the search only runs
   // once a provider that actually needs grounding is about to be called, and its
   // result is reused across failover attempts (one search per request maximum).
+  //
+  // Suburbs mode asks for medians across ~8 suburbs at once. A single generic
+  // query only returns `maxResults` (default 5) URLs total for the WHOLE set,
+  // so most suburbs never get a source page — one query can't cover 8 targets.
+  // Firing a few queries in parallel — one generic, plus two aimed directly at
+  // the two portals that actually publish per-suburb median-price pages
+  // (realestate.com.au / domain.com.au) for the village's own (known) suburb —
+  // meaningfully improves odds of landing a real price-guide page rather than
+  // just a generic snippet.
   const where = [body.suburb, body.state].filter(Boolean).join(' ');
-  const searchQuery = body.mode === 'suburbs'
-    ? `${body.villageName} ${where} surrounding suburbs median house and unit price`.replace(/\s+/g, ' ').trim()
-    : `retirement village near ${body.villageName} ${where} units for sale price recent`.replace(/\s+/g, ' ').trim();
-  const search = createWebSearchRunner(webSearch, searchQuery);
+  const searchQueries = body.mode === 'suburbs'
+    ? [
+        `${body.villageName} ${where} surrounding suburbs median house and unit price`,
+        where ? `site:realestate.com.au ${where} median house price` : '',
+        where ? `site:domain.com.au ${where} median house price` : '',
+      ].filter(Boolean).map(q => q.replace(/\s+/g, ' ').trim())
+    : [`retirement village near ${body.villageName} ${where} units for sale price recent`.replace(/\s+/g, ' ').trim()];
+
+  // Force scraping (full rendered page → markdown) for this endpoint's Firecrawl
+  // calls: suburb median prices on realestate.com.au / domain.com.au are rendered
+  // client-side and never appear in a plain search snippet/meta-description —
+  // without scraping, a returned URL still carries no usable figure. Also lift
+  // the per-query result cap so 3 parallel queries in suburbs mode still surface
+  // enough distinct suburb pages.
+  const groundingConfig: WebSearchConfig | null = webSearch && webSearch.firecrawl
+    ? { ...webSearch, firecrawl: { ...webSearch.firecrawl, scrapeContent: true, maxResults: Math.max(webSearch.firecrawl.maxResults, 8) } }
+    : webSearch;
+  const search = createWebSearchRunner(groundingConfig, searchQueries.length === 1 ? searchQueries[0] : searchQueries);
 
   // Run with auto-failover across configured providers (active first); on a
   // quota 429 fall through to the next provider when enabled.
