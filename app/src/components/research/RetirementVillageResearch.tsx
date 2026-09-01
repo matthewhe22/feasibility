@@ -134,11 +134,11 @@ export function RetirementVillageResearch() {
     proximityKm,
   });
 
-  async function research<T>(mode: 'suburbs' | 'competitors'): Promise<T> {
+  async function research<T>(mode: 'suburbs' | 'competitors', extra?: Record<string, unknown>): Promise<T> {
     const r = await fetch('/api/research/retirement-village', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode, ...body() }),
+      body: JSON.stringify({ mode, ...body(), ...extra }),
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({ error: r.statusText }));
@@ -158,7 +158,15 @@ export function RetirementVillageResearch() {
   const runCompetitors = async () => {
     if (!villageName.trim()) { setCompError('Enter a retirement village name first.'); return; }
     setCompLoading(true); setCompError(null); setCompResult(null);
-    try { setCompResult(await research<CompetitorsResult>('competitors')); }
+    // Reuse the confirmed nearby-suburb list from section 1 (if it's been run)
+    // so competitor search actually covers the proximity radius — villages.com.au
+    // serves one directory page per suburb, so knowing the real suburb names
+    // lets the backend query each one directly instead of guessing.
+    const nearbySuburbs = (subResult?.suburbs ?? [])
+      .filter(s => s.distanceKm == null || s.distanceKm <= proximityKm)
+      .map(s => s.suburb)
+      .filter(Boolean);
+    try { setCompResult(await research<CompetitorsResult>('competitors', nearbySuburbs.length ? { nearbySuburbs } : undefined)); }
     catch (e) { setCompError(e instanceof Error ? e.message : 'Research failed.'); }
     finally { setCompLoading(false); }
   };
@@ -262,7 +270,7 @@ export function RetirementVillageResearch() {
       {/* Section 2 — Competitor villages */}
       <Section
         title="2. Competitor retirement villages"
-        subtitle="All substantiable past sales and current listings within the proximity radius — operator, village, unit, beds/baths/study/car, m², price, $/m², date and tenure/DMF terms — sourced from villages.com.au, downsizing.com.au, operator sites & portals."
+        subtitle={`All substantiable past sales and current listings within the proximity radius — operator, village, unit, beds/baths/study/car, m², price, $/m², date and tenure/DMF terms — sourced from villages.com.au, downsizing.com.au, operator sites & portals.${subResult ? ' Using the suburb list from section 1 to cover the whole radius.' : ' Tip: run section 1 first so this searches every suburb in the radius, not just the subject village’s own.'}`}
         onRun={runCompetitors}
         running={compLoading}
         runLabel="Research competitors"

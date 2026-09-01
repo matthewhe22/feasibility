@@ -165,14 +165,16 @@ export interface StoredAISettings {
   model: string;
   enabled: boolean;
   /**
-   * Whether Gemini requests use Google Search grounding. **Default OFF.**
+   * Whether Gemini requests use Google Search grounding. **Default ON.**
    *
-   * The Google-Search tool draws on a small free-tier grounding quota that 429s
-   * ("quota / rate limit reached") even under light use, and it is the single
-   * most common cause of failed research. With it off, Gemini is grounded by
-   * Firecrawl / Tavily instead — same live web data, none of that quota. Turn it
-   * back on only when no web-search tool is configured and Gemini must search
-   * for itself.
+   * Google's own index reflects rendered page content (e.g. suburb median-price
+   * widgets that only populate via client-side JS), which gave materially better
+   * grounding than Firecrawl/Tavily snippets for property research. The
+   * Google-Search tool does draw on a free-tier quota that can 429 under load —
+   * if that becomes the common failure mode again, Firecrawl/Tavily still ground
+   * every other provider in the failover chain regardless of this flag, so
+   * turning it off here only affects Gemini's own grounding, not the app's
+   * ability to fail over.
    */
   useGrounding: boolean;
   /** When true (default), on a quota/rate-limit error the active provider fails
@@ -248,10 +250,10 @@ function normalizeStored(raw: unknown): StoredAISettings | null {
     provider,
     model: model || DEFAULT_MODEL_FOR[provider],
     enabled: r.enabled !== false,
-    // Default OFF — see StoredAISettings.useGrounding. Rows written before this
-    // default flipped, and rows that never set it, both fall back to Firecrawl /
-    // Tavily grounding rather than Gemini's rate-limited Google-Search tool.
-    useGrounding: r.useGrounding === true,
+    // Default ON — see StoredAISettings.useGrounding. A row that explicitly set
+    // it false (from when the default was off) keeps that choice; a row that
+    // never set it at all now defaults to Gemini's own Google-Search grounding.
+    useGrounding: r.useGrounding !== false,
     autoFailover: r.autoFailover !== false,   // default ON
     // Rows written before Firecrawl existed have neither field; both default so
     // existing installs pick up Firecrawl-first grounding without a migration.
@@ -420,9 +422,9 @@ export async function resolveProviderChain(supabase: SupabaseClient | null): Pro
   if (chain.length === 0) return null;
   return {
     chain,
-    // Default OFF — Firecrawl / Tavily ground Gemini instead of its own
-    // rate-limited Google-Search tool.
-    useGrounding: stored?.useGrounding === true,
+    // Default ON — see StoredAISettings.useGrounding. No stored row at all
+    // (nothing saved yet) defaults to ON too, matching normalizeStored.
+    useGrounding: stored ? stored.useGrounding : true,
     autoFailover: stored?.autoFailover !== false,
     webSearchPrimary: stored?.webSearchPrimary === 'tavily' ? 'tavily' : DEFAULT_WEB_SEARCH_PRIMARY,
     webSearchFallback: stored?.webSearchFallback !== false,

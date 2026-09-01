@@ -74,9 +74,10 @@ export function AISettingsPage() {
   const [provider, setProvider] = useState<AIProvider>('gemini');
   const [model, setModel] = useState<string>('gemini-2-0-flash');
   const [enabled, setEnabled] = useState(true);
-  // Default OFF: Gemini's Google-Search tool has a small free-tier quota that
-  // 429s under light use. Firecrawl / Tavily ground it instead.
-  const [useGrounding, setUseGrounding] = useState(false);
+  // Default ON: Google's own index reflects rendered page content, which grounds
+  // property research better than Firecrawl/Tavily snippets. Firecrawl/Tavily
+  // still ground every other provider in the failover chain regardless.
+  const [useGrounding, setUseGrounding] = useState(true);
   const [autoFailover, setAutoFailover] = useState(true);
   const [webSearchPrimary, setWebSearchPrimary] = useState<WebSearchProvider>('firecrawl');
   const [webSearchFallback, setWebSearchFallback] = useState(true);
@@ -475,12 +476,13 @@ export function AISettingsPage() {
             <input type="checkbox" checked={useGrounding} onChange={e => setUseGrounding(e.target.checked)} className="w-4 h-4 mt-0.5" />
             <span className="text-sm text-gray-200">Use Google Search grounding (Gemini)
               <span className="block text-xs text-gray-500 mt-0.5">
-                <strong className="text-gray-400">Off by default.</strong> Gemini's own search tool draws on a small
-                free-tier <strong className="text-gray-400">grounding quota</strong> that returns "quota / rate limit
-                reached" even on light use. While it is off, Gemini is grounded by the web-search tool above
-                ({webSearchPrimary === 'firecrawl' ? 'Firecrawl' : 'Tavily'}) — same live web data, none of that quota.
-                Turn it ON only if no search tool is configured, so Gemini can search for itself instead of
-                answering from training data. No effect on DeepSeek / OpenRouter / NVIDIA.
+                <strong className="text-gray-400">On by default.</strong> Google's own search index reflects the
+                actual rendered page (including figures that only populate via client-side JS, like suburb
+                median-price widgets), which grounds property research better than a Firecrawl/Tavily snippet.
+                Gemini's search tool draws on a free-tier <strong className="text-gray-400">grounding quota</strong> that
+                can return "quota / rate limit reached" under heavy use — if that becomes a problem, turn this off and
+                Gemini will be grounded by the web-search tool above ({webSearchPrimary === 'firecrawl' ? 'Firecrawl' : 'Tavily'}) instead.
+                No effect on DeepSeek / OpenRouter / NVIDIA — they always use the web-search tool above.
               </span>
             </span>
           </label>
