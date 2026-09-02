@@ -154,7 +154,7 @@ async function run() {
   await firecrawlSearch({ ...baseSettings, scrapeContent: false }, 'q');
   check('scrapeContent off → no scrapeOptions sent', sentBody.scrapeOptions === undefined);
   await firecrawlSearch({ ...baseSettings, scrapeContent: true }, 'q');
-  eq('scrapeContent on → requests markdown', sentBody.scrapeOptions, { formats: ['markdown'] });
+  eq('scrapeContent on → requests markdown, no cache', sentBody.scrapeOptions, { formats: ['markdown'], maxAge: 0 });
   eq('limit tracks maxResults', sentBody.limit, baseSettings.maxResults);
 
   console.log('\nPRIMARY / FALLBACK ORDERING');
