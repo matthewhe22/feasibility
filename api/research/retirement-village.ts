@@ -14,6 +14,7 @@ import {
 } from '../_lib/webSearch';
 import { runAIResearch, mergeSources, AIResearchError, type AIResearchSource } from '../_lib/aiClient';
 import { researchCacheKey, getCachedResearch, setCachedResearch } from '../_lib/researchCache';
+import { geocodeAuSuburbs } from '../_lib/geocode';
 
 /**
  * POST /api/research/retirement-village
@@ -451,6 +452,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         timestamp: new Date().toISOString(),
       };
       if (i > 0) payload.failoverNote = `Primary provider (${resolved.chain[0].provider}) was rate-limited; served by ${p.provider} instead.`;
+
+      // Attach real coordinates for the surrounding-suburb map. Geocoding is
+      // deterministic and free (OpenStreetMap Nominatim), so it's done here
+      // rather than asking the LLM to recall lat/lng — that's exactly the kind
+      // of numeric fact models get subtly wrong. Best-effort: a suburb that
+      // fails to geocode just gets lat/lng: null and is dropped from the map,
+      // not the whole response.
+      //
+      // Nominatim's public instance asks for ~1 request/second, so this is
+      // strictly sequential (see geocode.ts) — capped at 8 suburbs to bound
+      // added latency to under ~9s; a response typically has far fewer.
+      if (body.mode === 'suburbs' && Array.isArray(payload.suburbs)) {
+        const allRows = payload.suburbs as Array<{ suburb?: string; state?: string }>;
+        const geocodeCap = 8; // bounds added latency; table still shows every row regardless
+        const rows = allRows.slice(0, geocodeCap);
+        try {
+          const coords = await geocodeAuSuburbs(
+            rows.map(r => ({ suburb: String(r.suburb ?? ''), state: r.state })),
+          );
+          payload.suburbs = allRows.map((r, idx) => ({
+            ...r,
+            lat: idx < geocodeCap ? coords[idx]?.lat ?? null : null,
+            lng: idx < geocodeCap ? coords[idx]?.lng ?? null : null,
+          }));
+        } catch {
+          payload.suburbs = allRows.map(r => ({ ...r, lat: null, lng: null }));
+        }
+      }
+
       setCachedResearch(cacheKey, payload);
       return res.status(200).json(payload);
     } catch (e) {

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { formatCurrency } from '../../utils';
+import { SuburbMap } from './SuburbMap';
 
 /**
  * Retirement Village Property Research.
@@ -26,6 +27,9 @@ interface SuburbRow {
   medianUnitPrice?: number | null;
   medianDollarPerSqm?: number | null;
   asOf?: string | null;
+  /** Server-side geocoded (OpenStreetMap Nominatim) — null when unavailable. */
+  lat?: number | null;
+  lng?: number | null;
 }
 interface SuburbsResult {
   village?: { name?: string; suburb?: string; state?: string; postcode?: string };
@@ -275,6 +279,7 @@ export function RetirementVillageResearch() {
               </table>
             </div>
             <Averages avgMHP={avgMHP} avgMUP={avgMUP} avgPSM={avgPSM} />
+            <SuburbMap suburbs={subResult.suburbs ?? []} />
             <Sources sources={subResult.sources} />
           </div>
         )}
