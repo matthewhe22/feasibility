@@ -244,7 +244,13 @@ export async function firecrawlSearch(
   for (const path of attempts) {
     const url = `${normaliseBaseUrl(s.apiBaseUrl)}${path}`;
     const body: Record<string, unknown> = { query, limit: s.maxResults };
-    if (s.scrapeContent) body.scrapeOptions = { formats: ['markdown'] };
+    // maxAge: 0 disables Firecrawl's own page cache for the scrape. Without it,
+    // Firecrawl may serve a snapshot from its last crawl of that URL — which can
+    // be days old — instead of scraping the live page at request time. That's
+    // exactly the kind of drift that showed up as a suburb median a few thousand
+    // dollars off the live realestate.com.au figure: not wrong data, just an
+    // older cached copy of the same page.
+    if (s.scrapeContent) body.scrapeOptions = { formats: ['markdown'], maxAge: 0 };
 
     let resp: Response;
     try {

@@ -149,14 +149,24 @@ export function RetirementVillageResearch() {
 
   const runSuburbs = async () => {
     if (!villageName.trim()) { setSubError('Enter a retirement village name first.'); return; }
+    // A re-run (a result already showing) is an explicit request for fresh data —
+    // bypass the server's 6h response cache so a live figure that moved since the
+    // last pull (e.g. a portal's rolling-median recalculation) actually shows up,
+    // instead of silently re-serving the same cached answer. The first run for a
+    // village still hits the cache normally, so identical lookups within the
+    // window (incl. from other users) don't each spend search credits.
+    const refresh = subResult !== null;
     setSubLoading(true); setSubError(null); setSubResult(null);
-    try { setSubResult(await research<SuburbsResult>('suburbs')); }
+    try { setSubResult(await research<SuburbsResult>('suburbs', refresh ? { refresh: true } : undefined)); }
     catch (e) { setSubError(e instanceof Error ? e.message : 'Research failed.'); }
     finally { setSubLoading(false); }
   };
 
   const runCompetitors = async () => {
     if (!villageName.trim()) { setCompError('Enter a retirement village name first.'); return; }
+    // See runSuburbs — a re-run bypasses the response cache so it actually
+    // re-searches instead of re-serving the same cached answer.
+    const refresh = compResult !== null;
     setCompLoading(true); setCompError(null); setCompResult(null);
     // Reuse the confirmed nearby-suburb list from section 1 (if it's been run)
     // so competitor search actually covers the proximity radius — villages.com.au
@@ -166,7 +176,10 @@ export function RetirementVillageResearch() {
       .filter(s => s.distanceKm == null || s.distanceKm <= proximityKm)
       .map(s => s.suburb)
       .filter(Boolean);
-    try { setCompResult(await research<CompetitorsResult>('competitors', nearbySuburbs.length ? { nearbySuburbs } : undefined)); }
+    const extra: Record<string, unknown> = {};
+    if (nearbySuburbs.length) extra.nearbySuburbs = nearbySuburbs;
+    if (refresh) extra.refresh = true;
+    try { setCompResult(await research<CompetitorsResult>('competitors', Object.keys(extra).length ? extra : undefined)); }
     catch (e) { setCompError(e instanceof Error ? e.message : 'Research failed.'); }
     finally { setCompLoading(false); }
   };
