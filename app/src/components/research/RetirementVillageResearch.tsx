@@ -43,6 +43,9 @@ export interface SuburbsResult {
   timestamp?: string;
   cotality?: CotalityNote;
   groundingUsed?: boolean;
+  /** Real OSM-based map image (server-generated, api/_lib/staticMap.ts), as a
+   *  PNG data URL — null if the base-map fetch or geocoding failed. */
+  mapImage?: string | null;
 }
 
 export interface UnitRow {

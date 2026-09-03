@@ -15,6 +15,7 @@ import {
 import { runAIResearch, mergeSources, AIResearchError, type AIResearchSource } from '../_lib/aiClient';
 import { researchCacheKey, getCachedResearch, setCachedResearch } from '../_lib/researchCache';
 import { geocodeAuSuburbs } from '../_lib/geocode';
+import { buildSuburbMapImage } from '../_lib/staticMap';
 
 /**
  * POST /api/research/retirement-village
@@ -56,6 +57,64 @@ function slugify(s: string): string {
 
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+const SYSTEM_SUBURB_LOCATOR = `You are an Australian geography assistant. Given a retirement village, identify
+its suburb, state and postcode, plus the surrounding/related suburbs within
+roughly 5-8 km. This is a LOCATION lookup only — no pricing, no web search
+needed; use your own geographic knowledge. Return ONLY valid JSON matching the
+schema — no preamble.`;
+
+function buildSuburbLocatorPrompt(req: RVRequest): string {
+  const loc = [req.suburb, req.state, req.postcode].filter(Boolean).join(', ');
+  return [
+    `Identify the location of the retirement village: "${req.villageName}".`,
+    loc ? `Known location context: ${loc}.` : `Location not provided — resolve it from the village name.`,
+    `List the village's own suburb plus 4-7 surrounding/related suburbs (~5-8 km).`,
+    `Return JSON only: { "village": {"name","suburb","state","postcode"},`,
+    `"suburbs": [ {"suburb","state","postcode","distanceKm": <number|null>} ] }`,
+  ].join('\n');
+}
+
+/**
+ * Cheap pre-step for "suburbs" mode: resolve the confirmed suburb list BEFORE
+ * building search queries, so each suburb gets its own targeted
+ * site:realestate.com.au query instead of one generic query trying to cover
+ * however many suburbs the model eventually decides to report on (previously
+ * the mismatch here meant most returned suburbs had no source page at all —
+ * only the ones a single shared query happened to surface got real figures).
+ * Uses only the head provider (no failover) since this is a low-stakes,
+ * ungrounded geography lookup — on any failure, falls back to just the
+ * subject's own suburb so the caller degrades to the pre-existing behaviour
+ * rather than blocking the request.
+ */
+async function resolveSuburbList(
+  body: RVRequest,
+  headProvider: { provider: import('../_lib/aiSettings').AIProvider; model: string; apiKey: string },
+): Promise<Array<{ suburb: string; state?: string; postcode?: string; distanceKm?: number | null }>> {
+  const fallback = body.suburb ? [{ suburb: body.suburb, state: body.state, postcode: body.postcode }] : [];
+  try {
+    const result = await runAIResearch({
+      provider: headProvider.provider,
+      model: headProvider.model,
+      apiKey: headProvider.apiKey,
+      systemPrompt: SYSTEM_SUBURB_LOCATOR,
+      userPrompt: buildSuburbLocatorPrompt(body),
+      useGrounding: false, // geography lookup — no search needed, keep it cheap
+    });
+    const rows = Array.isArray(result.json.suburbs) ? (result.json.suburbs as Array<Record<string, unknown>>) : [];
+    const parsed = rows
+      .map(r => ({
+        suburb: typeof r.suburb === 'string' ? r.suburb : '',
+        state: typeof r.state === 'string' ? r.state : body.state,
+        postcode: typeof r.postcode === 'string' ? r.postcode : body.postcode,
+        distanceKm: typeof r.distanceKm === 'number' ? r.distanceKm : null,
+      }))
+      .filter(r => r.suburb);
+    return parsed.length ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 const SYSTEM_SUBURBS = `You are an Australian residential property research analyst.
@@ -152,10 +211,24 @@ You MUST:
          Levande, RetireAustralia, IRT, Stockland — NOT the village name)
        - villageName, unitNumber (e.g. "14" or "2/21" — from the listing/address),
          address, suburb, distanceKm
-       - priceType ("sold" or "listing"), price, date (sold or listing date;
-         ISO yyyy-mm-dd, or yyyy-mm when only the month is known)
+       - priceType ("sold" or "listing"), price, date (ISO yyyy-mm-dd, or yyyy-mm
+         when only the month is known). DATE IS REQUIRED — do not leave it null:
+           * SOLD: the settlement/sale date from the sold record.
+           * LISTING: the date it was listed / "first listed" / "on market since"
+             if published. If the page publishes no listing date, use TODAY's date
+             (${todayIsoDate()}) — the listing is current as of this search — and
+             say so in that row's "note" (e.g. "listing date not published; current
+             as at ${todayIsoDate()}").
        - bedrooms, bathrooms, study (true/false), carSpaces
-       - internalSqm (internal/living area in m²) and, for villas/land-lease, landSqm
+       - internalSqm — the internal/living area in m². LOOK FOR IT SPECIFICALLY:
+         listing pages label it "internal area", "living area", "floor area",
+         "approx. area", "m²", "sqm" or "square metres", often in a specifications
+         table, the floor-plan caption, or the body text rather than the headline.
+         The scraped page content supplied below is the FULL page, not a snippet —
+         read it through for these before concluding there is no area. If only a
+         total/land/site area is published, put that in landSqm and leave
+         internalSqm null; never put a land area in internalSqm.
+       - landSqm (for villas / land-lease / any published land or site area)
        - unitType, tenure (licence / loan-lease / leasehold / strata / rental)
        - dmfSummary (deferred management fee terms, e.g. "30% over 5 years, no capital gain share")
        - recurringFee + recurringFeePeriod (general services levy, e.g. 487.06 + "month")
@@ -171,17 +244,22 @@ You MUST:
      Capture it as the price and record the arrangement in tenure / dmfSummary.
   6. Return ONLY valid JSON matching the requested schema — no preamble.`;
 
-function buildSuburbsPrompt(req: RVRequest): string {
+function buildSuburbsPrompt(req: RVRequest, confirmedSuburbs: Array<{ suburb: string; state?: string; postcode?: string; distanceKm?: number | null }>): string {
   const loc = [req.suburb, req.state, req.postcode].filter(Boolean).join(', ');
+  const confirmedList = confirmedSuburbs
+    .map(s => `${s.suburb}${s.state ? `, ${s.state}` : ''}${s.postcode ? ` ${s.postcode}` : ''}${s.distanceKm != null ? ` (~${s.distanceKm} km)` : ''}`)
+    .join('; ');
   return [
     `Research the retirement village: "${req.villageName}".`,
     loc ? `Known location context: ${loc}.` : `Location not provided — resolve it from the village name.`,
-    ``,
-    `1. Identify the village's suburb, state and postcode.`,
-    `2. List the village's own suburb plus the surrounding/related suburbs (≈5–8 km).`,
+    confirmedList
+      ? `Report on EXACTLY these suburbs — a live search was already run for each one, so use ` +
+        `those results below rather than substituting or adding others: ${confirmedList}.`
+      : `1. Identify the village's suburb, state and postcode.\n2. List the village's own suburb plus the surrounding/related suburbs (≈5–8 km).`,
     `3. For each suburb provide the current median house price, median unit price, and`,
     `   median $/m² (living area) where published — sourced from realestate.com.au ONLY,`,
-    `   no other portal.`,
+    `   no other portal. If realestate.com.au has no published figure for one of these`,
+    `   suburbs, return null for it — do not drop the suburb from the list.`,
     `4. Compute the average of the per-suburb medians.`,
     ``,
     `Return JSON only, matching this schema:`,
@@ -220,6 +298,17 @@ function buildCompetitorsPrompt(req: RVRequest): string {
     `months where published. Do not limit the list to a few examples or to one unit per`,
     `village — if 20 units are substantiated by the live search results, return all 20,`,
     `not a shorter subset. Most recent first.`,
+    ``,
+    `For EVERY row, work hardest on these two fields — they were coming back empty:`,
+    `  • "date": always populate it. Sold → the sale date. Listing → the published`,
+    `    listing/"first listed" date, or TODAY (${todayIsoDate()}) if the page shows`,
+    `    none, noting that in "note".`,
+    `  • "internalSqm": search each listing page's specifications table, floor-plan`,
+    `    caption and body text for "internal area" / "living area" / "floor area" /`,
+    `    "m²" / "sqm". Only leave it null after actually checking the full page. Put a`,
+    `    land/site area in "landSqm", never in "internalSqm".`,
+    `Open the SPECIFIC unit's own listing page for these — a village summary page`,
+    `usually omits both, while the individual unit page usually publishes them.`,
     ``,
     `Return JSON only, matching this schema:`,
     `{`,
@@ -272,7 +361,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const systemPrompt = body.mode === 'suburbs' ? SYSTEM_SUBURBS : SYSTEM_COMPETITORS;
-  let userPrompt = body.mode === 'suburbs' ? buildSuburbsPrompt(body) : buildCompetitorsPrompt(body);
   const head = resolved.chain[0];
   const refresh = (body as RVRequest & { refresh?: boolean }).refresh === true;
 
@@ -316,6 +404,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (cached) return res.status(200).json(cached);
   }
 
+  // Cache miss: resolve the confirmed suburb list (suburbs mode only) BEFORE
+  // building the main prompt/queries — see resolveSuburbList's docstring for
+  // why. Done here rather than earlier so a cache hit never spends this call.
+  const confirmedSuburbs = body.mode === 'suburbs' && head
+    ? await resolveSuburbList(body, head)
+    : [];
+  let userPrompt = body.mode === 'suburbs' ? buildSuburbsPrompt(body, confirmedSuburbs) : buildCompetitorsPrompt(body);
+
   // Cache miss: perform the (paid) grounding lookups, once.
   let cotalityNote: { used: boolean; url?: string; reason?: string } = { used: false };
   if (cotalitySettings) {
@@ -335,15 +431,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Live web search for the providers that need it. Lazy: the search only runs
   // once a provider that actually needs grounding is about to be called, and its
   // result is reused across failover attempts (one search per request maximum).
-  //
-  // Suburbs mode asks for medians across ~8 suburbs at once. A single generic
-  // query only returns `maxResults` (default 5) URLs total for the WHOLE set,
-  // so most suburbs never get a source page — one query can't cover 8 targets.
-  // Firing a few queries in parallel — one generic, plus two aimed directly at
-  // the two portals that actually publish per-suburb median-price pages
-  // (realestate.com.au / domain.com.au) for the village's own (known) suburb —
-  // meaningfully improves odds of landing a real price-guide page rather than
-  // just a generic snippet.
   const where = [body.suburb, body.state].filter(Boolean).join(' ');
 
   // Competitors mode has the same one-query-can't-cover-it problem, for the
@@ -365,17 +452,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : `site:villages.com.au ${sub} ${body.state ?? ''} retirement village`;
   });
 
-  // Separate house/unit queries: a combined "house and unit price" query mostly
-  // surfaces the house price-guide page (units are usually a distinct tab/URL on
-  // the same portal), which is why unit medians kept coming back null. All three
-  // queries are `site:realestate.com.au`-scoped — suburb pricing is sourced from
-  // realestate.com.au only, no other portal.
+  // Suburbs mode: one site:realestate.com.au query PER suburb (house + unit,
+  // separately — a combined "house and unit price" query mostly surfaces the
+  // house price-guide page, since units are usually a distinct tab/URL on the
+  // same portal, which is why unit medians kept coming back null) built from
+  // `confirmedSuburbs` (resolveSuburbList, above) rather than a single generic
+  // query trying to somehow cover however many suburbs get reported on. A
+  // shared query can only return a handful of URLs total for the whole set, so
+  // most suburbs never got a source page before — only the ones that query
+  // happened to surface did. Capped at 6 suburbs (each is 2 Firecrawl queries).
+  const suburbsForQueries = confirmedSuburbs.slice(0, 6);
   const searchQueries = body.mode === 'suburbs'
-    ? [
-        `site:realestate.com.au ${body.villageName} ${where} surrounding suburbs median house and unit price`,
-        where ? `site:realestate.com.au ${where} median house price` : '',
-        where ? `site:realestate.com.au ${where} median unit price` : '',
-      ].filter(Boolean).map(q => q.replace(/\s+/g, ' ').trim())
+    ? suburbsForQueries.flatMap(s => {
+        const sw = [s.suburb, s.state ?? body.state].filter(Boolean).join(' ');
+        return [`site:realestate.com.au ${sw} median house price`, `site:realestate.com.au ${sw} median unit price`];
+      })
     : [
         `retirement village near ${body.villageName} ${where} units for sale price recent`,
         ...villagesDotComQueries,
@@ -464,20 +555,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // strictly sequential (see geocode.ts) — capped at 8 suburbs to bound
       // added latency to under ~9s; a response typically has far fewer.
       if (body.mode === 'suburbs' && Array.isArray(payload.suburbs)) {
-        const allRows = payload.suburbs as Array<{ suburb?: string; state?: string }>;
+        const allRows = payload.suburbs as Array<{ suburb?: string; state?: string; medianHousePrice?: number | null }>;
         const geocodeCap = 8; // bounds added latency; table still shows every row regardless
         const rows = allRows.slice(0, geocodeCap);
+        let geocoded = allRows.map(r => ({ ...r, lat: null as number | null, lng: null as number | null }));
         try {
           const coords = await geocodeAuSuburbs(
             rows.map(r => ({ suburb: String(r.suburb ?? ''), state: r.state })),
           );
-          payload.suburbs = allRows.map((r, idx) => ({
+          geocoded = allRows.map((r, idx) => ({
             ...r,
             lat: idx < geocodeCap ? coords[idx]?.lat ?? null : null,
             lng: idx < geocodeCap ? coords[idx]?.lng ?? null : null,
           }));
+        } catch { /* geocoded already defaults every row to lat/lng: null */ }
+        payload.suburbs = geocoded;
+
+        // Real map image (actual OSM map background, not a schematic) — built
+        // server-side (see staticMap.ts for why) from the suburbs that
+        // geocoded successfully. Best-effort: null just means no map image in
+        // the response; the Excel export falls back to a schematic in that case.
+        try {
+          payload.mapImage = await buildSuburbMapImage(
+            geocoded
+              .filter((r): r is typeof geocoded[number] & { lat: number; lng: number } => typeof r.lat === 'number' && typeof r.lng === 'number')
+              .map(r => ({ suburb: String(r.suburb ?? ''), lat: r.lat, lng: r.lng, medianHousePrice: r.medianHousePrice })),
+          );
         } catch {
-          payload.suburbs = allRows.map(r => ({ ...r, lat: null, lng: null }));
+          payload.mapImage = null;
         }
       }
 
