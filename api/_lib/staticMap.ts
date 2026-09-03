@@ -13,12 +13,19 @@
  * server-side, then shipped to the client as one finished PNG (data URL) —
  * used both by the in-app map and embedded directly into the Excel export.
  *
- * Base map source: staticmap.openstreetmap.de — a long-standing free, no-API-
- * key static-map renderer built on OpenStreetMap data (one GET request returns
- * one composed PNG for a given center/zoom/size; no tile-stitching needed on
- * our end). Best-effort throughout: any failure (network, non-200, bad
- * content-type) returns null rather than throwing, so a suburb-pricing
- * response still succeeds without a map image.
+ * Base map source: OpenStreetMap's standard raster tiles
+ * (tile.openstreetmap.org/{z}/{x}/{y}.png) — the SAME endpoint the in-app
+ * Leaflet map already renders from, stitched here into one image. Earlier this
+ * used the single-shot staticmap.openstreetmap.de renderer instead; that's one
+ * small community service and a single point of failure, whereas the tile
+ * endpoint is the canonical one this app already depends on. It's kept as a
+ * secondary fallback below. Best-effort throughout: any failure (network,
+ * non-200, bad content-type) returns null rather than throwing, so a
+ * suburb-pricing response still succeeds without a map image.
+ *
+ * Tile volume per request is a dozen or so — the same handful a browser fetches
+ * to render one map view, well inside OSM's tile usage policy, and sent with an
+ * identifying User-Agent as that policy requires.
  */
 import sharp from 'sharp';
 
@@ -29,7 +36,11 @@ export interface MapPoint {
   medianHousePrice?: number | null;
 }
 
+const TILE_URL = (z: number, x: number, y: number) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
 const STATIC_MAP_URL = 'https://staticmap.openstreetmap.de/staticmap.php';
+/** Identifies the app per OSM's tile usage policy — deliberately no personal contact info. */
+const USER_AGENT = 'kk-feaso-model-app/1.0 (retirement-village research map)';
+const TILE_SIZE = 256;
 const WIDTH = 640;
 const HEIGHT = 420;
 const PADDING = 60; // px kept clear at the edges so markers/labels aren't clipped
@@ -96,12 +107,100 @@ function buildOverlaySvg(points: MapPoint[], centerLat: number, centerLng: numbe
     );
   }
 
+  // OSM's tile usage / licensing terms require visible attribution wherever the
+  // tiles are displayed — including this image once it's embedded in Excel.
+  const attribution = '© OpenStreetMap contributors';
+  const attrWidth = attribution.length * 5.4 + 8;
+  parts.push(
+    `<rect x="${WIDTH - attrWidth - 4}" y="${HEIGHT - 18}" width="${attrWidth}" height="14" fill="rgba(255,255,255,0.75)" />`,
+    `<text x="${WIDTH - attrWidth}" y="${HEIGHT - 8}" font-family="Arial, sans-serif" font-size="9" fill="#374151">${attribution}</text>`,
+  );
+
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}">${parts.join('')}</svg>`;
 }
 
+async function fetchImage(url: string, timeoutMs = 8000): Promise<Buffer | null> {
+  try {
+    const resp = await fetch(url, {
+      headers: { 'User-Agent': USER_AGENT, Accept: 'image/png,image/*' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!resp.ok) return null;
+    if (!(resp.headers.get('content-type') ?? '').includes('image')) return null;
+    return Buffer.from(await resp.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Fetch a real OSM-based static map and composite suburb markers + MHP labels
- * onto it. Returns a PNG data URL, or null on any failure (best-effort).
+ * Stitch the OSM tiles covering the WIDTH x HEIGHT viewport centred on
+ * (centerLat, centerLng) at `zoom` into one base-map image.
+ *
+ * Tiles are composited onto a canvas sized to the whole tile grid (so every
+ * offset is non-negative — sharp rejects negative composite offsets) and the
+ * exact viewport is then extracted out of it. Returns null if no tile could be
+ * fetched; a partial grid (some tiles missing) still renders, just with gaps.
+ */
+async function fetchStitchedTiles(centerLat: number, centerLng: number, zoom: number): Promise<Buffer | null> {
+  const center = mercatorPixel(centerLat, centerLng, zoom);
+  const left = center.x - WIDTH / 2;
+  const top = center.y - HEIGHT / 2;
+
+  const minTileX = Math.floor(left / TILE_SIZE);
+  const maxTileX = Math.floor((left + WIDTH - 1) / TILE_SIZE);
+  const minTileY = Math.floor(top / TILE_SIZE);
+  const maxTileY = Math.floor((top + HEIGHT - 1) / TILE_SIZE);
+  const tilesPerAxis = 2 ** zoom;
+
+  const jobs: Array<Promise<{ buf: Buffer | null; left: number; top: number }>> = [];
+  for (let tx = minTileX; tx <= maxTileX; tx++) {
+    for (let ty = minTileY; ty <= maxTileY; ty++) {
+      // Wrap X around the antimeridian; Y outside the world is simply absent.
+      const wrappedX = ((tx % tilesPerAxis) + tilesPerAxis) % tilesPerAxis;
+      const offsetLeft = (tx - minTileX) * TILE_SIZE;
+      const offsetTop = (ty - minTileY) * TILE_SIZE;
+      if (ty < 0 || ty >= tilesPerAxis) continue;
+      jobs.push(
+        fetchImage(TILE_URL(zoom, wrappedX, ty)).then(buf => ({ buf, left: offsetLeft, top: offsetTop })),
+      );
+    }
+  }
+
+  const tiles = await Promise.all(jobs);
+  const usable = tiles.filter((t): t is { buf: Buffer; left: number; top: number } => t.buf !== null);
+  if (usable.length === 0) return null;
+
+  const gridWidth = (maxTileX - minTileX + 1) * TILE_SIZE;
+  const gridHeight = (maxTileY - minTileY + 1) * TILE_SIZE;
+
+  try {
+    const grid = await sharp({
+      create: { width: gridWidth, height: gridHeight, channels: 4, background: { r: 233, g: 231, b: 225, alpha: 1 } },
+    })
+      .composite(usable.map(t => ({ input: t.buf, left: t.left, top: t.top })))
+      .png()
+      .toBuffer();
+
+    // Extract the exact viewport out of the stitched grid.
+    return await sharp(grid)
+      .extract({
+        left: Math.round(left - minTileX * TILE_SIZE),
+        top: Math.round(top - minTileY * TILE_SIZE),
+        width: WIDTH,
+        height: HEIGHT,
+      })
+      .png()
+      .toBuffer();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build a real OSM map image for these suburbs and composite the markers +
+ * MHP labels onto it. Returns a PNG data URL, or null on any failure
+ * (best-effort — the caller falls back to a schematic).
  */
 export async function buildSuburbMapImage(points: MapPoint[]): Promise<string | null> {
   const plottable = points.filter(p => isFinite(p.lat) && isFinite(p.lng));
@@ -111,18 +210,15 @@ export async function buildSuburbMapImage(points: MapPoint[]): Promise<string | 
   const centerLng = plottable.reduce((s, p) => s + p.lng, 0) / plottable.length;
   const zoom = pickZoom(plottable, centerLat, centerLng);
 
-  const url = `${STATIC_MAP_URL}?center=${centerLat},${centerLng}&zoom=${zoom}&size=${WIDTH}x${HEIGHT}&maptype=mapnik`;
-
-  let baseBuffer: Buffer;
-  try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!resp.ok) return null;
-    const contentType = resp.headers.get('content-type') ?? '';
-    if (!contentType.includes('image')) return null;
-    baseBuffer = Buffer.from(await resp.arrayBuffer());
-  } catch {
-    return null; // network error, timeout, or service down — degrade gracefully
+  // Primary: stitch OSM's own tiles. Fallback: the single-shot static-map
+  // renderer, in case the tile endpoint is unreachable from this environment.
+  let baseBuffer = await fetchStitchedTiles(centerLat, centerLng, zoom);
+  if (!baseBuffer) {
+    baseBuffer = await fetchImage(
+      `${STATIC_MAP_URL}?center=${centerLat},${centerLng}&zoom=${zoom}&size=${WIDTH}x${HEIGHT}&maptype=mapnik`,
+    );
   }
+  if (!baseBuffer) return null;
 
   try {
     const overlay = buildOverlaySvg(plottable, centerLat, centerLng, zoom);

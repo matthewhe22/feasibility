@@ -211,10 +211,24 @@ You MUST:
          Levande, RetireAustralia, IRT, Stockland — NOT the village name)
        - villageName, unitNumber (e.g. "14" or "2/21" — from the listing/address),
          address, suburb, distanceKm
-       - priceType ("sold" or "listing"), price, date (sold or listing date;
-         ISO yyyy-mm-dd, or yyyy-mm when only the month is known)
+       - priceType ("sold" or "listing"), price, date (ISO yyyy-mm-dd, or yyyy-mm
+         when only the month is known). DATE IS REQUIRED — do not leave it null:
+           * SOLD: the settlement/sale date from the sold record.
+           * LISTING: the date it was listed / "first listed" / "on market since"
+             if published. If the page publishes no listing date, use TODAY's date
+             (${todayIsoDate()}) — the listing is current as of this search — and
+             say so in that row's "note" (e.g. "listing date not published; current
+             as at ${todayIsoDate()}").
        - bedrooms, bathrooms, study (true/false), carSpaces
-       - internalSqm (internal/living area in m²) and, for villas/land-lease, landSqm
+       - internalSqm — the internal/living area in m². LOOK FOR IT SPECIFICALLY:
+         listing pages label it "internal area", "living area", "floor area",
+         "approx. area", "m²", "sqm" or "square metres", often in a specifications
+         table, the floor-plan caption, or the body text rather than the headline.
+         The scraped page content supplied below is the FULL page, not a snippet —
+         read it through for these before concluding there is no area. If only a
+         total/land/site area is published, put that in landSqm and leave
+         internalSqm null; never put a land area in internalSqm.
+       - landSqm (for villas / land-lease / any published land or site area)
        - unitType, tenure (licence / loan-lease / leasehold / strata / rental)
        - dmfSummary (deferred management fee terms, e.g. "30% over 5 years, no capital gain share")
        - recurringFee + recurringFeePeriod (general services levy, e.g. 487.06 + "month")
@@ -284,6 +298,17 @@ function buildCompetitorsPrompt(req: RVRequest): string {
     `months where published. Do not limit the list to a few examples or to one unit per`,
     `village — if 20 units are substantiated by the live search results, return all 20,`,
     `not a shorter subset. Most recent first.`,
+    ``,
+    `For EVERY row, work hardest on these two fields — they were coming back empty:`,
+    `  • "date": always populate it. Sold → the sale date. Listing → the published`,
+    `    listing/"first listed" date, or TODAY (${todayIsoDate()}) if the page shows`,
+    `    none, noting that in "note".`,
+    `  • "internalSqm": search each listing page's specifications table, floor-plan`,
+    `    caption and body text for "internal area" / "living area" / "floor area" /`,
+    `    "m²" / "sqm". Only leave it null after actually checking the full page. Put a`,
+    `    land/site area in "landSqm", never in "internalSqm".`,
+    `Open the SPECIFIC unit's own listing page for these — a village summary page`,
+    `usually omits both, while the individual unit page usually publishes them.`,
     ``,
     `Return JSON only, matching this schema:`,
     `{`,
