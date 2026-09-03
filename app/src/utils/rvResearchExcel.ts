@@ -4,17 +4,20 @@
  * competitor villages — into one .xlsx workbook (ExcelJS + FileSaver, same
  * stack as exportToExcel.ts), one sheet each, run for whichever sections have
  * a result. The suburb-pricing sheet also embeds a map image plotting each
- * suburb's real position (from server-side geocoded lat/lng) and its median
- * house price (MHP).
+ * suburb's real position and its median house price (MHP).
  *
- * Why the map is drawn on an offscreen canvas rather than screenshotting the
- * on-screen Leaflet map: Leaflet's OpenStreetMap tile images are loaded
- * cross-origin, and OSM's public tile servers don't send CORS headers — any
- * canvas a tile has been drawn onto is then "tainted" and the browser refuses
- * to read its pixels back (`canvas.toDataURL()` throws), so a screenshot-style
- * capture (html2canvas et al) cannot reliably produce a usable image here. A
- * lightweight canvas we draw ourselves (background + suburb dots + labels, no
- * external images) has no such restriction and always works.
+ * The map image itself is normally the real, server-generated one
+ * (`SuburbsResult.mapImage` — an actual OSM map with tile background, built by
+ * api/_lib/staticMap.ts) — embedded here as-is. `drawSuburbMapPng` below is
+ * only a FALLBACK for when the server couldn't produce one (base-map fetch
+ * failed, or an older cached response predates this field): it draws a plain
+ * schematic (background + suburb dots + labels, no map tiles) on an offscreen
+ * canvas, which is client-side-safe but deliberately not "a real map" — that's
+ * exactly why it's a fallback and not the primary path. (The reason it can't
+ * just screenshot the on-screen Leaflet map instead: Leaflet's OSM tile images
+ * are cross-origin and OSM's public tile servers don't send CORS headers, so
+ * any canvas a tile has been drawn onto is "tainted" and the browser refuses
+ * to read its pixels back — `canvas.toDataURL()` throws.)
  */
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
@@ -193,7 +196,11 @@ function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult) {
   }
   ws.addRow([]);
 
-  const map = drawSuburbMapPng(suburbs);
+  // Prefer the real, server-generated map (actual OSM tile background + our
+  // markers, api/_lib/staticMap.ts) — falls back to the client-drawn schematic
+  // only if the server couldn't produce one (base-map fetch failed, or the
+  // response predates this field).
+  const map = r.mapImage ? { dataUrl: r.mapImage, width: 640, height: 420 } : drawSuburbMapPng(suburbs);
   if (map) {
     const imgId = wb.addImage({ base64: map.dataUrl, extension: 'png' });
     const anchorRow = ws.lastRow ? ws.lastRow.number : ws.rowCount;
