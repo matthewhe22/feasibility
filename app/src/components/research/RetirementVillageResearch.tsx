@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { formatCurrency } from '../../utils';
 import { SuburbMap } from './SuburbMap';
+import { exportRVResearchToExcel } from '../../utils/rvResearchExcel';
 
 /**
  * Retirement Village Property Research.
@@ -15,10 +16,10 @@ import { SuburbMap } from './SuburbMap';
 
 const STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'];
 
-interface ResearchSource { title: string; url: string; snippet?: string }
-interface CotalityNote { used: boolean; url?: string; reason?: string }
+export interface ResearchSource { title: string; url: string; snippet?: string }
+export interface CotalityNote { used: boolean; url?: string; reason?: string }
 
-interface SuburbRow {
+export interface SuburbRow {
   suburb: string;
   state?: string;
   postcode?: string;
@@ -31,7 +32,7 @@ interface SuburbRow {
   lat?: number | null;
   lng?: number | null;
 }
-interface SuburbsResult {
+export interface SuburbsResult {
   village?: { name?: string; suburb?: string; state?: string; postcode?: string };
   suburbs: SuburbRow[];
   averages?: { avgMedianHousePrice?: number | null; avgMedianUnitPrice?: number | null; avgDollarPerSqm?: number | null };
@@ -44,7 +45,7 @@ interface SuburbsResult {
   groundingUsed?: boolean;
 }
 
-interface UnitRow {
+export interface UnitRow {
   /** Owner/operator brand (Keyton, Aveo, Australian Unity…), not the village. */
   operator?: string | null;
   villageName: string;
@@ -72,7 +73,7 @@ interface UnitRow {
   source?: string | null;
   sourceUrl?: string | null;
 }
-interface CompetitorsResult {
+export interface CompetitorsResult {
   subject?: { name?: string; suburb?: string; state?: string; postcode?: string };
   proximityKm?: number;
   units: UnitRow[];
@@ -193,15 +194,36 @@ export function RetirementVillageResearch() {
   const avgMUP = subResult?.averages?.avgMedianUnitPrice ?? avg((subResult?.suburbs ?? []).map(s => s.medianUnitPrice));
   const avgPSM = subResult?.averages?.avgDollarPerSqm ?? avg((subResult?.suburbs ?? []).map(s => s.medianDollarPerSqm));
 
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const canExport = Boolean(subResult || compResult);
+  const runExport = async () => {
+    setExportError(null);
+    setExporting(true);
+    try { await exportRVResearchToExcel(villageName.trim(), subResult, compResult); }
+    catch (e) { setExportError(e instanceof Error ? e.message : 'Export failed.'); }
+    finally { setExporting(false); }
+  };
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="mb-4">
-        <h2 className="text-lg font-bold text-gray-800">Retirement Village Property Research</h2>
-        <p className="text-xs text-gray-500 mt-0.5">
-          Combines the configured AI model (Admin → AI Settings) with Cotality property data (Admin → Cotality Data)
-          to research surrounding-suburb pricing and nearby retirement-village competitors. Figures are indicative —
-          verify against the linked sources before relying on them.
-        </p>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-lg font-bold text-gray-800">Retirement Village Property Research</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Combines the configured AI model (Admin → AI Settings) with Cotality property data (Admin → Cotality Data)
+              to research surrounding-suburb pricing and nearby retirement-village competitors. Figures are indicative —
+              verify against the linked sources before relying on them.
+            </p>
+          </div>
+          <button onClick={runExport} disabled={!canExport || exporting}
+            title={canExport ? 'Export both sections (whichever have run) to one Excel workbook' : 'Run at least one section below first'}
+            className="text-[11px] bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white px-3 py-1.5 rounded font-medium whitespace-nowrap">
+            {exporting ? 'Exporting…' : '⬇ Export to Excel'}
+          </button>
+        </div>
+        {exportError && <p className="text-[11px] text-red-600 mt-1">{exportError}</p>}
         <p className="text-[11px] text-amber-700 mt-1">
           Tip: live results (current villages.com.au / downsizing.com.au listings) need a <strong>Gemini</strong> model
           with web search — DeepSeek has no live search and answers from training data only. Set this in Admin → AI Settings.
