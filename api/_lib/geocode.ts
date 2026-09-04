@@ -27,8 +27,8 @@ const MIN_GAP_MS = 1100;
 const cache = new Map<string, LatLng | null>();
 let lastRequestAt = 0;
 
-function cacheKey(suburb: string, state?: string): string {
-  return `${suburb.trim().toLowerCase()}|${(state ?? '').trim().toLowerCase()}`;
+function cacheKey(suburb: string, state?: string, postcode?: string): string {
+  return `${suburb.trim().toLowerCase()}|${(state ?? '').trim().toLowerCase()}|${(postcode ?? '').trim()}`;
 }
 
 async function throttle(): Promise<void> {
@@ -38,13 +38,15 @@ async function throttle(): Promise<void> {
 }
 
 /** Geocode one Australian suburb to lat/lng. Returns null on any failure or
- *  no match — never throws. Results are cached in-process indefinitely. */
-export async function geocodeAuSuburb(suburb: string, state?: string): Promise<LatLng | null> {
-  const key = cacheKey(suburb, state);
+ *  no match — never throws. Results are cached in-process indefinitely.
+ *  Pass the postcode where known: suburb names repeat across (and within)
+ *  states, and the postcode is what pins the match to the right one. */
+export async function geocodeAuSuburb(suburb: string, state?: string, postcode?: string): Promise<LatLng | null> {
+  const key = cacheKey(suburb, state, postcode);
   if (cache.has(key)) return cache.get(key) ?? null;
 
   await throttle();
-  const q = [suburb, state, 'Australia'].filter(Boolean).join(', ');
+  const q = [suburb, postcode, state, 'Australia'].filter(Boolean).join(', ');
   const url = `${NOMINATIM_URL}?format=jsonv2&limit=1&countrycodes=au&q=${encodeURIComponent(q)}`;
 
   let result: LatLng | null = null;
@@ -69,9 +71,9 @@ export async function geocodeAuSuburb(suburb: string, state?: string): Promise<L
  *  public instance) and return a map keyed the same way callers pass names
  *  in — the caller matches by index, not by this function re-deriving keys. */
 export async function geocodeAuSuburbs(
-  suburbs: Array<{ suburb: string; state?: string }>,
+  suburbs: Array<{ suburb: string; state?: string; postcode?: string }>,
 ): Promise<Array<LatLng | null>> {
   const out: Array<LatLng | null> = [];
-  for (const s of suburbs) out.push(await geocodeAuSuburb(s.suburb, s.state));
+  for (const s of suburbs) out.push(await geocodeAuSuburb(s.suburb, s.state, s.postcode));
   return out;
 }

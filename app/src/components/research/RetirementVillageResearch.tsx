@@ -19,6 +19,16 @@ const STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'];
 export interface ResearchSource { title: string; url: string; snippet?: string }
 export interface CotalityNote { used: boolean; url?: string; reason?: string }
 
+/** Mirror of SuburbMapData in api/_lib/staticMap.ts. */
+export interface SuburbMapData {
+  /** Stitched OSM tiles as a PNG data URL — no text drawn on it server-side. */
+  image: string;
+  markers: Array<{ x: number; y: number; label: string; color: string }>;
+  attribution: string;
+  width: number;
+  height: number;
+}
+
 export interface SuburbRow {
   suburb: string;
   state?: string;
@@ -43,9 +53,11 @@ export interface SuburbsResult {
   timestamp?: string;
   cotality?: CotalityNote;
   groundingUsed?: boolean;
-  /** Real OSM-based map image (server-generated, api/_lib/staticMap.ts), as a
-   *  PNG data URL — null if the base-map fetch or geocoding failed. */
-  mapImage?: string | null;
+  /** Real OSM map (server-generated, api/_lib/staticMap.ts): stitched tiles as
+   *  a PNG data URL plus marker positions. Labels are drawn client-side, where
+   *  real fonts exist — see SuburbMapData in staticMap.ts. Null if the base-map
+   *  fetch or geocoding failed. */
+  map?: SuburbMapData | null;
 }
 
 export interface UnitRow {

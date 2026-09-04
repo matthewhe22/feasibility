@@ -555,13 +555,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // strictly sequential (see geocode.ts) — capped at 8 suburbs to bound
       // added latency to under ~9s; a response typically has far fewer.
       if (body.mode === 'suburbs' && Array.isArray(payload.suburbs)) {
-        const allRows = payload.suburbs as Array<{ suburb?: string; state?: string; medianHousePrice?: number | null }>;
+        const allRows = payload.suburbs as Array<{ suburb?: string; state?: string; postcode?: string; medianHousePrice?: number | null }>;
         const geocodeCap = 8; // bounds added latency; table still shows every row regardless
         const rows = allRows.slice(0, geocodeCap);
         let geocoded = allRows.map(r => ({ ...r, lat: null as number | null, lng: null as number | null }));
         try {
           const coords = await geocodeAuSuburbs(
-            rows.map(r => ({ suburb: String(r.suburb ?? ''), state: r.state })),
+            // Postcode included when known: it disambiguates suburb names that
+            // repeat across (and within) states, which is what put a pin near
+            // Sydney on a Central Coast map.
+            rows.map(r => ({ suburb: String(r.suburb ?? ''), state: r.state, postcode: r.postcode })),
           );
           geocoded = allRows.map((r, idx) => ({
             ...r,
@@ -571,18 +574,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } catch { /* geocoded already defaults every row to lat/lng: null */ }
         payload.suburbs = geocoded;
 
-        // Real map image (actual OSM map background, not a schematic) — built
-        // server-side (see staticMap.ts for why) from the suburbs that
-        // geocoded successfully. Best-effort: null just means no map image in
-        // the response; the Excel export falls back to a schematic in that case.
+        // Real OSM map for the suburbs that geocoded: the stitched tiles as an
+        // image plus the marker positions as data — the client draws the labels
+        // (see staticMap.ts for why text isn't drawn here). Best-effort: null
+        // means the Excel export falls back to its schematic.
         try {
-          payload.mapImage = await buildSuburbMapImage(
+          payload.map = await buildSuburbMapImage(
             geocoded
               .filter((r): r is typeof geocoded[number] & { lat: number; lng: number } => typeof r.lat === 'number' && typeof r.lng === 'number')
               .map(r => ({ suburb: String(r.suburb ?? ''), lat: r.lat, lng: r.lng, medianHousePrice: r.medianHousePrice })),
           );
         } catch {
-          payload.mapImage = null;
+          payload.map = null;
         }
       }
 

@@ -78,45 +78,39 @@ function colorFor(price: number | null | undefined, min: number, max: number): s
   return `hsl(${200 - t * 190}, 75%, 42%)`;
 }
 
-function escapeXml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+/**
+ * Reject geocoding outliers before they set the view.
+ *
+ * These suburbs are all meant to be within ~5-8 km of each other, so a single
+ * bad Nominatim match (a same-named suburb in another state, say) both drops a
+ * pin in the wrong place AND forces `pickZoom` to zoom out far enough to fit
+ * it — wrecking the framing for every other suburb. Anything more than
+ * MAX_SPREAD_KM from the median point is dropped.
+ */
+const MAX_SPREAD_KM = 50;
+
+function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371;
+  const dLat = ((bLat - aLat) * Math.PI) / 180;
+  const dLng = ((bLng - aLng) * Math.PI) / 180;
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
 }
 
-/** Builds the SVG overlay (markers + "Suburb: MHP" labels) positioned by real
- *  Web Mercator projection so it lines up with the fetched base map. */
-function buildOverlaySvg(points: MapPoint[], centerLat: number, centerLng: number, zoom: number): string {
-  const center = mercatorPixel(centerLat, centerLng, zoom);
-  const prices = points.map(p => p.medianHousePrice).filter((p): p is number => typeof p === 'number' && isFinite(p));
-  const minPrice = prices.length ? Math.min(...prices) : 0;
-  const maxPrice = prices.length ? Math.max(...prices) : 0;
+function median(xs: number[]): number {
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? (sorted[mid] as number) : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
+}
 
-  const parts: string[] = [];
-  for (const p of points) {
-    const px = mercatorPixel(p.lat, p.lng, zoom);
-    const x = px.x - center.x + WIDTH / 2;
-    const y = px.y - center.y + HEIGHT / 2;
-    const color = colorFor(p.medianHousePrice, minPrice, maxPrice);
-    const label = `${p.suburb}: ${money(p.medianHousePrice)}`;
-    const textWidth = label.length * 6.2 + 8; // monospace-ish estimate, good enough for a background box
-    const boxX = Math.min(Math.max(x + 10, 4), WIDTH - textWidth - 4);
-
-    parts.push(
-      `<circle cx="${x}" cy="${y}" r="6" fill="${color}" stroke="#1f2937" stroke-width="1.5" />`,
-      `<rect x="${boxX - 3}" y="${y - 9}" width="${textWidth}" height="18" fill="rgba(255,255,255,0.9)" rx="2" />`,
-      `<text x="${boxX}" y="${y + 4}" font-family="Arial, sans-serif" font-size="12" fill="#111827">${escapeXml(label)}</text>`,
-    );
-  }
-
-  // OSM's tile usage / licensing terms require visible attribution wherever the
-  // tiles are displayed — including this image once it's embedded in Excel.
-  const attribution = '© OpenStreetMap contributors';
-  const attrWidth = attribution.length * 5.4 + 8;
-  parts.push(
-    `<rect x="${WIDTH - attrWidth - 4}" y="${HEIGHT - 18}" width="${attrWidth}" height="14" fill="rgba(255,255,255,0.75)" />`,
-    `<text x="${WIDTH - attrWidth}" y="${HEIGHT - 8}" font-family="Arial, sans-serif" font-size="9" fill="#374151">${attribution}</text>`,
-  );
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}">${parts.join('')}</svg>`;
+function rejectOutliers(points: MapPoint[]): MapPoint[] {
+  if (points.length < 3) return points; // too few to tell an outlier from the group
+  const medLat = median(points.map(p => p.lat));
+  const medLng = median(points.map(p => p.lng));
+  const kept = points.filter(p => haversineKm(medLat, medLng, p.lat, p.lng) <= MAX_SPREAD_KM);
+  return kept.length ? kept : points;
 }
 
 async function fetchImage(url: string, timeoutMs = 8000): Promise<Buffer | null> {
@@ -197,13 +191,43 @@ async function fetchStitchedTiles(centerLat: number, centerLng: number, zoom: nu
   }
 }
 
+/** One suburb's marker, already projected to pixel coordinates within the image. */
+export interface SuburbMapMarker {
+  x: number;
+  y: number;
+  label: string;
+  color: string;
+}
+
+/** The map handed to the client: base tiles as an image, markers as data. */
+export interface SuburbMapData {
+  /** Stitched OSM tiles as a PNG data URL — no text drawn on it. */
+  image: string;
+  markers: SuburbMapMarker[];
+  attribution: string;
+  width: number;
+  height: number;
+}
+
 /**
- * Build a real OSM map image for these suburbs and composite the markers +
- * MHP labels onto it. Returns a PNG data URL, or null on any failure
- * (best-effort — the caller falls back to a schematic).
+ * Build a real OSM map for these suburbs: stitched tiles as an image, plus the
+ * marker positions/labels as DATA for the client to draw.
+ *
+ * Labels are deliberately NOT drawn here. `sharp` renders SVG text through
+ * librsvg/fontconfig, which needs system fonts — and serverless runtimes
+ * (Vercel/Lambda) ship none, so every glyph came out as a tofu box □□□ in the
+ * exported map. (It rendered fine in local testing precisely because a dev
+ * machine has fonts, which is what hid the bug.) Rather than bundling a font
+ * and a fontconfig setup that can't be verified outside the deployed runtime,
+ * the client draws the text: it has real browser fonts, and drawing this
+ * base image costs nothing in canvas-tainting terms because it arrives as a
+ * same-origin `data:` URL rather than a cross-origin tile.
+ *
+ * Returns null on any failure (best-effort — the caller falls back to a
+ * schematic).
  */
-export async function buildSuburbMapImage(points: MapPoint[]): Promise<string | null> {
-  const plottable = points.filter(p => isFinite(p.lat) && isFinite(p.lng));
+export async function buildSuburbMapImage(points: MapPoint[]): Promise<SuburbMapData | null> {
+  const plottable = rejectOutliers(points.filter(p => isFinite(p.lat) && isFinite(p.lng)));
   if (plottable.length === 0) return null;
 
   const centerLat = plottable.reduce((s, p) => s + p.lat, 0) / plottable.length;
@@ -221,14 +245,33 @@ export async function buildSuburbMapImage(points: MapPoint[]): Promise<string | 
   if (!baseBuffer) return null;
 
   try {
-    const overlay = buildOverlaySvg(plottable, centerLat, centerLng, zoom);
-    const composed = await sharp(baseBuffer)
-      .resize(WIDTH, HEIGHT, { fit: 'cover' })
-      .composite([{ input: Buffer.from(overlay) }])
-      .png()
-      .toBuffer();
-    return `data:image/png;base64,${composed.toString('base64')}`;
+    const png = await sharp(baseBuffer).resize(WIDTH, HEIGHT, { fit: 'cover' }).png().toBuffer();
+
+    const center = mercatorPixel(centerLat, centerLng, zoom);
+    const prices = plottable.map(p => p.medianHousePrice).filter((p): p is number => typeof p === 'number' && isFinite(p));
+    const minPrice = prices.length ? Math.min(...prices) : 0;
+    const maxPrice = prices.length ? Math.max(...prices) : 0;
+
+    const markers: SuburbMapMarker[] = plottable.map(p => {
+      const px = mercatorPixel(p.lat, p.lng, zoom);
+      return {
+        x: px.x - center.x + WIDTH / 2,
+        y: px.y - center.y + HEIGHT / 2,
+        label: `${p.suburb}: ${money(p.medianHousePrice)}`,
+        color: colorFor(p.medianHousePrice, minPrice, maxPrice),
+      };
+    });
+
+    return {
+      image: `data:image/png;base64,${png.toString('base64')}`,
+      markers,
+      // OSM's tile licence requires visible attribution wherever the tiles are
+      // shown — the client draws this onto the image.
+      attribution: '© OpenStreetMap contributors',
+      width: WIDTH,
+      height: HEIGHT,
+    };
   } catch {
-    return null; // malformed base image or compositing failure
+    return null; // malformed base image or processing failure
   }
 }
