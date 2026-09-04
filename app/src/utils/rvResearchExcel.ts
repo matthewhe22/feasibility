@@ -25,7 +25,16 @@
  */
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
+import { toNum } from '../components/research/RetirementVillageResearch';
 import type { SuburbsResult, CompetitorsResult, SuburbRow, UnitRow, ResearchSource, SuburbMapData } from '../components/research/RetirementVillageResearch';
+
+/** Price per internal m² — only when both figures are real; never estimated. */
+function dollarsPerSqmValue(u: UnitRow): number | null {
+  const price = toNum(u.price);
+  const areaSqm = toNum(u.internalSqm);
+  if (price === null || price <= 0 || areaSqm === null || areaSqm <= 0) return null;
+  return Math.round(price / areaSqm);
+}
 
 const CURRENCY_FMT = '_("$"* #,##0_);_("$"* (#,##0);_("$"* "-"_);_(@_)';
 
@@ -282,7 +291,9 @@ async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult) {
   sourcesRows(ws, r.sources ?? [], SUBURB_SPAN);
 }
 
-const UNIT_SPAN = 18;
+/** Column count of the unit table below — the width the title/meta rows merge
+ *  across, so they span the whole table rather than stopping short of it. */
+const UNIT_SPAN = 23;
 
 function buildCompetitorsSheet(wb: ExcelJS.Workbook, r: CompetitorsResult) {
   const ws = wb.addWorksheet('Competitor Villages', { properties: { tabColor: { argb: 'FF' + HEADER_FILL } } });
@@ -305,20 +316,26 @@ function buildCompetitorsSheet(wb: ExcelJS.Workbook, r: CompetitorsResult) {
     { label: 'Unit', get: u => u.unitNumber },
     { label: 'Address', get: u => u.address },
     { label: 'Suburb', get: u => u.suburb },
-    { label: 'Dist (km)', get: u => u.distanceKm },
+    // Numeric fields go through toNum so a model-returned string ("85", "85 m²")
+    // lands in the sheet as a real number rather than a text cell or a blank.
+    { label: 'Dist (km)', get: u => toNum(u.distanceKm) },
     { label: 'Sold/Listing', get: u => u.priceType },
-    { label: 'Price', get: u => u.price, numFmt: CURRENCY_FMT },
+    { label: 'Price', get: u => toNum(u.price), numFmt: CURRENCY_FMT },
     { label: 'Date', get: u => u.date },
-    { label: 'Beds', get: u => u.bedrooms },
-    { label: 'Baths', get: u => u.bathrooms },
+    { label: 'Beds', get: u => toNum(u.bedrooms) },
+    { label: 'Baths', get: u => toNum(u.bathrooms) },
     { label: 'Study', get: u => (u.study == null ? null : u.study ? 'Yes' : 'No') },
-    { label: 'Car', get: u => u.carSpaces },
-    { label: 'Internal m²', get: u => u.internalSqm },
-    { label: 'Land m²', get: u => u.landSqm },
+    { label: 'Car', get: u => toNum(u.carSpaces) },
+    { label: 'Internal m²', get: u => toNum(u.internalSqm) },
+    { label: 'Land m²', get: u => toNum(u.landSqm) },
+    { label: '$/m²', get: u => dollarsPerSqmValue(u), numFmt: CURRENCY_FMT },
     { label: 'Type', get: u => u.unitType },
     { label: 'Tenure', get: u => u.tenure },
     { label: 'DMF', get: u => u.dmfSummary },
-    { label: 'Levy', get: u => (u.recurringFee != null ? `${u.recurringFee}${u.recurringFeePeriod ? '/' + u.recurringFeePeriod : ''}` : null) },
+    { label: 'Levy', get: u => {
+      const fee = toNum(u.recurringFee);
+      return fee === null ? null : `${fee}${u.recurringFeePeriod ? '/' + u.recurringFeePeriod : ''}`;
+    } },
     { label: 'Note', get: u => u.note },
     { label: 'Source', get: u => u.source },
     { label: 'Source URL', get: u => u.sourceUrl },

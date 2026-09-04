@@ -16,6 +16,7 @@ import { runAIResearch, mergeSources, AIResearchError, type AIResearchSource } f
 import { researchCacheKey, getCachedResearch, setCachedResearch } from '../_lib/researchCache';
 import { geocodeAuSuburbs } from '../_lib/geocode';
 import { buildSuburbMapImage } from '../_lib/staticMap';
+import { normalizeUnitRows, normalizeSuburbRows } from '../_lib/normalizeUnits';
 
 /**
  * POST /api/research/retirement-village
@@ -543,6 +544,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         timestamp: new Date().toISOString(),
       };
       if (i > 0) payload.failoverNote = `Primary provider (${resolved.chain[0].provider}) was rate-limited; served by ${p.provider} instead.`;
+
+      // Coerce numeric fields before anything downstream reads them. Models
+      // often return numbers as strings, with the unit attached ("85 m²",
+      // "approx. 85 sqm", "$1.15M"); the UI and the export both test
+      // `typeof x === 'number'`, so those were silently rendering as em dashes
+      // — which is why internal area and $/m² came back empty even when the
+      // figure had been found. See normalizeUnits.ts.
+      if (Array.isArray(payload.units)) payload.units = normalizeUnitRows(payload.units);
+      if (Array.isArray(payload.suburbs)) payload.suburbs = normalizeSuburbRows(payload.suburbs);
 
       // Attach real coordinates for the surrounding-suburb map. Geocoding is
       // deterministic and free (OpenStreetMap Nominatim), so it's done here
