@@ -26,6 +26,7 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { toNum } from '../components/research/RetirementVillageResearch';
+import { summariseByTypology } from './typologySummary';
 import type { SuburbsResult, CompetitorsResult, SuburbRow, UnitRow, ResearchSource, SuburbMapData } from '../components/research/RetirementVillageResearch';
 
 /** Price per internal m² — only when both figures are real; never estimated. */
@@ -309,6 +310,35 @@ function buildCompetitorsSheet(wb: ExcelJS.Workbook, r: CompetitorsResult) {
   metaRow(ws, 'Live web search', r.groundingUsed ? 'Yes' : 'No — figures may be from training data', UNIT_SPAN);
   metaRow(ws, 'Summary', r.summary || '', UNIT_SPAN);
   ws.addRow([]);
+
+  // Typology summary above the unit list — the comparison that drives a
+  // feasibility, rather than any single sale. Mirrors the on-screen table.
+  const typologies = summariseByTypology(r.units ?? []);
+  if (typologies.length) {
+    const secHdr = ws.addRow(['Summary by typology']);
+    ws.mergeCells(secHdr.number, 1, secHdr.number, 6);
+    style(secHdr.getCell(1), { fill: SUBHEADER_FILL, fontColor: WHITE, bold: true, size: 10 });
+
+    const tHdr = ws.addRow(['Typology', 'Units', 'Avg price', 'Priced from', 'Avg m²', 'Avg $/m²']);
+    tHdr.eachCell(cell => style(cell, { fill: HEADER_FILL, fontColor: WHITE, bold: true, size: 9 }));
+
+    for (const t of typologies) {
+      const row = ws.addRow([t.label, t.count, t.avgPrice, t.pricedCount, t.avgInternalSqm, t.avgDollarPerSqm]);
+      row.eachCell((cell, colNum) => {
+        const isMoney = colNum === 3 || colNum === 6;
+        style(cell, {
+          size: 9,
+          numFmt: isMoney ? CURRENCY_FMT : undefined,
+          hAlign: colNum === 1 ? 'left' : 'right',
+        });
+      });
+    }
+    style(
+      ws.addRow(['Averages exclude units with no published price or internal area; "Priced from" is how many units the price average came from.']).getCell(1),
+      { italic: true, size: 8, fontColor: '6B7280' },
+    );
+    ws.addRow([]);
+  }
 
   const columns: Array<{ label: string; get: (u: UnitRow) => string | number | boolean | null | undefined; numFmt?: string }> = [
     { label: 'Operator', get: u => u.operator },

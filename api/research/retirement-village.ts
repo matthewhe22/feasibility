@@ -17,6 +17,7 @@ import { researchCacheKey, getCachedResearch, setCachedResearch } from '../_lib/
 import { geocodeAuSuburbs } from '../_lib/geocode';
 import { buildSuburbMapImage } from '../_lib/staticMap';
 import { normalizeUnitRows, normalizeSuburbRows } from '../_lib/normalizeUnits';
+import { enrichUnitsFromListingPages } from '../_lib/enrichUnits';
 
 /**
  * POST /api/research/retirement-village
@@ -213,13 +214,15 @@ You MUST:
        - villageName, unitNumber (e.g. "14" or "2/21" — from the listing/address),
          address, suburb, distanceKm
        - priceType ("sold" or "listing"), price, date (ISO yyyy-mm-dd, or yyyy-mm
-         when only the month is known). DATE IS REQUIRED — do not leave it null:
+         when only the month is known). "date" is the REAL published date of that
+         record, and nothing else:
            * SOLD: the settlement/sale date from the sold record.
-           * LISTING: the date it was listed / "first listed" / "on market since"
-             if published. If the page publishes no listing date, use TODAY's date
-             (${todayIsoDate()}) — the listing is current as of this search — and
-             say so in that row's "note" (e.g. "listing date not published; current
-             as at ${todayIsoDate()}").
+           * LISTING: the date it was listed / "first listed" / "on market since".
+         NEVER substitute today's date, the date you searched, or any other
+         stand-in — a reader compares these dates to judge how current the
+         evidence is, and a search date masquerading as a listing date destroys
+         that. If the page publishes no date, set date to null and note
+         "listing date not published" in that row's "note".
        - bedrooms, bathrooms, study (true/false), carSpaces
        - internalSqm — the internal/living area in m². LOOK FOR IT SPECIFICALLY:
          listing pages label it "internal area", "living area", "floor area",
@@ -301,9 +304,10 @@ function buildCompetitorsPrompt(req: RVRequest): string {
     `not a shorter subset. Most recent first.`,
     ``,
     `For EVERY row, work hardest on these two fields — they were coming back empty:`,
-    `  • "date": always populate it. Sold → the sale date. Listing → the published`,
-    `    listing/"first listed" date, or TODAY (${todayIsoDate()}) if the page shows`,
-    `    none, noting that in "note".`,
+    `  • "date": the record's REAL published date. Sold → the sale date. Listing →`,
+    `    the published listing / "first listed" date. Never substitute today's date`,
+    `    or the search date; if the page publishes none, use null and say so in`,
+    `    "note".`,
     `  • "internalSqm": search each listing page's specifications table, floor-plan`,
     `    caption and body text for "internal area" / "living area" / "floor area" /`,
     `    "m²" / "sqm". Only leave it null after actually checking the full page. Put a`,
@@ -553,6 +557,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // figure had been found. See normalizeUnits.ts.
       if (Array.isArray(payload.units)) payload.units = normalizeUnitRows(payload.units);
       if (Array.isArray(payload.suburbs)) payload.suburbs = normalizeSuburbRows(payload.suburbs);
+
+      // Internal area (and often the listing date) lives on a unit's OWN
+      // listing page, not on the per-suburb directory page our searches rank
+      // for — so no prompt could extract it, the page had to be fetched. Now
+      // that the model has told us each unit's sourceUrl, read the missing
+      // fields off those pages. Bounded + best-effort; see enrichUnits.ts.
+      if (Array.isArray(payload.units)) {
+        payload.units = normalizeUnitRows(
+          await enrichUnitsFromListingPages(payload.units, groundingConfig?.firecrawl ?? null, p),
+        );
+      }
 
       // Attach real coordinates for the surrounding-suburb map. Geocoding is
       // deterministic and free (OpenStreetMap Nominatim), so it's done here
