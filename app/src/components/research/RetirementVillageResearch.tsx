@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { formatCurrency } from '../../utils';
 import { SuburbMap } from './SuburbMap';
 import { exportRVResearchToExcel } from '../../utils/rvResearchExcel';
+import { summariseByTypology } from '../../utils/typologySummary';
 
 /**
  * Retirement Village Property Research.
@@ -114,6 +115,18 @@ export const toNum = (v: unknown): number | null => {
   const m = /-?\d+(?:\.\d+)?/.exec(v.replace(/,/g, ''));
   const n = m ? Number(m[0]) : NaN;
   return isFinite(n) ? n : null;
+};
+
+/** Companion to toNum for `study`: the model returns "Yes"/"No" as often as a
+ *  boolean, and an uncoerced string is neither true nor false — which silently
+ *  splits one typology into two groups. */
+export const toBool = (v: unknown): boolean | null => {
+  if (typeof v === 'boolean') return v;
+  if (typeof v !== 'string') return null;
+  const s = v.trim().toLowerCase();
+  if (['yes', 'y', 'true', '1'].includes(s)) return true;
+  if (['no', 'n', 'false', '0'].includes(s)) return false;
+  return null;
 };
 
 const money = (v?: unknown) => {
@@ -364,6 +377,7 @@ export function RetirementVillageResearch() {
           <div>
             <Meta result={compResult} />
             <p className="text-[11px] text-gray-700 mb-2">{compResult.summary}</p>
+            <TypologySummary units={compResult.units ?? []} />
             <div className="overflow-x-auto">
               <table className="w-full text-xs border-collapse">
                 <thead>
@@ -473,6 +487,62 @@ function Badge({ type }: { type: 'sold' | 'listing' }) {
     <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
       type === 'sold' ? 'bg-green-50 border-green-300 text-green-800' : 'bg-blue-50 border-blue-300 text-blue-800'
     }`}>{type === 'sold' ? 'Sold' : 'Listing'}</span>
+  );
+}
+
+/**
+ * Average price and $/m² per typology (beds / baths / study), above the unit
+ * list — the comparison that drives a feasibility, rather than any single sale.
+ * Each average shows the number of units behind it, so a one-unit "average"
+ * can't be read as a market rate.
+ */
+function TypologySummary({ units }: { units: UnitRow[] }) {
+  const rows = summariseByTypology(units);
+  if (rows.length === 0) return null;
+  return (
+    <div className="mb-3 border border-gray-200 rounded overflow-hidden">
+      <div className="px-2 py-1.5 bg-gray-100 border-b border-gray-200">
+        <h4 className="text-[11px] font-bold text-gray-700">Summary by typology</h4>
+        <p className="text-[10px] text-gray-500">
+          Average price and $/m² per bed / bath / study combination. Averages ignore units with no
+          published price or internal area — the count beside each shows how many they came from.
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="bg-gray-50 text-left">
+              <Th>Typology</Th>
+              <Th className="text-right">Units</Th>
+              <Th className="text-right">Avg price</Th>
+              <Th className="text-right">Avg m²</Th>
+              <Th className="text-right">Avg $/m²</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} className="border-b border-gray-100">
+                <Td className="font-medium">{r.label}</Td>
+                <Td className="text-right">{r.count}</Td>
+                <Td className="text-right font-mono">
+                  {money(r.avgPrice)}
+                  {r.avgPrice !== null && r.pricedCount < r.count && (
+                    <span className="block text-[10px] text-gray-400">from {r.pricedCount}</span>
+                  )}
+                </Td>
+                <Td className="text-right font-mono">{num(r.avgInternalSqm)}</Td>
+                <Td className="text-right font-mono">
+                  {money(r.avgDollarPerSqm)}
+                  {r.avgDollarPerSqm !== null && r.sqmCount < r.count && (
+                    <span className="block text-[10px] text-gray-400">from {r.sqmCount}</span>
+                  )}
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

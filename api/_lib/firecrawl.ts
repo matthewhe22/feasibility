@@ -295,6 +295,49 @@ export async function firecrawlSearch(
   throw lastError ?? new FirecrawlError('Firecrawl request failed.');
 }
 
+/**
+ * Scrape ONE known URL to markdown (Firecrawl's /scrape endpoint, as opposed to
+ * /search).
+ *
+ * Search only ever surfaces the pages a query ranks for — for retirement
+ * villages that's the aggregator's per-suburb DIRECTORY page, which carries a
+ * village's headline price/beds/baths but not a unit's internal area. The
+ * individual unit listing page does. So once the model has told us a unit's
+ * `sourceUrl`, this fetches that specific page to read the specs off it.
+ *
+ * Best-effort: returns null on any failure rather than throwing, so an
+ * enrichment pass can never break the research request it's improving.
+ * `maxAge: 0` for the same reason as in search — avoid Firecrawl serving a
+ * stale cached copy of the page.
+ */
+export async function firecrawlScrapeUrl(
+  s: Pick<StoredFirecrawlSettings, 'apiKey' | 'apiBaseUrl'>,
+  targetUrl: string,
+  timeoutMs = 15000,
+): Promise<string | null> {
+  const base = normaliseBaseUrl(s.apiBaseUrl);
+  // Try v2 then v1 — the account's API version isn't known here, and a 404 on
+  // one path just means the other version is the live one.
+  for (const path of ['/v2/scrape', '/v1/scrape']) {
+    try {
+      const resp = await fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s.apiKey}` },
+        body: JSON.stringify({ url: targetUrl, formats: ['markdown'], maxAge: 0 }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (resp.status === 404) continue; // wrong API version — try the sibling
+      if (!resp.ok) return null;
+      const json = (await resp.json().catch(() => ({}))) as { data?: { markdown?: unknown } };
+      const markdown = json?.data?.markdown;
+      return typeof markdown === 'string' && markdown.trim() ? markdown : null;
+    } catch {
+      return null; // network error / timeout
+    }
+  }
+  return null;
+}
+
 export interface FirecrawlContext {
   /** Prompt-ready grounding block built from the search results. */
   promptBlock: string;
