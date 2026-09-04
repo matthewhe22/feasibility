@@ -19,6 +19,16 @@ const STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'];
 export interface ResearchSource { title: string; url: string; snippet?: string }
 export interface CotalityNote { used: boolean; url?: string; reason?: string }
 
+/** Mirror of SuburbMapData in api/_lib/staticMap.ts. */
+export interface SuburbMapData {
+  /** Stitched OSM tiles as a PNG data URL — no text drawn on it server-side. */
+  image: string;
+  markers: Array<{ x: number; y: number; label: string; color: string }>;
+  attribution: string;
+  width: number;
+  height: number;
+}
+
 export interface SuburbRow {
   suburb: string;
   state?: string;
@@ -43,9 +53,11 @@ export interface SuburbsResult {
   timestamp?: string;
   cotality?: CotalityNote;
   groundingUsed?: boolean;
-  /** Real OSM-based map image (server-generated, api/_lib/staticMap.ts), as a
-   *  PNG data URL — null if the base-map fetch or geocoding failed. */
-  mapImage?: string | null;
+  /** Real OSM map (server-generated, api/_lib/staticMap.ts): stitched tiles as
+   *  a PNG data URL plus marker positions. Labels are drawn client-side, where
+   *  real fonts exist — see SuburbMapData in staticMap.ts. Null if the base-map
+   *  fetch or geocoding failed. */
+  map?: SuburbMapData | null;
 }
 
 export interface UnitRow {
@@ -89,8 +101,29 @@ export interface CompetitorsResult {
   groundingUsed?: boolean;
 }
 
-const money = (v?: number | null) => (typeof v === 'number' && isFinite(v) ? formatCurrency(v) : '—');
-const num = (v?: number | null) => (typeof v === 'number' && isFinite(v) ? String(v) : '—');
+/**
+ * Numeric fields are normalised server-side (api/_lib/normalizeUnits.ts), but
+ * every read goes through this anyway: responses cached before that landed —
+ * and any field the model returns in an unexpected shape — still carry strings
+ * like "85" or "85 m²", and a bare `typeof x === 'number'` test drops them
+ * silently, which is what emptied the internal-area and $/m² columns.
+ */
+export const toNum = (v: unknown): number | null => {
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  if (typeof v !== 'string') return null;
+  const m = /-?\d+(?:\.\d+)?/.exec(v.replace(/,/g, ''));
+  const n = m ? Number(m[0]) : NaN;
+  return isFinite(n) ? n : null;
+};
+
+const money = (v?: unknown) => {
+  const n = toNum(v);
+  return n === null ? '—' : formatCurrency(n);
+};
+const num = (v?: unknown) => {
+  const n = toNum(v);
+  return n === null ? '—' : String(n);
+};
 const avg = (xs: Array<number | null | undefined>) => {
   const v = xs.filter((x): x is number => typeof x === 'number' && isFinite(x));
   return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null;
@@ -98,8 +131,8 @@ const avg = (xs: Array<number | null | undefined>) => {
 
 /** Area cell: internal m², with land m² beneath it for villas / land-lease. */
 function area(u: UnitRow): React.ReactNode {
-  const internal = typeof u.internalSqm === 'number' && isFinite(u.internalSqm) ? u.internalSqm : null;
-  const land = typeof u.landSqm === 'number' && isFinite(u.landSqm) ? u.landSqm : null;
+  const internal = toNum(u.internalSqm);
+  const land = toNum(u.landSqm);
   if (internal == null && land == null) return '—';
   return (
     <>
@@ -112,10 +145,9 @@ function area(u: UnitRow): React.ReactNode {
 /** Price per internal m² — the comparison that makes units of different sizes
  *  comparable. Only shown when both figures are real; never estimated. */
 function dollarsPerSqm(u: UnitRow): string {
-  const p = u.price;
-  const a = u.internalSqm;
-  if (typeof p !== 'number' || !isFinite(p) || p <= 0) return '—';
-  if (typeof a !== 'number' || !isFinite(a) || a <= 0) return '—';
+  const p = toNum(u.price);
+  const a = toNum(u.internalSqm);
+  if (p === null || p <= 0 || a === null || a <= 0) return '—';
   return formatCurrency(Math.round(p / a));
 }
 

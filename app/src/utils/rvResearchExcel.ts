@@ -6,22 +6,35 @@
  * a result. The suburb-pricing sheet also embeds a map image plotting each
  * suburb's real position and its median house price (MHP).
  *
- * The map image itself is normally the real, server-generated one
- * (`SuburbsResult.mapImage` — an actual OSM map with tile background, built by
- * api/_lib/staticMap.ts) — embedded here as-is. `drawSuburbMapPng` below is
- * only a FALLBACK for when the server couldn't produce one (base-map fetch
- * failed, or an older cached response predates this field): it draws a plain
- * schematic (background + suburb dots + labels, no map tiles) on an offscreen
- * canvas, which is client-side-safe but deliberately not "a real map" — that's
- * exactly why it's a fallback and not the primary path. (The reason it can't
- * just screenshot the on-screen Leaflet map instead: Leaflet's OSM tile images
- * are cross-origin and OSM's public tile servers don't send CORS headers, so
- * any canvas a tile has been drawn onto is "tainted" and the browser refuses
- * to read its pixels back — `canvas.toDataURL()` throws.)
+ * The map is a two-part job, split where each side is actually capable:
+ *   - the SERVER (api/_lib/staticMap.ts) stitches the real OSM tiles and
+ *     projects each suburb to pixel coordinates, returning both as
+ *     `SuburbsResult.map`;
+ *   - this file draws the marker dots, "Suburb: MHP" labels and the OSM
+ *     attribution onto that base image (`composeMapPng`), because TEXT is the
+ *     one part the server can't do — serverless runtimes ship no system fonts,
+ *     so server-rendered SVG text came out as tofu boxes □□□ in the export.
+ * Drawing the server's image here is canvas-safe: it arrives as a `data:` URL,
+ * so it doesn't taint the canvas the way a cross-origin tile would (which is
+ * why screenshotting the on-screen Leaflet map was never an option —
+ * `canvas.toDataURL()` throws once a cross-origin tile is drawn onto it).
+ *
+ * `drawSuburbMapPng` remains a last-resort FALLBACK for when the server
+ * returned no map at all (tile fetch failed, or an older cached response
+ * predates the field): a plain schematic with no map tiles.
  */
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-import type { SuburbsResult, CompetitorsResult, SuburbRow, UnitRow, ResearchSource } from '../components/research/RetirementVillageResearch';
+import { toNum } from '../components/research/RetirementVillageResearch';
+import type { SuburbsResult, CompetitorsResult, SuburbRow, UnitRow, ResearchSource, SuburbMapData } from '../components/research/RetirementVillageResearch';
+
+/** Price per internal m² — only when both figures are real; never estimated. */
+function dollarsPerSqmValue(u: UnitRow): number | null {
+  const price = toNum(u.price);
+  const areaSqm = toNum(u.internalSqm);
+  if (price === null || price <= 0 || areaSqm === null || areaSqm <= 0) return null;
+  return Math.round(price / areaSqm);
+}
 
 const CURRENCY_FMT = '_("$"* #,##0_);_("$"* (#,##0);_("$"* "-"_);_(@_)';
 
@@ -73,6 +86,69 @@ function sourcesRows(ws: ExcelJS.Worksheet, sources: ResearchSource[], span: num
     style(r.getCell(2), { size: 9, fontColor: '2563EB' });
     r.getCell(2).value = { text: s.url, hyperlink: s.url };
   }
+}
+
+/** Loads a data-URL image. Rejects rather than hanging if it can't decode. */
+function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('map image failed to decode'));
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * Draws the server's stitched OSM base map, then the marker dots, their
+ * "Suburb: MHP" labels and the OSM attribution on top — the text half of the
+ * map, done here because the browser has fonts and the serverless runtime
+ * doesn't. Returns a PNG data URL, or null if the base image can't be drawn.
+ */
+async function composeMapPng(map: SuburbMapData): Promise<{ dataUrl: string; width: number; height: number } | null> {
+  const { width, height } = map;
+  let base: HTMLImageElement;
+  try {
+    base = await loadImage(map.image);
+  } catch {
+    return null;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  ctx.drawImage(base, 0, 0, width, height);
+
+  ctx.font = '12px Arial, sans-serif';
+  ctx.textBaseline = 'middle';
+  for (const m of map.markers) {
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, 6, 0, Math.PI * 2);
+    ctx.fillStyle = m.color;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#1f2937';
+    ctx.stroke();
+
+    const textWidth = ctx.measureText(m.label).width;
+    const boxX = Math.min(Math.max(m.x + 10, 4), width - textWidth - 8);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fillRect(boxX - 3, m.y - 9, textWidth + 6, 18);
+    ctx.fillStyle = '#111827';
+    ctx.fillText(m.label, boxX, m.y);
+  }
+
+  // OSM tile licence requires this to stay visible on the image.
+  ctx.font = '9px Arial, sans-serif';
+  const attrWidth = ctx.measureText(map.attribution).width;
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.fillRect(width - attrWidth - 8, height - 16, attrWidth + 6, 14);
+  ctx.fillStyle = '#374151';
+  ctx.fillText(map.attribution, width - attrWidth - 5, height - 9);
+
+  return { dataUrl: canvas.toDataURL('image/png'), width, height };
 }
 
 /** Draws a self-contained (no external images) map on an offscreen canvas:
@@ -160,7 +236,7 @@ function drawSuburbMapPng(suburbs: SuburbRow[]): { dataUrl: string; width: numbe
 
 const SUBURB_SPAN = 9; // Suburb, State, Postcode, Median House, Median Unit, $/m², Dist, As of, (Lat/Lng dropped from view)
 
-function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult) {
+async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult) {
   const ws = wb.addWorksheet('Suburb Pricing', { properties: { tabColor: { argb: 'FF' + HEADER_FILL } } });
   ws.getColumn(1).width = 20;
   for (let c = 2; c <= SUBURB_SPAN; c++) ws.getColumn(c).width = 16;
@@ -196,11 +272,10 @@ function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult) {
   }
   ws.addRow([]);
 
-  // Prefer the real, server-generated map (actual OSM tile background + our
-  // markers, api/_lib/staticMap.ts) — falls back to the client-drawn schematic
-  // only if the server couldn't produce one (base-map fetch failed, or the
-  // response predates this field).
-  const map = r.mapImage ? { dataUrl: r.mapImage, width: 640, height: 420 } : drawSuburbMapPng(suburbs);
+  // Prefer the real map: the server's stitched OSM tiles with the labels drawn
+  // on here. Falls back to the client-drawn schematic only when the server
+  // returned no map (tile fetch failed, or the response predates the field).
+  const map = (r.map ? await composeMapPng(r.map) : null) ?? drawSuburbMapPng(suburbs);
   if (map) {
     const imgId = wb.addImage({ base64: map.dataUrl, extension: 'png' });
     const anchorRow = ws.lastRow ? ws.lastRow.number : ws.rowCount;
@@ -216,7 +291,9 @@ function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult) {
   sourcesRows(ws, r.sources ?? [], SUBURB_SPAN);
 }
 
-const UNIT_SPAN = 18;
+/** Column count of the unit table below — the width the title/meta rows merge
+ *  across, so they span the whole table rather than stopping short of it. */
+const UNIT_SPAN = 23;
 
 function buildCompetitorsSheet(wb: ExcelJS.Workbook, r: CompetitorsResult) {
   const ws = wb.addWorksheet('Competitor Villages', { properties: { tabColor: { argb: 'FF' + HEADER_FILL } } });
@@ -239,20 +316,26 @@ function buildCompetitorsSheet(wb: ExcelJS.Workbook, r: CompetitorsResult) {
     { label: 'Unit', get: u => u.unitNumber },
     { label: 'Address', get: u => u.address },
     { label: 'Suburb', get: u => u.suburb },
-    { label: 'Dist (km)', get: u => u.distanceKm },
+    // Numeric fields go through toNum so a model-returned string ("85", "85 m²")
+    // lands in the sheet as a real number rather than a text cell or a blank.
+    { label: 'Dist (km)', get: u => toNum(u.distanceKm) },
     { label: 'Sold/Listing', get: u => u.priceType },
-    { label: 'Price', get: u => u.price, numFmt: CURRENCY_FMT },
+    { label: 'Price', get: u => toNum(u.price), numFmt: CURRENCY_FMT },
     { label: 'Date', get: u => u.date },
-    { label: 'Beds', get: u => u.bedrooms },
-    { label: 'Baths', get: u => u.bathrooms },
+    { label: 'Beds', get: u => toNum(u.bedrooms) },
+    { label: 'Baths', get: u => toNum(u.bathrooms) },
     { label: 'Study', get: u => (u.study == null ? null : u.study ? 'Yes' : 'No') },
-    { label: 'Car', get: u => u.carSpaces },
-    { label: 'Internal m²', get: u => u.internalSqm },
-    { label: 'Land m²', get: u => u.landSqm },
+    { label: 'Car', get: u => toNum(u.carSpaces) },
+    { label: 'Internal m²', get: u => toNum(u.internalSqm) },
+    { label: 'Land m²', get: u => toNum(u.landSqm) },
+    { label: '$/m²', get: u => dollarsPerSqmValue(u), numFmt: CURRENCY_FMT },
     { label: 'Type', get: u => u.unitType },
     { label: 'Tenure', get: u => u.tenure },
     { label: 'DMF', get: u => u.dmfSummary },
-    { label: 'Levy', get: u => (u.recurringFee != null ? `${u.recurringFee}${u.recurringFeePeriod ? '/' + u.recurringFeePeriod : ''}` : null) },
+    { label: 'Levy', get: u => {
+      const fee = toNum(u.recurringFee);
+      return fee === null ? null : `${fee}${u.recurringFeePeriod ? '/' + u.recurringFeePeriod : ''}`;
+    } },
     { label: 'Note', get: u => u.note },
     { label: 'Source', get: u => u.source },
     { label: 'Source URL', get: u => u.sourceUrl },
@@ -302,7 +385,7 @@ export async function exportRVResearchToExcel(
   wb.created = new Date();
   wb.modified = new Date();
 
-  if (suburbsResult) buildSuburbsSheet(wb, suburbsResult);
+  if (suburbsResult) await buildSuburbsSheet(wb, suburbsResult);
   if (competitorsResult) buildCompetitorsSheet(wb, competitorsResult);
 
   const buffer = await wb.xlsx.writeBuffer();
