@@ -1,12 +1,18 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin } from '../_lib/auth';
 import { getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
+import { handleKeepAlive } from '../_lib/keepAlive';
 
 /**
  * GET /api/admin/stats
  * Returns high-level statistics about the stored projects.
+ *
+ * Also serves the Supabase keep-alive cron (`/api/cron/keep-alive` is
+ * rewritten here with `?keepalive=1`); that branch skips admin auth and
+ * checks CRON_SECRET instead.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.query.keepalive !== undefined) return handleKeepAlive(req, res);
   if (!requireAdmin(req, res)) return;
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
