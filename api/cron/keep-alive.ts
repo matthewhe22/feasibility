@@ -5,7 +5,7 @@ import { describeCause, getAdminSupabase, isSupabaseConfigured } from '../_lib/s
  * GET /api/cron/keep-alive
  *
  * Supabase free-tier projects are paused after a stretch of no database
- * activity. Vercel Cron (see `crons` in vercel.json) calls this once a day and
+ * activity. Vercel Cron (see `crons` in vercel.json) calls this every 3 days and
  * it runs a tiny read against the `projects` table, which counts as activity
  * and keeps the project awake.
  *
