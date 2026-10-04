@@ -3,6 +3,15 @@
   "outputDirectory": "app/dist",
   "installCommand": "npm install && cd app && npm install",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/keep-alive",
+      "schedule": "0 18 * * *"
+    }
   ]
 }
