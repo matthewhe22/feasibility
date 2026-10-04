@@ -4,6 +4,10 @@
   "installCommand": "npm install && cd app && npm install",
   "rewrites": [
     {
+      "source": "/api/cron/keep-alive",
+      "destination": "/api/admin/stats?keepalive=1"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

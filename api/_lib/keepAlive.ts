@@ -1,8 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { describeCause, getAdminSupabase, isSupabaseConfigured } from '../_lib/supabase';
+import { describeCause, getAdminSupabase, isSupabaseConfigured } from './supabase';
 
 /**
  * GET /api/cron/keep-alive
+ *
+ * Not a standalone function: the Vercel Hobby plan caps a deployment at 12
+ * serverless functions, so vercel.json rewrites this path to
+ * `/api/admin/stats?keepalive=1` and that handler delegates here.
  *
  * Supabase free-tier projects are paused after a stretch of no database
  * activity. Vercel Cron (see `crons` in vercel.json) calls this every 3 days and
@@ -14,7 +18,7 @@ import { describeCause, getAdminSupabase, isSupabaseConfigured } from '../_lib/s
  * rejected. Without it the endpoint is open, which is harmless: it only
  * reports whether a one-row read succeeded.
  */
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export async function handleKeepAlive(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   const secret = process.env.CRON_SECRET;
