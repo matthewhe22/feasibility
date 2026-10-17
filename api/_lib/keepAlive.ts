@@ -9,15 +9,43 @@ import { describeCause, getAdminSupabase, isSupabaseConfigured } from './supabas
  * `/api/admin/stats?keepalive=1` and that handler delegates here.
  *
  * Supabase free-tier projects are paused after a stretch of no database
- * activity. Vercel Cron (see `crons` in vercel.json) calls this every 3 days and
- * it runs a tiny read against the `projects` table, which counts as activity
- * and keeps the project awake.
+ * activity. Vercel Cron (see `crons` in vercel.json) calls this daily and it
+ * refreshes a heartbeat sentinel row (`__keepalive__`) in the `projects`
+ * table. A write is used rather than a bare SELECT so the activity is
+ * unambiguous. `.github/workflows/supabase-keepalive.yml` writes the same row
+ * directly via the Supabase REST API as an independent second scheduler.
  *
  * When CRON_SECRET is set in the Vercel env, Vercel sends it as
  * `Authorization: Bearer <secret>` on cron invocations and anything else is
  * rejected. Without it the endpoint is open, which is harmless: it only
  * reports whether a one-row read succeeded.
  */
+export const KEEPALIVE_SENTINEL = '__keepalive__';
+
+/** Upsert the heartbeat row; update first, insert only on the very first run. */
+async function writeHeartbeat(pingedAt: string): Promise<void> {
+  const supabase = getAdminSupabase();
+  const admin = { keepAlive: { lastPingAt: pingedAt, source: 'vercel-cron' } };
+
+  const { data: updated, error: updateError } = await supabase
+    .from('projects')
+    .update({ admin, updated_at: pingedAt })
+    .eq('name', KEEPALIVE_SENTINEL)
+    .select('id');
+  if (updateError) throw new Error(updateError.message);
+  if (updated && updated.length > 0) return;
+
+  const { error: insertError } = await supabase
+    .from('projects')
+    .insert({
+      name: KEEPALIVE_SENTINEL,
+      description: 'Supabase keep-alive heartbeat (written by a scheduled job). Do not edit.',
+      admin,
+      inputs: {},
+    });
+  if (insertError) throw new Error(insertError.message);
+}
+
 export async function handleKeepAlive(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -33,12 +61,9 @@ export async function handleKeepAlive(req: VercelRequest, res: VercelResponse) {
   }
 
   const startedAt = Date.now();
+  const pingedAt = new Date().toISOString();
   try {
-    const { error } = await getAdminSupabase()
-      .from('projects')
-      .select('id')
-      .limit(1);
-    if (error) throw new Error(error.message);
+    await writeHeartbeat(pingedAt);
   } catch (e) {
     const reason = describeCause(e);
     console.error('[keep-alive] Supabase ping failed:', reason);
@@ -47,7 +72,7 @@ export async function handleKeepAlive(req: VercelRequest, res: VercelResponse) {
 
   return res.status(200).json({
     ok: true,
-    pingedAt: new Date().toISOString(),
+    pingedAt,
     latencyMs: Date.now() - startedAt,
   });
 }
