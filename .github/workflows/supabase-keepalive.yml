@@ -1,0 +1,58 @@
+# Keeps the free-tier Supabase project from being paused for inactivity.
+#
+# Runs daily, independently of the Vercel cron (/api/cron/keep-alive), and
+# refreshes the `__keepalive__` heartbeat row in the `projects` table directly
+# through the Supabase REST API. A failed run makes GitHub email the repo owner,
+# which doubles as an early warning that the database is unreachable or paused.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   SUPABASE_URL               e.g. https://<project-ref>.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY  service_role key (Supabase → Project Settings → API)
+
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: '17 20 * * *' # daily, 20:17 UTC (06:17 AEST)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refresh heartbeat row
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_KEY:-}" ]; then
+            echo "::error::Set the SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY repository secrets."
+            exit 1
+          fi
+
+          base="${SUPABASE_URL%/}/rest/v1/projects"
+          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          admin="{\"keepAlive\":{\"lastPingAt\":\"$now\",\"source\":\"github-actions\"}}"
+
+          call() { # method url body
+            curl -sS --fail-with-body --retry 3 --retry-delay 10 -X "$1" "$2" \
+              -H "apikey: $SUPABASE_KEY" \
+              -H "Authorization: Bearer $SUPABASE_KEY" \
+              -H "Content-Type: application/json" \
+              -H "Prefer: return=representation" \
+              -d "$3"
+          }
+
+          updated="$(call PATCH "$base?name=eq.__keepalive__&select=id" \
+            "{\"admin\":$admin,\"updated_at\":\"$now\"}")"
+          if [ "$updated" = "[]" ]; then
+            call POST "$base?select=id" \
+              "{\"name\":\"__keepalive__\",\"description\":\"Supabase keep-alive heartbeat (written by a scheduled job). Do not edit.\",\"admin\":$admin,\"inputs\":{}}"
+            echo
+          fi
+          echo "Heartbeat written at $now"

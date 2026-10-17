@@ -43,9 +43,11 @@ export interface BrandingSettings {
 
 const BRANDING_SENTINEL = '__global_branding__';
 const PROJECT_LIST_SENTINEL = '__global_project_list__';
+/** Heartbeat row written by the Supabase keep-alive job (api/_lib/keepAlive.ts). */
+const KEEPALIVE_SENTINEL = '__keepalive__';
 
 /** All sentinel record names — filtered out of listProjects. */
-const SENTINELS: readonly string[] = [BRANDING_SENTINEL, PROJECT_LIST_SENTINEL];
+const SENTINELS: readonly string[] = [BRANDING_SENTINEL, PROJECT_LIST_SENTINEL, KEEPALIVE_SENTINEL];
 
 // ── IndexedDB (Dexie) — local fallback ─────────────────────────────────────
 
