@@ -83,18 +83,56 @@ export function normalizeUnitRows(units: unknown): unknown {
   });
 }
 
-/** The same treatment for suburb-pricing rows. */
+/**
+ * Growth in percent from `prior` to `current`, rounded to one decimal place —
+ * or null unless both are real, positive prices.
+ */
+export function growthPct(current: number | null, prior: number | null): number | null {
+  if (current === null || prior === null || current <= 0 || prior <= 0) return null;
+  return Math.round((current / prior - 1) * 1000) / 10;
+}
+
+/** The median `pct` percent before `current`, to the nearest $1,000 — or null. */
+export function priorFromGrowth(current: number | null, pct: number | null): number | null {
+  if (current === null || pct === null || current <= 0 || pct <= -100) return null;
+  return Math.round(current / (1 + pct / 100) / 1000) * 1000;
+}
+
+/**
+ * The same treatment for suburb-pricing rows, plus the MHP growth fields.
+ *
+ * Growth is derived from the two prices whenever both are present, so the
+ * percentage shown always agrees with the prices beside it. The model's own
+ * percentage is kept only when a prior price is missing — realestate.com.au
+ * sometimes publishes an annual-growth figure without the prior median.
+ */
 export function normalizeSuburbRows(suburbs: unknown): unknown {
   if (!Array.isArray(suburbs)) return suburbs;
   return suburbs.map(s => {
     if (!s || typeof s !== 'object') return s;
     const row = s as Record<string, unknown>;
+    const mhp = toMoney(row.medianHousePrice);
+    const stated12 = toMoney(row.medianHousePrice12mAgo);
+    const stated6 = toMoney(row.medianHousePrice6mAgo);
+    const g12 = growthPct(mhp, stated12) ?? toNumber(row.houseGrowth12mPct);
+    const g6 = growthPct(mhp, stated6) ?? toNumber(row.houseGrowth6mPct);
+    // realestate.com.au publishes "Past 12 month growth" but not the prior
+    // median, so the prior median is derived from the two published figures
+    // and flagged as derived.
+    const mhp12 = stated12 ?? priorFromGrowth(mhp, g12);
+    const mhp6 = stated6 ?? priorFromGrowth(mhp, g6);
     return {
       ...row,
-      medianHousePrice: toMoney(row.medianHousePrice),
+      medianHousePrice: mhp,
       medianUnitPrice: toMoney(row.medianUnitPrice),
       medianDollarPerSqm: toMoney(row.medianDollarPerSqm),
       distanceKm: toNumber(row.distanceKm),
+      medianHousePrice12mAgo: mhp12,
+      medianHousePrice6mAgo: mhp6,
+      houseGrowth12mPct: g12,
+      houseGrowth6mPct: g6,
+      ...(stated12 === null && mhp12 !== null ? { medianHousePrice12mAgoDerived: true } : {}),
+      ...(stated6 === null && mhp6 !== null ? { medianHousePrice6mAgoDerived: true } : {}),
     };
   });
 }

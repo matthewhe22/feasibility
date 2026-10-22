@@ -248,6 +248,9 @@ async function runDeepSeek({ apiKey, model, systemPrompt, userPrompt }: RunAIRes
         ],
         response_format: { type: 'json_object' },
         temperature: 0.2,
+        // DeepSeek's default output cap is 4,096 tokens — too few for a full
+        // competitor list. 8,192 is its documented maximum.
+        max_tokens: 8192,
         stream: false,
       }),
     });
@@ -422,6 +425,53 @@ export function parseJsonResponse(text: string): Record<string, unknown> | null 
     if (m) {
       try { return JSON.parse(m[0]) as Record<string, unknown>; } catch { /* ignore */ }
     }
+    return repairTruncatedJson(cleaned);
+  }
+}
+
+/**
+ * Recover what a reply cut off at the output-token limit still holds.
+ *
+ * A long competitor list can exceed the model's output cap (8,192 tokens on
+ * Gemini 2.0 Flash), which ends the JSON mid-row and used to fail the whole
+ * request. This keeps everything up to the last COMPLETE array element or
+ * object member, closes the open brackets, and marks the result
+ * `_truncated: true` so the caller can say rows may be missing.
+ *
+ * Returns null when nothing usable precedes the cut.
+ */
+export function repairTruncatedJson(text: string): Record<string, unknown> | null {
+  const start = text.indexOf('{');
+  if (start < 0) return null;
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  // Last cut point after a complete value, with the closers needed there.
+  let lastCut = -1;
+  let lastClosers = '';
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === '\\') escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; continue; }
+    if (c === '{' || c === '[') { stack.push(c === '{' ? '}' : ']'); continue; }
+    if (c === '}' || c === ']') {
+      stack.pop();
+      if (stack.length === 0) return null; // complete document — not a truncation
+      lastCut = i + 1;
+      lastClosers = [...stack].reverse().join('');
+    }
+  }
+  if (lastCut < 0) return null;
+  const body = text.slice(start, lastCut).replace(/,\s*$/, '');
+  try {
+    const json = JSON.parse(body + lastClosers) as Record<string, unknown>;
+    return { ...json, _truncated: true };
+  } catch {
     return null;
   }
 }

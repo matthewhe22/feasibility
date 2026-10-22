@@ -26,6 +26,8 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { toNum } from '../components/research/RetirementVillageResearch';
+import { scopeText } from './competitorScope';
+import { houseGrowth, suburbAverages } from './suburbPricing';
 import { summariseByTypology } from './typologySummary';
 import type { SuburbsResult, CompetitorsResult, SuburbRow, UnitRow, ResearchSource, SuburbMapData } from '../components/research/RetirementVillageResearch';
 
@@ -235,10 +237,22 @@ function drawSuburbMapPng(suburbs: SuburbRow[]): { dataUrl: string; width: numbe
 
 /* ── Sheet builders ──────────────────────────────────────────────────────── */
 
-const SUBURB_SPAN = 9; // Suburb, State, Postcode, Median House, Median Unit, $/m², Dist, As of, (Lat/Lng dropped from view)
+/** Suburb, State, Postcode, Median House, MHP 12m ago, 12m growth, MHP 6m ago,
+ *  6m growth, Median Unit, $/m², Dist, As of. */
+const SUBURB_SPAN = 13;
+const PCT_FMT = '+0.0%;-0.0%;0.0%';
 
-async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult) {
-  const ws = wb.addWorksheet('Suburb Pricing', { properties: { tabColor: { argb: 'FF' + HEADER_FILL } } });
+/** "REA 12-month growth; 12m-ago median derived from growth %". */
+function historyNote(s: SuburbRow): string {
+  const derived = [
+    s.medianHousePrice12mAgoDerived && '12m-ago median derived from growth %',
+    s.medianHousePrice6mAgoDerived && '6m-ago median derived from growth %',
+  ].filter(Boolean);
+  return [s.historySource, ...derived].filter(Boolean).join('; ');
+}
+
+async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult, sheetName: string) {
+  const ws = wb.addWorksheet(sheetName, { properties: { tabColor: { argb: 'FF' + HEADER_FILL } } });
   ws.getColumn(1).width = 20;
   for (let c = 2; c <= SUBURB_SPAN; c++) ws.getColumn(c).width = 16;
 
@@ -251,25 +265,46 @@ async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult) {
   metaRow(ws, 'Summary', r.summary || '', SUBURB_SPAN);
   ws.addRow([]);
 
-  const hdr = ws.addRow(['Suburb', 'State', 'Postcode', 'Median House', 'Median Unit', 'Median $/m²', 'Dist (km)', 'As of']);
+  const hdr = ws.addRow([
+    'Suburb', 'State', 'Postcode', 'Median House', 'MHP 12m ago', '12m growth', 'MHP 6m ago', '6m growth',
+    'Median Unit', 'Median $/m²', 'Dist (km)', 'As of', 'History source',
+  ]);
   hdr.eachCell(cell => style(cell, { fill: HEADER_FILL, fontColor: WHITE, bold: true, size: 9 }));
+
+  // Column number → format. Growth is stored as a fraction so Excel's % format applies.
+  const fmt = (colNum: number): string | undefined =>
+    [4, 5, 7, 9, 10].includes(colNum) ? CURRENCY_FMT : colNum === 6 || colNum === 8 ? PCT_FMT : colNum === 11 ? '0.0' : undefined;
+  const asFraction = (p: number | null) => (p === null ? null : p / 100);
 
   const suburbs = r.suburbs ?? [];
   for (const s of suburbs) {
-    const row = ws.addRow([s.suburb, s.state ?? '', s.postcode ?? '', s.medianHousePrice ?? null, s.medianUnitPrice ?? null, s.medianDollarPerSqm ?? null, s.distanceKm ?? null, s.asOf ?? '']);
+    const row = ws.addRow([
+      s.suburb, s.state ?? '', s.postcode ?? '', toNum(s.medianHousePrice),
+      toNum(s.medianHousePrice12mAgo), asFraction(houseGrowth(s, '12m')),
+      toNum(s.medianHousePrice6mAgo), asFraction(houseGrowth(s, '6m')),
+      toNum(s.medianUnitPrice), toNum(s.medianDollarPerSqm), toNum(s.distanceKm), s.asOf ?? '',
+      historyNote(s),
+    ]);
     row.eachCell((cell, colNum) => {
-      const numeric = colNum === 4 || colNum === 5 || colNum === 6;
-      style(cell, { size: 9, numFmt: numeric ? CURRENCY_FMT : (colNum === 7 ? '0.0' : undefined), hAlign: numeric || colNum === 7 ? 'right' : 'left' });
+      const f = fmt(colNum);
+      style(cell, { size: 9, numFmt: f, hAlign: f ? 'right' : 'left' });
     });
   }
 
-  const avg = r.averages;
-  if (avg) {
-    const row = ws.addRow(['Indicative average', '', '', avg.avgMedianHousePrice ?? null, avg.avgMedianUnitPrice ?? null, avg.avgDollarPerSqm ?? null, '', '']);
+  if (suburbs.length) {
+    const a = suburbAverages(r);
+    const row = ws.addRow([
+      'Indicative average', '', '', a.mhp, a.mhp12mAgo, asFraction(a.growth12m), a.mhp6mAgo, asFraction(a.growth6m),
+      a.mup, a.psm, '', '', '',
+    ]);
     row.eachCell((cell, colNum) => {
-      const numeric = colNum === 4 || colNum === 5 || colNum === 6;
-      style(cell, { fill: 'DCFCE7', bold: true, size: 9, numFmt: numeric ? CURRENCY_FMT : undefined, hAlign: numeric ? 'right' : 'left' });
+      const f = fmt(colNum);
+      style(cell, { fill: 'DCFCE7', bold: true, size: 9, numFmt: f, hAlign: f ? 'right' : 'left' });
     });
+    style(
+      ws.addRow(['12-month growth is realestate.com.au\'s published figure; a prior median marked "derived" is calculated from it, as REA does not print it. REA publishes no 6-month figure — 6-month values come from Cotality where available. Average growth is the mean of the per-suburb figures.']).getCell(1),
+      { italic: true, size: 8, fontColor: '6B7280' },
+    );
   }
   ws.addRow([]);
 
@@ -296,8 +331,8 @@ async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult) {
  *  across, so they span the whole table rather than stopping short of it. */
 const UNIT_SPAN = 23;
 
-function buildCompetitorsSheet(wb: ExcelJS.Workbook, r: CompetitorsResult) {
-  const ws = wb.addWorksheet('Competitor Villages', { properties: { tabColor: { argb: 'FF' + HEADER_FILL } } });
+function buildCompetitorsSheet(wb: ExcelJS.Workbook, r: CompetitorsResult, sheetName: string) {
+  const ws = wb.addWorksheet(sheetName, { properties: { tabColor: { argb: 'FF' + HEADER_FILL } } });
   ws.getColumn(1).width = 16;
   for (let c = 2; c <= UNIT_SPAN; c++) ws.getColumn(c).width = 14;
 
@@ -305,6 +340,7 @@ function buildCompetitorsSheet(wb: ExcelJS.Workbook, r: CompetitorsResult) {
   const loc = [r.subject?.suburb, r.subject?.state, r.subject?.postcode].filter(Boolean).join(', ');
   if (loc) metaRow(ws, 'Subject location', loc, UNIT_SPAN);
   if (r.proximityKm) metaRow(ws, 'Proximity radius', `${r.proximityKm} km`, UNIT_SPAN);
+  if (r.scope) metaRow(ws, 'Evidence scope', scopeText(r.scope), UNIT_SPAN);
   if (r.timestamp) metaRow(ws, 'Generated', new Date(r.timestamp).toLocaleString('en-AU'), UNIT_SPAN);
   if (r.provider || r.model) metaRow(ws, 'Model', [r.provider, r.model].filter(Boolean).join(' / '), UNIT_SPAN);
   metaRow(ws, 'Live web search', r.groundingUsed ? 'Yes' : 'No — figures may be from training data', UNIT_SPAN);
@@ -393,20 +429,27 @@ function buildCompetitorsSheet(wb: ExcelJS.Workbook, r: CompetitorsResult) {
 
 /* ── Main export function ───────────────────────────────────────────────── */
 
+export interface RVResearchExportEntry {
+  /** 1-based village row on screen — the sheets are numbered by it. */
+  row: number;
+  villageName: string;
+  suburbs: SuburbsResult | null;
+  competitors: CompetitorsResult | null;
+}
+
 /**
  * exportRVResearchToExcel
- * One workbook covering both RV Research tools, whichever have a result:
+ * One workbook covering both RV Research tools for every researched village,
+ * whichever sections have a result:
  *   - "Suburb Pricing"      — section 1 table + averages + suburb map + sources
  *   - "Competitor Villages" — section 2 table + sources
- * No-ops (throws) if neither result is provided — callers should disable the
- * export action until at least one section has run.
+ * With more than one village each sheet is prefixed "V1 ", "V2 " … by the
+ * village's on-screen row number. Throws if no entry has a result — callers should disable the export
+ * action until at least one section has run.
  */
-export async function exportRVResearchToExcel(
-  villageName: string,
-  suburbsResult: SuburbsResult | null,
-  competitorsResult: CompetitorsResult | null,
-): Promise<void> {
-  if (!suburbsResult && !competitorsResult) {
+export async function exportRVResearchToExcel(entries: RVResearchExportEntry[]): Promise<void> {
+  const withResults = entries.filter(e => e.suburbs || e.competitors);
+  if (!withResults.length) {
     throw new Error('Run at least one of the two research sections before exporting.');
   }
 
@@ -415,12 +458,19 @@ export async function exportRVResearchToExcel(
   wb.created = new Date();
   wb.modified = new Date();
 
-  if (suburbsResult) await buildSuburbsSheet(wb, suburbsResult);
-  if (competitorsResult) buildCompetitorsSheet(wb, competitorsResult);
+  const multi = withResults.length > 1;
+  for (const e of withResults) {
+    // Numbered by the on-screen village row, so "V3" is always Village 3 even
+    // when Village 2 has no results.
+    const prefix = multi ? `V${e.row} ` : '';
+    if (e.suburbs) await buildSuburbsSheet(wb, e.suburbs, `${prefix}Suburb Pricing`);
+    if (e.competitors) buildCompetitorsSheet(wb, e.competitors, `${prefix}Competitor Villages`);
+  }
 
   const buffer = await wb.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  const safeName = (villageName || 'RV_Research').replace(/[^a-zA-Z0-9]/g, '_');
+  const baseName = multi ? `${withResults.length}_villages` : withResults[0]?.villageName;
+  const safeName = (baseName || 'RV_Research').replace(/[^a-zA-Z0-9]/g, '_');
   const timestamp = new Date().toISOString().slice(0, 10);
   saveAs(blob, `${safeName}_RV_Research_${timestamp}.xlsx`);
 }

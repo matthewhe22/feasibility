@@ -18,6 +18,9 @@ import { geocodeAuSuburbs } from '../_lib/geocode';
 import { buildSuburbMapImage } from '../_lib/staticMap';
 import { normalizeUnitRows, normalizeSuburbRows } from '../_lib/normalizeUnits';
 import { enrichUnitsFromListingPages } from '../_lib/enrichUnits';
+import { scopeCompetitorUnits, soldCutoff } from '../_lib/competitorScope';
+import { verifyCompetitorDistances } from '../_lib/competitorDistance';
+import { directoryTargets, fetchDirectoryPages, suburbSlug, type DirectoryPagesContext } from '../_lib/rvDirectories';
 
 /**
  * POST /api/research/retirement-village
@@ -52,13 +55,12 @@ interface RVRequest {
   nearbySuburbs?: string[];
 }
 
-/** "Bateau Bay" → "bateau-bay", matching villages.com.au's directory slug. */
-function slugify(s: string): string {
-  return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '');
-}
-
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function twelveMonthsAgoIsoDate(): string {
+  return soldCutoff(new Date());
 }
 
 const SYSTEM_SUBURB_LOCATOR = `You are an Australian geography assistant. Given a retirement village, identify
@@ -129,14 +131,14 @@ adjacent suburbs within roughly 5–8 km), and (3) report current median dwellin
 prices for each.
 
 You MUST:
-  1. Use ONLY realestate.com.au (REA) suburb profile pages as your price source —
-     do not search or cite Domain, CoreLogic, ABS, or any other portal for these
-     figures. Every supplied live-search result below is already scoped to
-     realestate.com.au; use whichever of those carries the most recent "as of"
-     date. If realestate.com.au has no published figure for a suburb, return
-     null for it rather than substituting another source.
-  2. (Exception: a supplied Cotality data block, if present, is the one other
-     PRIMARY source — see below.)
+  1. Use realestate.com.au (REA) suburb profile pages as the PRIMARY price source,
+     and a supplied Cotality data block as the SECOND source — do not search or
+     cite Domain, ABS, or any other portal. Every supplied live-search result
+     below is already scoped to realestate.com.au; use whichever of those carries
+     the most recent "as of" date.
+  2. Where REA has no figure for a suburb (or for a field), use the Cotality
+     block's figure if it has one and say so in that row's "historySource" /
+     "summary"; otherwise return null rather than substituting another source.
   3. For each suburb return: median HOUSE price, median UNIT/apartment price, and
      median $/m² of living area where available (else null). Quote the figure
      EXACTLY as published by the single source you cite for it — never average
@@ -144,17 +146,28 @@ You MUST:
      neither. If the supplied results disagree by more than a few percent, pick
      the one from the most authoritative/most recent source and say which portal
      it came from in "summary"; don't split the difference.
-  4. Set "asOf" to the actual period the figure is reported for (e.g. rolling
+  4. Also report the median HOUSE price as it stood 12 MONTHS AGO and 6 MONTHS AGO
+     (relative to the current figure's period), and the growth % over each.
+       - 12 months: REA suburb profiles publish "Past 12 month growth" beside the
+         median (e.g. "Up 7.1%") — return it in houseGrowth12mPct. REA does not
+         print the prior median; leave medianHousePrice12mAgo null unless a
+         source states it (the server derives it from the growth figure).
+       - 6 months: REA publishes NO 6-month figure (its trend is a chart). Take
+         the 6-month-ago median / change from the Cotality block if it has one;
+         otherwise leave both 6-month fields null. Never estimate either.
+       - Set "historySource" per suburb to where these came from, e.g.
+         "realestate.com.au 12-month growth; Cotality 6-month".
+  5. Set "asOf" to the actual period the figure is reported for (e.g. rolling
      12-month window ending in a stated month, or a stated quarter) — read it off
      the source, never guess or default to a plausible-sounding recent quarter.
-  5. If the most recent figure you can substantiate is more than 2 quarters old
+  6. If the most recent figure you can substantiate is more than 2 quarters old
      relative to today (${todayIsoDate()}), still report it but say so plainly in
      "summary" (e.g. "data is N months old; no more recent figure was found").
-  6. Compute the simple average of the per-suburb medians (ignoring nulls).
-  7. State all prices in AUD. If a figure is unavailable, use null — never invent.
-  8. Return ONLY valid JSON matching the requested schema — no preamble.
-If a Cotality data block is supplied, treat it as the PRIMARY source and reconcile
-web figures against it.`;
+  7. Compute the simple average of the per-suburb medians (ignoring nulls).
+  8. State all prices in AUD. If a figure is unavailable, use null — never invent.
+  9. Return ONLY valid JSON matching the requested schema — no preamble.
+If Cotality and REA disagree on a current median, report REA's and mention the
+Cotality figure in "summary".`;
 
 const SYSTEM_COMPETITORS = `You are an Australian retirement-living market analyst.
 Today's date is ${todayIsoDate()}. Use this date, not your training cutoff, to judge
@@ -195,7 +208,15 @@ You MUST:
      aggregators are often the best source for retirement-unit listing prices.
      SALES: include every sale dated within the past 12 months from today
      (${todayIsoDate()}) that you can substantiate — do not stop at the first few
-     found. LISTINGS: include every current listing you find, with no time bound.
+     found. Do NOT include any sale older than 12 months — those are out of scope
+     and will be discarded. A sale whose date is not published may be included
+     with date null (it will be flagged), but never one you know is older.
+     LISTINGS: include every CURRENT listing you find (on the market now), with no
+     time bound on when it was listed; do not include withdrawn or expired listings.
+     PROXIMITY: only villages/operators within the stated radius of the subject
+     village. Give every row a distanceKm (straight-line from the subject village)
+     and leave out any village beyond the radius — a directory page for one suburb
+     often lists villages from further afield too.
   2. Be EXHAUSTIVE — this is the most important instruction. List EVERY unit you can
      substantiate across ALL competing villages in the radius — both past-12-months
      SALES and current LISTINGS. Do not truncate to a handful of examples, do not
@@ -246,7 +267,11 @@ You MUST:
   5. Retirement-village units are usually sold under licence / loan-lease / DMF
      arrangements, so the headline figure is an INGOING price, not a freehold price.
      Capture it as the price and record the arrangement in tenure / dmfSummary.
-  6. Return ONLY valid JSON matching the requested schema — no preamble.`;
+  6. Do NOT include the SUBJECT village itself (the one named in the request) or any
+     of its units — this is a competitor analysis. Other villages run by the same
+     operator are competitors and stay in.
+  7. Return ONLY valid JSON matching the requested schema — no preamble. To keep the
+     reply short enough to list every unit, OMIT any key whose value would be null.`;
 
 function buildSuburbsPrompt(req: RVRequest, confirmedSuburbs: Array<{ suburb: string; state?: string; postcode?: string; distanceKm?: number | null }>): string {
   const loc = [req.suburb, req.state, req.postcode].filter(Boolean).join(', ');
@@ -264,7 +289,10 @@ function buildSuburbsPrompt(req: RVRequest, confirmedSuburbs: Array<{ suburb: st
     `   median $/m² (living area) where published — sourced from realestate.com.au ONLY,`,
     `   no other portal. If realestate.com.au has no published figure for one of these`,
     `   suburbs, return null for it — do not drop the suburb from the list.`,
-    `4. Compute the average of the per-suburb medians.`,
+    `4. For each suburb also give the median HOUSE price 12 months ago and 6 months ago, read off`,
+    `   realestate.com.au's price-trend / history data for that suburb, and the growth % over each`,
+    `   period (null where not published — never estimate).`,
+    `5. Compute the average of the per-suburb medians.`,
     ``,
     `Return JSON only, matching this schema:`,
     `{`,
@@ -272,7 +300,10 @@ function buildSuburbsPrompt(req: RVRequest, confirmedSuburbs: Array<{ suburb: st
     `  "suburbs": [`,
     `    { "suburb": "...", "state": "...", "postcode": "...", "distanceKm": <number|null>,`,
     `      "medianHousePrice": <number|null>, "medianUnitPrice": <number|null>,`,
-    `      "medianDollarPerSqm": <number|null>, "asOf": "<period e.g. 2026-Q1 or null>" }`,
+    `      "medianDollarPerSqm": <number|null>, "asOf": "<period e.g. 2026-Q1 or null>",`,
+    `      "medianHousePrice12mAgo": <number|null>, "medianHousePrice6mAgo": <number|null>,`,
+    `      "houseGrowth12mPct": <number|null, e.g. 4.2 for +4.2%>, "houseGrowth6mPct": <number|null>,`,
+    `      "historySource": "<where the 12/6-month figures came from | null>" }`,
     `  ],`,
     `  "averages": { "avgMedianHousePrice": <number|null>, "avgMedianUnitPrice": <number|null>, "avgDollarPerSqm": <number|null> },`,
     `  "summary": "2-4 sentences incl. data period, basis, and source names",`,
@@ -287,6 +318,7 @@ function buildCompetitorsPrompt(req: RVRequest): string {
   const nearby = (req.nearbySuburbs ?? []).map(s => s.trim()).filter(Boolean);
   return [
     `Find retirement villages competing with "${req.villageName}" within ${radius} km.`,
+    `Exclude "${req.villageName}" itself and its own units — list competitors only.`,
     loc ? `Known location context: ${loc}.` : `Resolve the subject village's location from its name.`,
     nearby.length
       ? `Suburbs already confirmed within the radius (from prior research) — check the villages.com.au ` +
@@ -295,10 +327,11 @@ function buildCompetitorsPrompt(req: RVRequest): string {
       : `First identify which suburbs fall within ${radius} km, then check villages.com.au's directory page ` +
         `for each of those suburbs individually, not just the subject's own suburb.`,
     ``,
-    `List EVERY unit you can substantiate for EVERY competing village within ${radius} km —`,
-    `SALES from the past 12 months (today is ${todayIsoDate()}) and ALL current LISTINGS`,
-    `(no time bound on listings). Check each village's own "for sale" page as well as the`,
-    `aggregators and portals, and include the full sold-price history from the last 12`,
+    `List EVERY unit you can substantiate for EVERY competing village (and its operator) within`,
+    `${radius} km — SALES dated within the past 12 months only (since ${twelveMonthsAgoIsoDate()};`,
+    `today is ${todayIsoDate()}) and ALL CURRENT LISTINGS. Exclude sales older than that and any`,
+    `village beyond ${radius} km (a sale with no published date may stay, date null). Check each village's own "for sale"`,
+    `page as well as the aggregators and portals, and include every sale from the last 12`,
     `months where published. Do not limit the list to a few examples or to one unit per`,
     `village — if 20 units are substantiated by the live search results, return all 20,`,
     `not a shorter subset. Most recent first.`,
@@ -395,9 +428,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Response cache — checked BEFORE any model / Cotality / web-search call, so
   // a cached request spends no search quota. Bypass with { refresh: true }.
+  // `refresh` is left out of the key, so a refreshed answer replaces the
+  // cached one instead of being stored beside it (a later normal run would
+  // otherwise keep getting the old answer).
+  const { refresh: _refresh, ...keyBody } = body as RVRequest & { refresh?: boolean };
   const cacheKey = researchCacheKey({
     endpoint: 'retirement-village',
-    body,
+    body: keyBody,
     provider: head?.provider,
     model: head?.model,
     grounding: resolved.useGrounding,
@@ -409,26 +446,69 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (cached) return res.status(200).json(cached);
   }
 
-  // Cache miss: resolve the confirmed suburb list (suburbs mode only) BEFORE
-  // building the main prompt/queries — see resolveSuburbList's docstring for
-  // why. Done here rather than earlier so a cache hit never spends this call.
-  const confirmedSuburbs = body.mode === 'suburbs' && head
-    ? await resolveSuburbList(body, head)
-    : [];
-  let userPrompt = body.mode === 'suburbs' ? buildSuburbsPrompt(body, confirmedSuburbs) : buildCompetitorsPrompt(body);
+  // Cache miss: resolve the confirmed suburb list BEFORE building the main
+  // prompt/queries — see resolveSuburbList's docstring for why. Done here
+  // rather than earlier so a cache hit never spends this call.
+  //
+  // Competitors mode needs it too when the client has no section-1 result to
+  // pass as `nearbySuburbs`: without a suburb list (and a state) no
+  // villages.com.au / downsizing.com.au page could be targeted at all, so a
+  // request carrying only a village name searched neither site.
+  const radiusKm = body.proximityKm && body.proximityKm > 0 ? body.proximityKm : 5;
+  // Also needed when the state is unknown: without it no directory URL can be
+  // built, and the request falls back to many costly `site:` searches.
+  const needsSuburbList = body.mode === 'suburbs' || !body.state || !(body.nearbySuburbs ?? []).some(s => s && s.trim());
+  const confirmedSuburbs = needsSuburbList && head ? await resolveSuburbList(body, head) : [];
+  let competitorState = body.state;
+  let competitorSuburbs: string[] = [];
+  if (body.mode === 'competitors') {
+    const inRadius = confirmedSuburbs
+      .filter(s => s.distanceKm == null || s.distanceKm <= radiusKm)
+      .map(s => s.suburb);
+    competitorState = competitorState || confirmedSuburbs.find(s => s.state)?.state;
+    const seen = new Set<string>();
+    competitorSuburbs = [body.suburb, ...(body.nearbySuburbs ?? []), ...inRadius]
+      .filter((s): s is string => Boolean(s && s.trim()))
+      .filter(s => {
+        const k = suburbSlug(s);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      })
+      .slice(0, 6); // cap: each suburb costs two directory scrapes
+  }
+  // Postcodes where known — realestate.com.au's sold pages are keyed by them.
+  const postcodeFor = (sub: string) =>
+    confirmedSuburbs.find(c => suburbSlug(c.suburb) === suburbSlug(sub))?.postcode
+    ?? (body.suburb && suburbSlug(body.suburb) === suburbSlug(sub) ? body.postcode : undefined);
+  // The subject's own suburb, for distance checks.
+  const subjectSuburb = body.suburb || confirmedSuburbs.find(c => c.distanceKm === 0)?.suburb || confirmedSuburbs[0]?.suburb || competitorSuburbs[0];
+  let userPrompt = body.mode === 'suburbs'
+    ? buildSuburbsPrompt(body, confirmedSuburbs)
+    : buildCompetitorsPrompt({ ...body, state: competitorState, nearbySuburbs: competitorSuburbs });
 
   // Cache miss: perform the (paid) grounding lookups, once.
   let cotalityNote: { used: boolean; url?: string; reason?: string } = { used: false };
   if (cotalitySettings) {
     try {
-      const ctx = await fetchCotalityContext(cotalitySettings, { suburb: body.suburb, state: body.state, postcode: body.postcode });
-      if (ctx) {
+      // Suburbs mode: Cotality is the second source for every reported suburb
+      // (the 6-month MHP in particular, which REA doesn't publish), so fetch it
+      // per suburb rather than for the subject's suburb alone.
+      const lookups = body.mode === 'suburbs' && confirmedSuburbs.length
+        ? confirmedSuburbs.slice(0, 6).map(c => ({ suburb: c.suburb, state: c.state ?? body.state, postcode: c.postcode }))
+        : [{ suburb: body.suburb, state: body.state, postcode: body.postcode }];
+      const results = await Promise.all(lookups.map(async l => ({ l, ctx: await fetchCotalityContext(cotalitySettings!, l).catch(() => null) })));
+      const found = results.filter((r): r is typeof r & { ctx: NonNullable<typeof r.ctx> } => Boolean(r.ctx));
+      if (found.length) {
         userPrompt +=
-          `\n\n=== AUTHORITATIVE COTALITY DATA (treat as PRIMARY source; cite as "Cotality") ===\n` +
-          `Source: ${ctx.url}\n${ctx.data}\n=== END COTALITY DATA ===`;
-        cotalityNote = { used: true, url: ctx.url };
+          `\n\n=== COTALITY DATA (second source; cite as "Cotality") ===\n` +
+          found.map(r => `--- ${r.l.suburb ?? r.l.postcode} — ${r.ctx.url} ---\n${r.ctx.data}`).join('\n\n') +
+          `\n=== END COTALITY DATA ===`;
+        cotalityNote = { used: true, url: found[0]!.ctx.url };
       } else if (cotalitySettings.propertyDataPath) {
-        cotalityNote = { used: false, reason: 'Cotality configured but returned no data for the supplied suburb/postcode — used web research only.' };
+        cotalityNote = { used: false, reason: 'Cotality configured but returned no data for these suburbs — used web research only.' };
+      } else {
+        cotalityNote = { used: false, reason: 'Cotality has no property data path set (Admin → Cotality Data), so the 6-month MHP can\'t be sourced.' };
       }
     } catch { /* never block AI research on Cotality */ }
   }
@@ -436,7 +516,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Live web search for the providers that need it. Lazy: the search only runs
   // once a provider that actually needs grounding is about to be called, and its
   // result is reused across failover attempts (one search per request maximum).
-  const where = [body.suburb, body.state].filter(Boolean).join(' ');
+  const where = [body.suburb || competitorSuburbs[0], competitorState].filter(Boolean).join(' ');
 
   // Competitors mode has the same one-query-can't-cover-it problem, for the
   // proximity radius rather than a fixed suburb list: villages.com.au serves one
@@ -446,16 +526,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // `nearbySuburbs`; a site-targeted query is built for each (capped — every
   // query is a paid search call) so the radius is actually covered rather than
   // just the subject village's own suburb.
-  const stateSlug = (body.state || '').toLowerCase();
-  const competitorSuburbs = [body.suburb, ...(body.nearbySuburbs ?? [])]
-    .filter((s): s is string => Boolean(s && s.trim()))
-    .slice(0, 6); // cap: each entry costs one Firecrawl query
-  const villagesDotComQueries = competitorSuburbs.map(sub => {
-    const slug = slugify(sub);
-    return stateSlug && slug
-      ? `site:villages.com.au/retirement-villages/${stateSlug}/${slug}`
-      : `site:villages.com.au ${sub} ${body.state ?? ''} retirement village`;
-  });
+  //
+  // With Firecrawl configured those directory pages (and downsizing.com.au's
+  // equivalent) are scraped DIRECTLY by URL instead — see rvDirectories.ts —
+  // and the `site:` queries below are only the fallback for when that isn't
+  // possible (Tavily-only setup, or no state could be resolved).
+  let directoryCtx: DirectoryPagesContext | null = null;
+  if (body.mode === 'competitors') {
+    directoryCtx = await fetchDirectoryPages(
+      webSearch?.firecrawl ?? null,
+      directoryTargets(competitorState, competitorSuburbs.map(sub => ({ suburb: sub, postcode: postcodeFor(sub) }))),
+      body.villageName,
+    );
+    if (directoryCtx) userPrompt += `\n\n${directoryCtx.promptBlock}`;
+  }
+  const stateSlug = (competitorState || '').toLowerCase();
+  const aggregatorQueries = directoryCtx ? [] : competitorSuburbs.flatMap(sub => {
+    const slug = suburbSlug(sub);
+    return [
+      stateSlug && slug
+        ? `site:villages.com.au/retirement-villages/${stateSlug}/${slug}`
+        : `site:villages.com.au ${sub} ${competitorState ?? ''} retirement village`,
+      `site:downsizing.com.au ${sub} ${competitorState ?? ''} retirement village for sale`,
+    ];
+  }).slice(0, 4); // fallback only — each query scrapes up to 8 pages
 
   // Suburbs mode: one site:realestate.com.au query PER suburb (house + unit,
   // separately — a combined "house and unit price" query mostly surfaces the
@@ -474,8 +568,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     : [
         `retirement village near ${body.villageName} ${where} units for sale price recent`,
-        ...villagesDotComQueries,
-        where ? `site:downsizing.com.au ${where} retirement village` : '',
+        ...aggregatorQueries,
       ].filter(Boolean).map(q => q.replace(/\s+/g, ' ').trim());
 
   // Force scraping (full rendered page → markdown) for this endpoint's Firecrawl
@@ -485,8 +578,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // still carries no usable figure. Also lift the per-query result cap so the
   // several parallel queries fired per request still surface enough distinct
   // pages.
+  //
+  // Competitor pages are long listing directories; after compaction (see
+  // compactScrapedMarkdown) a dozen listings is ~10 KB, so they get a larger
+  // per-page budget than the 8000-char default.
   const groundingConfig: WebSearchConfig | null = webSearch && webSearch.firecrawl
-    ? { ...webSearch, firecrawl: { ...webSearch.firecrawl, scrapeContent: true, maxResults: Math.max(webSearch.firecrawl.maxResults, 8) } }
+    ? {
+        ...webSearch,
+        firecrawl: {
+          ...webSearch.firecrawl,
+          scrapeContent: true,
+          maxResults: Math.max(webSearch.firecrawl.maxResults, 8),
+          ...(body.mode === 'competitors' ? { contentChars: 12000 } : {}),
+        },
+      }
     : webSearch;
   const search = createWebSearchRunner(groundingConfig, searchQueries.length === 1 ? searchQueries[0] : searchQueries);
 
@@ -524,7 +629,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const usedCtx: WebSearchContext | null = searchCtx ?? fallbackCtx;
       const searchNote = webSearchNote(usedCtx);
-      const searchSources: AIResearchSource[] = usedCtx ? usedCtx.sources : [];
+      const searchSources: AIResearchSource[] = [...(directoryCtx?.sources ?? []), ...(usedCtx ? usedCtx.sources : [])];
       // Legacy field: only truthy when Tavily was the tool that actually ran.
       const tavilyNote: { used: boolean; results?: number } = usedCtx && usedCtx.provider === 'tavily'
         ? { used: true, results: usedCtx.resultCount }
@@ -536,7 +641,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sources: mergeSources([...result.groundingSources, ...searchSources], declared),
         model: p.model,
         provider: result.provider,
-        groundingUsed: result.groundingUsed || searchNote.used,
+        groundingUsed: result.groundingUsed || searchNote.used || Boolean(directoryCtx),
         // Raw Gemini-native flag, kept separate from the merged `groundingUsed`
         // above so the UI can tell "Gemini searched live AND Firecrawl was
         // injected" apart from either one alone.
@@ -545,6 +650,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         cotality: cotalityNote,
         webSearch: searchNote,
         tavily: tavilyNote,
+        // villages.com.au / downsizing.com.au directory pages scraped by URL.
+        ...(body.mode === 'competitors' ? { directoryPages: { used: Boolean(directoryCtx), pages: directoryCtx?.pageCount ?? 0 } } : {}),
         timestamp: new Date().toISOString(),
       };
       if (i > 0) payload.failoverNote = `Primary provider (${resolved.chain[0].provider}) was rate-limited; served by ${p.provider} instead.`;
@@ -555,6 +662,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // `typeof x === 'number'`, so those were silently rendering as em dashes
       // — which is why internal area and $/m² came back empty even when the
       // figure had been found. See normalizeUnits.ts.
+      if (payload._truncated) {
+        delete payload._truncated;
+        payload.truncated = true;
+        payload.summary = `${typeof payload.summary === 'string' ? `${payload.summary} ` : ''}` +
+          `(The model's reply hit its output limit, so the list may be incomplete — rows after the cut were lost.)`;
+      }
       if (Array.isArray(payload.units)) payload.units = normalizeUnitRows(payload.units);
       if (Array.isArray(payload.suburbs)) payload.suburbs = normalizeSuburbRows(payload.suburbs);
 
@@ -567,6 +680,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         payload.units = normalizeUnitRows(
           await enrichUnitsFromListingPages(payload.units, groundingConfig?.firecrawl ?? null, p),
         );
+        // After enrichment, which can fill in a missing sale date: keep only
+        // sales from the last 12 months, current listings, and rows within the
+        // radius. See competitorScope.ts.
+        // Real suburb-centre distances first, so the radius filter below acts on
+        // checked numbers rather than the model's estimates (or blanks).
+        const verified = await verifyCompetitorDistances(
+          payload.units,
+          { suburb: subjectSuburb, state: competitorState, postcode: body.postcode },
+          radiusKm,
+        );
+        payload.units = verified.units;
+        const scoped = scopeCompetitorUnits(payload.units, radiusKm, new Date(), body.villageName);
+        payload.units = scoped.units;
+        payload.scope = scoped.note;
       }
 
       // Attach real coordinates for the surrounding-suburb map. Geocoding is

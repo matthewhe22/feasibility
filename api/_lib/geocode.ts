@@ -51,7 +51,10 @@ export async function geocodeAuSuburb(suburb: string, state?: string, postcode?:
 
   let result: LatLng | null = null;
   try {
-    const resp = await fetch(url, { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' } });
+    const resp = await fetch(url, {
+      headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+      signal: AbortSignal.timeout(8000), // a hung lookup must not stall the request
+    });
     if (resp.ok) {
       const json = (await resp.json()) as Array<{ lat?: string; lon?: string }>;
       const hit = Array.isArray(json) ? json[0] : undefined;

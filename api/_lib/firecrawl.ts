@@ -47,6 +47,12 @@ export interface StoredFirecrawlSettings {
    * but costs more credits per search — off by default.
    */
   scrapeContent: boolean;
+  /**
+   * Per-call override of how many characters of each scraped result reach the
+   * prompt (see `contentBudget`). Not persisted — set by endpoints whose target
+   * pages are long listing directories (RV competitor research).
+   */
+  contentChars?: number;
 }
 
 export const FIRECRAWL_DEFAULT_SETTINGS: StoredFirecrawlSettings = {
@@ -258,6 +264,9 @@ export async function firecrawlSearch(
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s.apiKey}` },
         body: JSON.stringify(body),
+        // Search + scrape of several pages; bounded so one hung call can't hold
+        // the whole research request until the platform kills it.
+        signal: AbortSignal.timeout(45000),
       });
     } catch (e) {
       throw new FirecrawlError(`Could not reach Firecrawl: ${e instanceof Error ? e.message : 'network error'}`);
@@ -328,7 +337,11 @@ export async function firecrawlScrapeUrl(
       });
       if (resp.status === 404) continue; // wrong API version — try the sibling
       if (!resp.ok) return null;
-      const json = (await resp.json().catch(() => ({}))) as { data?: { markdown?: unknown } };
+      const json = (await resp.json().catch(() => ({}))) as { data?: { markdown?: unknown; metadata?: { statusCode?: unknown } } };
+      // The target site's own status — Firecrawl answers 200 even when it
+      // scraped a 404 page, whose "content" is just the site's not-found shell.
+      const siteStatus = json?.data?.metadata?.statusCode;
+      if (typeof siteStatus === 'number' && siteStatus >= 400) return null;
       const markdown = json?.data?.markdown;
       return typeof markdown === 'string' && markdown.trim() ? markdown : null;
     } catch {
@@ -336,6 +349,60 @@ export async function firecrawlScrapeUrl(
     }
   }
   return null;
+}
+
+/**
+ * Strip the boilerplate out of a scraped page's markdown so the content budget
+ * is spent on listings rather than markup.
+ *
+ * This is what kept villages.com.au and downsizing.com.au listings out of RV
+ * competitor research: both pages were found and scraped, but the per-result
+ * cut (`contentBudget`) was applied to the RAW markdown. villages.com.au opens
+ * with ~6 KB of price-filter dropdowns ("$200,000 / $250,000 / …", twice over)
+ * and downsizing.com.au with a 10-image carousel per listing (~3 KB each) —
+ * so the cut landed before the first price on either page and the model never
+ * saw a single listing.
+ *
+ * Removes: images (short alt text such as the "bed" / "bathtub" / "car" icons
+ * is kept, since it labels the number beside it), price-dropdown option lines,
+ * links back into the same page, repeat links to a URL already shown, and
+ * duplicate consecutive lines. Listing text and each listing's URL (first
+ * occurrence) are kept.
+ */
+/** A markdown link target, allowing one level of nested parentheses — image
+ *  CDNs write `filters:format(jpeg):max_bytes(204800)` inside the URL. */
+const URL_PART = String.raw`(?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"\n]*")?`;
+const URL_PART_NO_SPACE = String.raw`(?:[^()\s]|\([^()\s]*\))+`;
+
+export function compactScrapedMarkdown(markdown: string, pageUrl?: string): string {
+  const pageBase = pageUrl ? pageUrl.split('#')[0] : '';
+  const seen = new Set<string>();
+
+  let s = markdown
+    // Images: keep icon labels ("bed", "car"), drop everything else.
+    .replace(new RegExp(`!\\[([^\\]]*)\\]\\(${URL_PART}\\)`, 'g'), (_m, alt: string) => (alt.trim().length <= 12 ? alt.trim() : ''))
+    // Links whose text is now empty (image carousels).
+    .replace(new RegExp(`\\[(?:\\s|\\\\)*\\]\\(${URL_PART}\\)`, 'g'), '');
+
+  s = s.replace(new RegExp(`\\[([^\\]]*)\\]\\((${URL_PART_NO_SPACE})(?:\\s+"[^"\\n]*")?\\)`, 'g'), (_m, text: string, url: string) => {
+    const base = url.split('#')[0];
+    if (!base || (pageBase && base === pageBase)) return text; // in-page anchor / UI control
+    if (seen.has(url)) return text;
+    seen.add(url);
+    return `[${text}](${url})`;
+  });
+
+  const PRICE_OPTION = /^\s*(?:[-*]\s*)?(?:Any price|Less than \$[\d,]+|\$[\d,]+\+?)\s*$/;
+  const GLUED_PRICES = /(?:\$[\d,]+\+?){4,}/;
+  const out: string[] = [];
+  for (const raw of s.split('\n')) {
+    const line = raw.replace(/\s+$/, '');
+    if (PRICE_OPTION.test(line) || GLUED_PRICES.test(line)) continue;
+    if (/^[\s\\]+$/.test(line)) { out.push(''); continue; }
+    if (line && out.length && out[out.length - 1] === line) continue;
+    out.push(line);
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 export interface FirecrawlContext {
@@ -389,7 +456,7 @@ export async function fetchFirecrawlContext(
   if (!s.apiKey || !query.trim()) return null;
 
   const ttl = ctxTtlMs();
-  const cacheKey = `${query.trim().toLowerCase()}|${s.maxResults}|${s.scrapeContent}|${s.apiBaseUrl}${s.searchPath}`;
+  const cacheKey = `${query.trim().toLowerCase()}|${s.maxResults}|${s.scrapeContent}|${s.contentChars ?? ''}|${s.apiBaseUrl}${s.searchPath}`;
   if (ttl > 0) {
     const hit = _ctxCache.get(cacheKey);
     if (hit && hit.expiresAt > Date.now()) return hit.value;
@@ -405,10 +472,11 @@ export async function fetchFirecrawlContext(
 
   let value: FirecrawlContext | null = null;
   if (r.results.length > 0) {
-    const budget = contentBudget(s.scrapeContent);
+    const budget = s.contentChars ?? contentBudget(s.scrapeContent);
+    const text = (res: FirecrawlResult) => (s.scrapeContent ? compactScrapedMarkdown(res.content, res.url) : res.content);
     value = {
       promptBlock: r.results
-        .map((res, i) => `[${i + 1}] ${res.title}\n${res.url}\n${res.content.slice(0, budget)}`)
+        .map((res, i) => `[${i + 1}] ${res.title}\n${res.url}\n${text(res).slice(0, budget)}`)
         .join('\n\n'),
       sources: r.results.map(res => ({ title: res.title, url: res.url, snippet: res.content.slice(0, 160) })),
       resultCount: r.results.length,
