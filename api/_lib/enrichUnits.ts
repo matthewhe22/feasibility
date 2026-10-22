@@ -14,18 +14,26 @@
  * So: once the first pass has produced units with `sourceUrl`s, scrape those
  * specific pages and run one focused extraction over them.
  *
+ * Several units often share ONE page — every villages.com.au vacancy links to
+ * its village's page with a `#vacancy-id` anchor. Each page is therefore
+ * scraped once, and the model is told which units on it to fill (unit number,
+ * price, bedrooms) so a figure is never copied onto the wrong unit. Pages are
+ * compacted first: a villages.com.au village page opens with ~6 KB of
+ * price-filter boilerplate, which used to fill the whole budget before the
+ * first vacancy. The monthly levy, which village pages do publish, is read too.
+ *
  * Bounded and best-effort throughout — a capped number of scrapes, one extra
  * model call, and any failure leaves the unit exactly as it was.
  */
-import { firecrawlScrapeUrl, type StoredFirecrawlSettings } from './firecrawl';
+import { firecrawlScrapeUrl, compactScrapedMarkdown, type StoredFirecrawlSettings } from './firecrawl';
 import { runAIResearch } from './aiClient';
 import type { AIProvider } from './aiSettings';
-import { toNumber } from './normalizeUnits';
+import { toNumber, toMoney } from './normalizeUnits';
 
-/** Max listing pages fetched per request — each is one Firecrawl scrape. */
-const MAX_ENRICH = 10;
-/** How much of each scraped page to hand the model. */
-const PAGE_BUDGET = 6000;
+/** Max distinct pages fetched per request — each is one Firecrawl scrape. */
+const MAX_PAGES = 10;
+/** How much of each compacted page to hand the model. */
+const PAGE_BUDGET = 15000;
 
 interface EnrichableUnit {
   villageName?: unknown;
@@ -34,15 +42,21 @@ interface EnrichableUnit {
   internalSqm?: unknown;
   landSqm?: unknown;
   date?: unknown;
+  price?: unknown;
+  bedrooms?: unknown;
+  recurringFee?: unknown;
+  recurringFeePeriod?: unknown;
   note?: unknown;
   [key: string]: unknown;
 }
 
-const SYSTEM_EXTRACT = `You extract two specific facts from Australian property listing pages:
-the unit's INTERNAL AREA in square metres, and the record's published DATE.
+const SYSTEM_EXTRACT = `You extract specific facts about named units from Australian property listing pages.
 
-For each numbered page you are given, return an entry with:
-  - "index": the page number as given.
+Each numbered page lists the units to fill from it, each with a reference such as
+"1a" plus its unit number / price / bedrooms so you can find it on the page. A page
+can describe several units — take each figure from the part of the page about THAT
+unit, never from a neighbouring one. For each reference return:
+  - "ref": the reference as given.
   - "internalSqm": the internal / living / floor area in m², as a NUMBER ONLY
     (no units, no "approx"). Labels vary: "internal area", "living area",
     "floor area", "approx. area", "m²", "sqm", "square metres". It may sit in a
@@ -54,15 +68,34 @@ For each numbered page you are given, return an entry with:
     listed" / "on market since" date) as ISO yyyy-mm-dd, or yyyy-mm if only the
     month is given. NEVER substitute today's date or invent one — null if the
     page does not publish a date.
+  - "recurringFee": the recurring levy / general services charge as a number
+    (e.g. "Monthly Levy: $448.13" → 448.13), or null.
+  - "recurringFeePeriod": "week" | "month" | "quarter" | "year", or null.
 
-Return ONLY valid JSON: { "units": [ { "index": <n>, "internalSqm": <number|null>,
-"landSqm": <number|null>, "date": "<iso|null>" } ] }
-Use null for anything the page does not state. Never guess a number.`;
+Return ONLY valid JSON: { "units": [ { "ref": "<ref>", "internalSqm": <number|null>,
+"landSqm": <number|null>, "date": "<iso|null>", "recurringFee": <number|null>,
+"recurringFeePeriod": "<period|null>" } ] }
+Use null for anything the page does not state for that unit. Never guess a number.`;
+
+/** The page a unit points at, without the in-page anchor. */
+function pageOf(url: string): string {
+  return url.split('#')[0] ?? url;
+}
+
+function describe(u: EnrichableUnit): string {
+  const bits = [
+    typeof u.unitNumber === 'string' && u.unitNumber ? `unit ${u.unitNumber}` : null,
+    toMoney(u.price) !== null ? `$${toMoney(u.price)!.toLocaleString('en-AU')}` : null,
+    toNumber(u.bedrooms) !== null ? `${toNumber(u.bedrooms)} bed` : null,
+    typeof u.villageName === 'string' ? u.villageName : null,
+  ].filter(Boolean);
+  return bits.join(', ') || 'the unit on this page';
+}
 
 /**
- * Fill in missing internalSqm / date on units by scraping their own listing
- * pages. Returns the units array (same order, same length) with those fields
- * filled where the page supplied them; everything else is untouched.
+ * Fill in missing internalSqm / date / levy on units by scraping their own
+ * listing pages. Returns the units array (same order, same length) with those
+ * fields filled where the page supplied them; everything else is untouched.
  */
 export async function enrichUnitsFromListingPages(
   units: unknown,
@@ -73,30 +106,40 @@ export async function enrichUnitsFromListingPages(
 
   const rows = units as EnrichableUnit[];
 
-  // Only units that are actually missing something AND have a page to read.
-  const targets: Array<{ rowIndex: number; url: string }> = [];
+  // Group the units that are missing something by the page they point at.
+  const pages = new Map<string, number[]>();
   for (let i = 0; i < rows.length; i++) {
     const u = rows[i];
     if (!u || typeof u !== 'object') continue;
-    const needsArea = toNumber(u.internalSqm) === null;
-    const needsDate = !u.date;
+    const needs = toNumber(u.internalSqm) === null || !u.date || toMoney(u.recurringFee) === null;
     const url = typeof u.sourceUrl === 'string' ? u.sourceUrl : '';
     // A bare domain is the aggregator's home page, not a unit's listing page.
-    const isSpecificPage = /^https?:\/\/[^/]+\/.+/.test(url);
-    if ((needsArea || needsDate) && isSpecificPage) targets.push({ rowIndex: i, url });
-    if (targets.length >= MAX_ENRICH) break;
+    if (!needs || !/^https?:\/\/[^/]+\/.+/.test(url)) continue;
+    const page = pageOf(url);
+    if (!pages.has(page) && pages.size >= MAX_PAGES) continue;
+    pages.set(page, [...(pages.get(page) ?? []), i]);
   }
-  if (targets.length === 0) return units;
+  if (pages.size === 0) return units;
 
   const scraped = await Promise.all(
-    targets.map(async t => ({ ...t, markdown: await firecrawlScrapeUrl(firecrawl, t.url) })),
+    [...pages].map(async ([url, rowIndexes]) => {
+      const md = await firecrawlScrapeUrl(firecrawl, url);
+      return { url, rowIndexes, text: md ? compactScrapedMarkdown(md, url).slice(0, PAGE_BUDGET) : null };
+    }),
   );
-  const usable = scraped.filter((s): s is typeof s & { markdown: string } => typeof s.markdown === 'string');
+  const usable = scraped.filter((s): s is typeof s & { text: string } => Boolean(s.text));
   if (usable.length === 0) return units;
 
-  const prompt = usable
-    .map((s, n) => `--- PAGE ${n + 1} (${s.url}) ---\n${s.markdown.slice(0, PAGE_BUDGET)}`)
-    .join('\n\n');
+  // ref ("2b") → row index
+  const refs = new Map<string, number>();
+  const prompt = usable.map((page, n) => {
+    const list = page.rowIndexes.map((rowIndex, k) => {
+      const ref = `${n + 1}${String.fromCharCode(97 + (k % 26))}${k >= 26 ? Math.floor(k / 26) : ''}`;
+      refs.set(ref, rowIndex);
+      return `  [${ref}] ${describe(rows[rowIndex]!)}`;
+    }).join('\n');
+    return `--- PAGE ${n + 1} (${page.url}) ---\nUnits to fill from this page:\n${list}\n\n${page.text}`;
+  }).join('\n\n');
 
   let extracted: Array<Record<string, unknown>>;
   try {
@@ -105,7 +148,7 @@ export async function enrichUnitsFromListingPages(
       model: provider.model,
       apiKey: provider.apiKey,
       systemPrompt: SYSTEM_EXTRACT,
-      userPrompt: `Extract internal area and date from each page below.\n\n${prompt}`,
+      userPrompt: `Extract the listed facts for each referenced unit.\n\n${prompt}`,
       useGrounding: false, // the pages are already supplied; no search needed
     });
     extracted = Array.isArray(result.json.units) ? (result.json.units as Array<Record<string, unknown>>) : [];
@@ -115,11 +158,9 @@ export async function enrichUnitsFromListingPages(
 
   const out = rows.map(r => ({ ...r }));
   for (const entry of extracted) {
-    const idx = toNumber(entry.index);
-    if (idx === null) continue;
-    const target = usable[idx - 1]; // model is given 1-based page numbers
-    if (!target) continue;
-    const row = out[target.rowIndex];
+    const rowIndex = typeof entry.ref === 'string' ? refs.get(entry.ref.trim().toLowerCase()) : undefined;
+    if (rowIndex === undefined) continue;
+    const row = out[rowIndex];
     if (!row) continue;
 
     const area = toNumber(entry.internalSqm);
@@ -130,6 +171,14 @@ export async function enrichUnitsFromListingPages(
 
     if (!row.date && typeof entry.date === 'string' && entry.date.trim() && entry.date !== 'null') {
       row.date = entry.date;
+    }
+
+    const fee = toMoney(entry.recurringFee);
+    if (fee !== null && toMoney(row.recurringFee) === null) {
+      row.recurringFee = fee;
+      if (typeof entry.recurringFeePeriod === 'string' && entry.recurringFeePeriod !== 'null') {
+        row.recurringFeePeriod = entry.recurringFeePeriod;
+      }
     }
   }
   return out;

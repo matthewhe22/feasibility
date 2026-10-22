@@ -92,6 +92,12 @@ export function growthPct(current: number | null, prior: number | null): number 
   return Math.round((current / prior - 1) * 1000) / 10;
 }
 
+/** The median `pct` percent before `current`, to the nearest $1,000 — or null. */
+export function priorFromGrowth(current: number | null, pct: number | null): number | null {
+  if (current === null || pct === null || current <= 0 || pct <= -100) return null;
+  return Math.round(current / (1 + pct / 100) / 1000) * 1000;
+}
+
 /**
  * The same treatment for suburb-pricing rows, plus the MHP growth fields.
  *
@@ -106,8 +112,15 @@ export function normalizeSuburbRows(suburbs: unknown): unknown {
     if (!s || typeof s !== 'object') return s;
     const row = s as Record<string, unknown>;
     const mhp = toMoney(row.medianHousePrice);
-    const mhp12 = toMoney(row.medianHousePrice12mAgo);
-    const mhp6 = toMoney(row.medianHousePrice6mAgo);
+    const stated12 = toMoney(row.medianHousePrice12mAgo);
+    const stated6 = toMoney(row.medianHousePrice6mAgo);
+    const g12 = growthPct(mhp, stated12) ?? toNumber(row.houseGrowth12mPct);
+    const g6 = growthPct(mhp, stated6) ?? toNumber(row.houseGrowth6mPct);
+    // realestate.com.au publishes "Past 12 month growth" but not the prior
+    // median, so the prior median is derived from the two published figures
+    // and flagged as derived.
+    const mhp12 = stated12 ?? priorFromGrowth(mhp, g12);
+    const mhp6 = stated6 ?? priorFromGrowth(mhp, g6);
     return {
       ...row,
       medianHousePrice: mhp,
@@ -116,8 +129,10 @@ export function normalizeSuburbRows(suburbs: unknown): unknown {
       distanceKm: toNumber(row.distanceKm),
       medianHousePrice12mAgo: mhp12,
       medianHousePrice6mAgo: mhp6,
-      houseGrowth12mPct: growthPct(mhp, mhp12) ?? toNumber(row.houseGrowth12mPct),
-      houseGrowth6mPct: growthPct(mhp, mhp6) ?? toNumber(row.houseGrowth6mPct),
+      houseGrowth12mPct: g12,
+      houseGrowth6mPct: g6,
+      ...(stated12 === null && mhp12 !== null ? { medianHousePrice12mAgoDerived: true } : {}),
+      ...(stated6 === null && mhp6 !== null ? { medianHousePrice6mAgoDerived: true } : {}),
     };
   });
 }

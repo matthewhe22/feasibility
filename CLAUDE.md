@@ -465,13 +465,23 @@ With 2+ villages, checkboxes in section 2 choose which villages the competitor
 search runs for (all ticked by default); unticked villages keep prior results.
 
 **MHP history:** suburb rows carry `medianHousePrice12mAgo` / `6mAgo` and
-`houseGrowth12mPct` / `6mPct`. Growth is derived server-side from the two prices
-when both exist (`normalizeSuburbRows`), else the published % is kept.
+`houseGrowth12mPct` / `6mPct`. realestate.com.au (primary) publishes "past 12
+month growth" but not the prior median and **no 6-month figure** (its trend is a
+chart), so: growth is derived from two prices when both exist, else the
+published % is kept, and a missing prior median is derived from the growth %
+(`priorFromGrowth`, flagged `…AgoDerived`, shown "≈"). **Cotality is the second
+source** — fetched per reported suburb (up to 6) when a property data path is
+set in Admin → Cotality Data; it is the only source of 6-month values.
+`historySource` records where each row's history came from.
 
 **Aggregator listings:** competitor mode scrapes the villages.com.au and
 downsizing.com.au per-suburb directory pages directly by URL
 (`api/_lib/rvDirectories.ts`, up to 6 suburbs × 2 sites), resolving the suburb
-list itself when section 1 hasn't run. Scraped markdown is passed through
+list (and state) itself when section 1 hasn't run or no state was given. It also
+scrapes realestate.com.au's **sold retirement-living** list, newest first, for
+the nearest 3 suburbs (the aggregators carry no sales; REA pages cost ~5
+credits each), and follows up villages.com.au village pages for any village
+whose directory entry stops at five vacancies ("See all vacancies", max 6). Scraped markdown is passed through
 `compactScrapedMarkdown` (firecrawl.ts) before the per-page cut — previously the
 cut landed in dropdown/image-carousel boilerplate, before the first listing, so
 neither site's listings ever reached the model. Tests:
@@ -479,11 +489,34 @@ neither site's listings ever reached the model. Tests:
 
 **Evidence scope:** competitor results are limited to sales dated within the
 last 12 months and current listings, from villages within the proximity radius.
+The **subject village itself is excluded** (name match ignoring operator brands
+and generic words — `sameVillage`); other villages of the same operator stay.
+Rentals are dropped, and the same unit listed on two sites is merged into one
+row (`dedupeUnits`). Distances are checked against geocoded suburb centres
+(`api/_lib/competitorDistance.ts`): a missing distance is filled (shown "~") and
+a model distance inside the radius whose suburb is >3 km beyond it is corrected.
 Sales with no published date are kept and flagged "sale date not published" in
 their note. The prompt asks for this and
 `api/_lib/competitorScope.ts` enforces it after enrichment; the response's
 `scope` field reports what was dropped (shown under the summary and in the
-export). Tests: `npx tsx api/__tests__/competitorScope.test.ts`.
+export). Tests: `npx tsx api/__tests__/competitorScope.test.ts`,
+`npx tsx api/__tests__/rvPipeline.test.ts`.
+
+**Enrichment** (`api/_lib/enrichUnits.ts`) scrapes each unit's listing page once
+per page (villages.com.au vacancies share their village page), compacted, and
+tells the model which units to fill so figures aren't copied across units; it
+fills internal area, date and the recurring levy.
+
+**Output limit:** a reply cut off at the model's output cap is recovered up to
+the last complete row (`repairTruncatedJson` in aiClient.ts) and flagged
+`truncated: true` (UI banner) instead of failing. Gemini 2.0 Flash caps output
+at 8,192 tokens — use Gemini 2.5 Flash for large radii. DeepSeek requests set
+`max_tokens: 8192`. The competitor prompt asks the model to omit null keys.
+
+**Timeouts:** `vercel.json` sets `maxDuration: 300` for the research functions;
+Firecrawl search (45 s), scrape (15 s / 30 s for REA), Cotality (10 s) and
+Nominatim (8 s) calls are individually bounded. The response-cache key excludes
+`refresh`, so a re-run replaces the cached answer.
 
 Backend: `POST /api/research/retirement-village` (`mode: 'suburbs' | 'competitors'`),
 sharing `api/_lib/aiClient.ts` (the reusable Gemini-grounded / DeepSeek JSON caller)

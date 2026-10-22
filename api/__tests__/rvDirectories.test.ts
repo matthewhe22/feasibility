@@ -12,7 +12,7 @@
  * Lives under `__tests__` so Vercel's function detection skips it.
  */
 import { compactScrapedMarkdown } from '../_lib/firecrawl';
-import { directoryTargets, suburbSlug } from '../_lib/rvDirectories';
+import { directoryTargets, suburbSlug, reaSoldUrl, truncatedVillagePages, MAX_SOLD_PAGES } from '../_lib/rvDirectories';
 
 let passed = 0;
 let failed = 0;
@@ -88,11 +88,27 @@ eq('collapses blank runs', compactScrapedMarkdown('a\n\n\n\n\nb'), 'a\n\nb');
 console.log('\nDIRECTORY TARGETS');
 eq('slug', suburbSlug(' Bateau Bay '), 'bateau-bay');
 eq('slug strips punctuation', suburbSlug("O'Connor"), 'o-connor');
-const t = directoryTargets('NSW', ['Bateau Bay', 'Killarney Vale', 'bateau bay']);
-eq('two sites per suburb, duplicates dropped', t.length, 4);
+const t = directoryTargets('NSW', [{ suburb: 'Bateau Bay', postcode: '2261' }, 'Killarney Vale', 'bateau bay']);
+eq('three pages per suburb, duplicates dropped', t.length, 6);
 eq('villages.com.au URL', t[0]?.url, 'https://www.villages.com.au/retirement-villages/nsw/bateau-bay');
 eq('downsizing.com.au URL', t[1]?.url, 'https://www.downsizing.com.au/property/sale/nsw/suburb-bateau-bay');
-eq('second suburb', t[2]?.url, 'https://www.villages.com.au/retirement-villages/nsw/killarney-vale');
+eq('REA sold URL, newest first', t[2]?.url, 'https://www.realestate.com.au/sold/property-retire-in-bateau+bay,+nsw+2261/list-1?activeSort=solddate');
+eq('second suburb', t[3]?.url, 'https://www.villages.com.au/retirement-villages/nsw/killarney-vale');
+eq('REA sold URL without postcode', reaSoldUrl('nsw', { suburb: 'Killarney Vale' }), 'https://www.realestate.com.au/sold/property-retire-in-killarney+vale,+nsw/list-1?activeSort=solddate');
+const many = directoryTargets('NSW', ['A1', 'B2', 'C3', 'D4', 'E5']);
+eq('REA sold pages capped (they cost ~5 credits)', many.filter(x => x.site === 'realestate.com.au sold').length, MAX_SOLD_PAGES);
+
+console.log('\nTRUNCATED VILLAGE ENTRIES');
+const dir = [
+  '[5 Available](https://www.villages.com.au/nsw/cc/wood-glen-retirement-village-4337#vacancies-list)',
+  '[See all vacancies](https://www.villages.com.au/nsw/cc/wood-glen-retirement-village-4337#vacancies-list)',
+  '[See all vacancies](https://www.villages.com.au/nsw/cc/glengara-retirement-village-4345#vacancies-list)',
+  '[1 Available](https://www.villages.com.au/nsw/cc/kiah-lodge-3998#vacancies-list)',
+].join('\n');
+eq('only villages cut at five are followed up', truncatedVillagePages(dir), [
+  'https://www.villages.com.au/nsw/cc/wood-glen-retirement-village-4337',
+  'https://www.villages.com.au/nsw/cc/glengara-retirement-village-4345',
+]);
 eq('no state → no targets', directoryTargets(undefined, ['Bateau Bay']).length, 0);
 
 console.log('\n' + '═'.repeat(60));

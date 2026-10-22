@@ -289,6 +289,7 @@ export async function fetchCotalityContext(
   try {
     const resp = await fetch(url, {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(10000), // a slow Cotality call must not stall research
     });
     if (!resp.ok) return null;
     const text = await resp.text();

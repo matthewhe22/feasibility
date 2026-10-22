@@ -239,8 +239,17 @@ function drawSuburbMapPng(suburbs: SuburbRow[]): { dataUrl: string; width: numbe
 
 /** Suburb, State, Postcode, Median House, MHP 12m ago, 12m growth, MHP 6m ago,
  *  6m growth, Median Unit, $/m², Dist, As of. */
-const SUBURB_SPAN = 12;
+const SUBURB_SPAN = 13;
 const PCT_FMT = '+0.0%;-0.0%;0.0%';
+
+/** "REA 12-month growth; 12m-ago median derived from growth %". */
+function historyNote(s: SuburbRow): string {
+  const derived = [
+    s.medianHousePrice12mAgoDerived && '12m-ago median derived from growth %',
+    s.medianHousePrice6mAgoDerived && '6m-ago median derived from growth %',
+  ].filter(Boolean);
+  return [s.historySource, ...derived].filter(Boolean).join('; ');
+}
 
 async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult, sheetName: string) {
   const ws = wb.addWorksheet(sheetName, { properties: { tabColor: { argb: 'FF' + HEADER_FILL } } });
@@ -258,7 +267,7 @@ async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult, sheetNa
 
   const hdr = ws.addRow([
     'Suburb', 'State', 'Postcode', 'Median House', 'MHP 12m ago', '12m growth', 'MHP 6m ago', '6m growth',
-    'Median Unit', 'Median $/m²', 'Dist (km)', 'As of',
+    'Median Unit', 'Median $/m²', 'Dist (km)', 'As of', 'History source',
   ]);
   hdr.eachCell(cell => style(cell, { fill: HEADER_FILL, fontColor: WHITE, bold: true, size: 9 }));
 
@@ -274,6 +283,7 @@ async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult, sheetNa
       toNum(s.medianHousePrice12mAgo), asFraction(houseGrowth(s, '12m')),
       toNum(s.medianHousePrice6mAgo), asFraction(houseGrowth(s, '6m')),
       toNum(s.medianUnitPrice), toNum(s.medianDollarPerSqm), toNum(s.distanceKm), s.asOf ?? '',
+      historyNote(s),
     ]);
     row.eachCell((cell, colNum) => {
       const f = fmt(colNum);
@@ -285,14 +295,14 @@ async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult, sheetNa
     const a = suburbAverages(r);
     const row = ws.addRow([
       'Indicative average', '', '', a.mhp, a.mhp12mAgo, asFraction(a.growth12m), a.mhp6mAgo, asFraction(a.growth6m),
-      a.mup, a.psm, '', '',
+      a.mup, a.psm, '', '', '',
     ]);
     row.eachCell((cell, colNum) => {
       const f = fmt(colNum);
       style(cell, { fill: 'DCFCE7', bold: true, size: 9, numFmt: f, hAlign: f ? 'right' : 'left' });
     });
     style(
-      ws.addRow(['Growth = current MHP ÷ MHP 12 (or 6) months earlier − 1; the published growth figure is used where the prior median is not published. Average growth is the mean of the per-suburb figures.']).getCell(1),
+      ws.addRow(['12-month growth is realestate.com.au\'s published figure; a prior median marked "derived" is calculated from it, as REA does not print it. REA publishes no 6-month figure — 6-month values come from Cotality where available. Average growth is the mean of the per-suburb figures.']).getCell(1),
       { italic: true, size: 8, fontColor: '6B7280' },
     );
   }
@@ -420,6 +430,8 @@ function buildCompetitorsSheet(wb: ExcelJS.Workbook, r: CompetitorsResult, sheet
 /* ── Main export function ───────────────────────────────────────────────── */
 
 export interface RVResearchExportEntry {
+  /** 1-based village row on screen — the sheets are numbered by it. */
+  row: number;
   villageName: string;
   suburbs: SuburbsResult | null;
   competitors: CompetitorsResult | null;
@@ -431,8 +443,8 @@ export interface RVResearchExportEntry {
  * whichever sections have a result:
  *   - "Suburb Pricing"      — section 1 table + averages + suburb map + sources
  *   - "Competitor Villages" — section 2 table + sources
- * With more than one village each sheet is prefixed "V1 ", "V2 " … in input
- * order. Throws if no entry has a result — callers should disable the export
+ * With more than one village each sheet is prefixed "V1 ", "V2 " … by the
+ * village's on-screen row number. Throws if no entry has a result — callers should disable the export
  * action until at least one section has run.
  */
 export async function exportRVResearchToExcel(entries: RVResearchExportEntry[]): Promise<void> {
@@ -447,8 +459,10 @@ export async function exportRVResearchToExcel(entries: RVResearchExportEntry[]):
   wb.modified = new Date();
 
   const multi = withResults.length > 1;
-  for (const [n, e] of withResults.entries()) {
-    const prefix = multi ? `V${n + 1} ` : '';
+  for (const e of withResults) {
+    // Numbered by the on-screen village row, so "V3" is always Village 3 even
+    // when Village 2 has no results.
+    const prefix = multi ? `V${e.row} ` : '';
     if (e.suburbs) await buildSuburbsSheet(wb, e.suburbs, `${prefix}Suburb Pricing`);
     if (e.competitors) buildCompetitorsSheet(wb, e.competitors, `${prefix}Competitor Villages`);
   }

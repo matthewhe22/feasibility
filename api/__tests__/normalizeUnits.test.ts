@@ -11,7 +11,7 @@
  *
  * Lives under `__tests__` so Vercel's function detection skips it.
  */
-import { toNumber, toMoney, toBoolean, growthPct, normalizeUnitRows, normalizeSuburbRows } from '../_lib/normalizeUnits';
+import { toNumber, toMoney, toBoolean, growthPct, priorFromGrowth, normalizeUnitRows, normalizeSuburbRows } from '../_lib/normalizeUnits';
 
 let passed = 0;
 let failed = 0;
@@ -106,6 +106,11 @@ eq('12m-ago price coerced from "$1.0M"', hist[0]?.medianHousePrice12mAgo, 100000
 eq('12m growth derived from prices', hist[0]?.houseGrowth12mPct, 10);
 eq('6m growth derived from prices', hist[0]?.houseGrowth6mPct, 4.8);
 eq('published 12m growth kept when no prior price', hist[1]?.houseGrowth12mPct, 4.2);
+eq('12m-ago median derived from the published growth', hist[1]?.medianHousePrice12mAgo, 864000);
+eq('derived median flagged', hist[1]?.medianHousePrice12mAgoDerived, true);
+eq('stated median not flagged', hist[0]?.medianHousePrice12mAgoDerived, undefined);
+eq('REA Bateau Bay: $1,245,000 up 7.1% → ≈$1,162,000 a year earlier', priorFromGrowth(1245000, 7.1), 1162000);
+eq('no growth → no derived prior', priorFromGrowth(1245000, null), null);
 eq('published 6m growth (negative) kept', hist[1]?.houseGrowth6mPct, -1.5);
 eq('no data → null 12m growth', hist[2]?.houseGrowth12mPct, null);
 eq('no data → null 6m price', hist[2]?.medianHousePrice6mAgo, null);

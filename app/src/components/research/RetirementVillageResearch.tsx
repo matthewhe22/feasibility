@@ -47,6 +47,12 @@ export interface SuburbRow {
   medianHousePrice6mAgo?: number | null;
   houseGrowth12mPct?: number | null;
   houseGrowth6mPct?: number | null;
+  /** True when the prior median wasn't published but derived from the
+   *  published growth % (realestate.com.au prints growth, not the old median). */
+  medianHousePrice12mAgoDerived?: boolean;
+  medianHousePrice6mAgoDerived?: boolean;
+  /** Where the 12/6-month figures came from, e.g. "REA 12-month growth; Cotality 6-month". */
+  historySource?: string | null;
   /** Server-side geocoded (OpenStreetMap Nominatim) — null when unavailable. */
   lat?: number | null;
   lng?: number | null;
@@ -96,6 +102,9 @@ export interface UnitRow {
   note?: string | null;
   source?: string | null;
   sourceUrl?: string | null;
+  /** Set when the distance was measured between suburb centres by the server
+   *  (OpenStreetMap) rather than taken from the model. */
+  distanceBasis?: 'suburb-centre' | null;
 }
 /** Mirror of CompetitorScopeNote in api/_lib/competitorScope.ts. */
 export interface CompetitorScope {
@@ -103,6 +112,9 @@ export interface CompetitorScope {
   soldSince: string;
   excludedOldSales: number;
   undatedSalesKept: number;
+  excludedSubject?: number;
+  excludedRentals?: number;
+  duplicatesMerged?: number;
   excludedOutsideRadius: number;
 }
 export interface CompetitorsResult {
@@ -111,6 +123,8 @@ export interface CompetitorsResult {
   units: UnitRow[];
   /** What the server kept and dropped — absent on responses cached before it existed. */
   scope?: CompetitorScope;
+  /** The model's reply hit its output limit; rows after the cut are missing. */
+  truncated?: boolean;
   summary: string;
   sources: ResearchSource[];
   model?: string;
@@ -302,6 +316,9 @@ export function RetirementVillageResearch() {
       const extra: Record<string, unknown> = {};
       if (nearbySuburbs.length) extra.nearbySuburbs = nearbySuburbs;
       if (refresh) extra.refresh = true;
+      // State left on "(auto)": reuse the one section 1 resolved, so the server
+      // can build the directory page addresses without another lookup.
+      if (!v.state && subResults[i]?.village?.state) extra.state = subResults[i]!.village!.state;
       try { setAt(setCompResults, i, await research<CompetitorsResult>('competitors', v, Object.keys(extra).length ? extra : undefined)); }
       catch (e) { setAt(setCompErrors, i, e instanceof Error ? e.message : 'Research failed.'); }
     }
@@ -311,7 +328,7 @@ export function RetirementVillageResearch() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const exportEntries = villages
-    .map((v, i) => ({ villageName: v.villageName.trim(), suburbs: subResults[i] ?? null, competitors: compResults[i] ?? null }))
+    .map((v, i) => ({ row: i + 1, villageName: v.villageName.trim(), suburbs: subResults[i] ?? null, competitors: compResults[i] ?? null }))
     .filter(e => e.suburbs || e.competitors);
   const canExport = exportEntries.length > 0;
   const runExport = async () => {
@@ -481,9 +498,9 @@ function SuburbsResultView({ result }: { result: SuburbsResult }) {
                   <Td className="capitalize font-medium">{s.suburb}</Td>
                   <Td>{s.state ?? '—'}{s.postcode ? ` ${s.postcode}` : ''}</Td>
                   <Td className="text-right font-mono">{money(s.medianHousePrice)}</Td>
-                  <Td className="text-right font-mono text-gray-600">{money(s.medianHousePrice12mAgo)}</Td>
+                  <Td className="text-right font-mono text-gray-600">{priorMoney(s.medianHousePrice12mAgo, s.medianHousePrice12mAgoDerived)}</Td>
                   <Td className={`text-right font-mono ${pctClass(g12)}`}>{pct(g12)}</Td>
-                  <Td className="text-right font-mono text-gray-600">{money(s.medianHousePrice6mAgo)}</Td>
+                  <Td className="text-right font-mono text-gray-600">{priorMoney(s.medianHousePrice6mAgo, s.medianHousePrice6mAgoDerived)}</Td>
                   <Td className={`text-right font-mono ${pctClass(g6)}`}>{pct(g6)}</Td>
                   <Td className="text-right font-mono">{money(s.medianUnitPrice)}</Td>
                   <Td className="text-right font-mono">{money(s.medianDollarPerSqm)}</Td>
@@ -507,8 +524,12 @@ function SuburbsResultView({ result }: { result: SuburbsResult }) {
         </table>
       </div>
       <p className="text-[10px] text-gray-400 mt-1">
-        Growth = current MHP ÷ MHP 12 (or 6) months earlier − 1, from realestate.com.au's price history; the published
-        growth figure is shown where the prior median isn't. The average growth is the mean of the per-suburb figures.
+        12-month growth is realestate.com.au's published "past 12 month growth"; the 12-months-ago median (≈) is derived
+        from it, since REA doesn't print it. realestate.com.au publishes no 6-month figure, so 6-month values come from
+        Cotality (Admin → Cotality Data) when its data includes them. Average growth is the mean of the per-suburb figures.
+        {result.suburbs?.some(s => s.historySource) && (
+          <span className="block mt-0.5">Sources: {[...new Set(result.suburbs.map(s => s.historySource).filter(Boolean))].join(' · ')}</span>
+        )}
       </p>
       <Averages avgMHP={a.mhp} avgMUP={a.mup} avgPSM={a.psm} growth12m={a.growth12m} growth6m={a.growth6m} />
       <SuburbMap suburbs={result.suburbs ?? []} />
@@ -517,11 +538,23 @@ function SuburbsResultView({ result }: { result: SuburbsResult }) {
   );
 }
 
+/** A prior median, marked "≈" when derived from the published growth %. */
+function priorMoney(v: unknown, derived?: boolean): React.ReactNode {
+  if (!derived || toNum(v) === null) return money(v);
+  return <span title="Derived from the published growth % — the prior median itself isn't published">≈{money(v)}</span>;
+}
+
 function CompetitorsResultView({ result }: { result: CompetitorsResult }) {
   return (
     <div>
       <Meta result={result} />
       <p className="text-[11px] text-gray-700 mb-2">{result.summary}</p>
+      {result.truncated && (
+        <p className="text-[10px] bg-amber-50 border border-amber-300 text-amber-800 rounded px-2 py-1 mb-2">
+          ⚠ The model's reply hit its output limit, so some units may be missing. Re-run, or choose a model with a
+          larger output limit (e.g. Gemini 2.5 Flash) in Admin → AI Settings.
+        </p>
+      )}
       {result.scope && <p className="text-[10px] text-gray-500 mb-2">{scopeText(result.scope)}</p>}
       <TypologySummary units={result.units ?? []} />
       <div className="overflow-x-auto">
@@ -565,7 +598,11 @@ function CompetitorsResultView({ result }: { result: CompetitorsResult }) {
                     </span>
                   )}
                 </Td>
-                <Td className="text-right">{num(u.distanceKm)}</Td>
+                <Td className="text-right" >
+                  <span title={u.distanceBasis === 'suburb-centre' ? 'Measured between suburb centres (approximate)' : undefined}>
+                    {u.distanceBasis === 'suburb-centre' && toNum(u.distanceKm) !== null ? '~' : ''}{num(u.distanceKm)}
+                  </span>
+                </Td>
                 <Td>
                   {u.sourceUrl
                     ? <a href={u.sourceUrl} target="_blank" rel="noopener" className="text-blue-600 underline">{u.source || 'link'}</a>

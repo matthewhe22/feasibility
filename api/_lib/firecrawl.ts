@@ -264,6 +264,9 @@ export async function firecrawlSearch(
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s.apiKey}` },
         body: JSON.stringify(body),
+        // Search + scrape of several pages; bounded so one hung call can't hold
+        // the whole research request until the platform kills it.
+        signal: AbortSignal.timeout(45000),
       });
     } catch (e) {
       throw new FirecrawlError(`Could not reach Firecrawl: ${e instanceof Error ? e.message : 'network error'}`);
