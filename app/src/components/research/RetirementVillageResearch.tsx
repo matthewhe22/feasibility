@@ -4,6 +4,7 @@ import { SuburbMap } from './SuburbMap';
 import { exportRVResearchToExcel } from '../../utils/rvResearchExcel';
 import { summariseByTypology } from '../../utils/typologySummary';
 import { houseGrowth, suburbAverages } from '../../utils/suburbPricing';
+import { scopeText } from '../../utils/competitorScope';
 
 /**
  * Retirement Village Property Research.
@@ -96,10 +97,20 @@ export interface UnitRow {
   source?: string | null;
   sourceUrl?: string | null;
 }
+/** Mirror of CompetitorScopeNote in api/_lib/competitorScope.ts. */
+export interface CompetitorScope {
+  radiusKm: number;
+  soldSince: string;
+  excludedOldSales: number;
+  excludedUndatedSales: number;
+  excludedOutsideRadius: number;
+}
 export interface CompetitorsResult {
   subject?: { name?: string; suburb?: string; state?: string; postcode?: string };
   proximityKm?: number;
   units: UnitRow[];
+  /** What the server kept and dropped — absent on responses cached before it existed. */
+  scope?: CompetitorScope;
   summary: string;
   sources: ResearchSource[];
   model?: string;
@@ -488,6 +499,7 @@ function CompetitorsResultView({ result }: { result: CompetitorsResult }) {
     <div>
       <Meta result={result} />
       <p className="text-[11px] text-gray-700 mb-2">{result.summary}</p>
+      {result.scope && <p className="text-[10px] text-gray-500 mb-2">{scopeText(result.scope)}</p>}
       <TypologySummary units={result.units ?? []} />
       <div className="overflow-x-auto">
         <table className="w-full text-xs border-collapse">

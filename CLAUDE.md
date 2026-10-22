@@ -475,6 +475,13 @@ cut landed in dropdown/image-carousel boilerplate, before the first listing, so
 neither site's listings ever reached the model. Tests:
 `npx tsx api/__tests__/rvDirectories.test.ts`.
 
+**Evidence scope:** competitor results are limited to sales dated within the
+last 12 months (undated sales excluded) and current listings, from villages
+within the proximity radius. The prompt asks for this and
+`api/_lib/competitorScope.ts` enforces it after enrichment; the response's
+`scope` field reports what was dropped (shown under the summary and in the
+export). Tests: `npx tsx api/__tests__/competitorScope.test.ts`.
+
 Backend: `POST /api/research/retirement-village` (`mode: 'suburbs' | 'competitors'`),
 sharing `api/_lib/aiClient.ts` (the reusable Gemini-grounded / DeepSeek JSON caller)
 and the same Cotality grounding + `cotality:{used,url?,reason?}` response field as

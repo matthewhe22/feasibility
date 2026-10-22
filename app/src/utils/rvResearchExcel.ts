@@ -26,6 +26,7 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { toNum } from '../components/research/RetirementVillageResearch';
+import { scopeText } from './competitorScope';
 import { houseGrowth, suburbAverages } from './suburbPricing';
 import { summariseByTypology } from './typologySummary';
 import type { SuburbsResult, CompetitorsResult, SuburbRow, UnitRow, ResearchSource, SuburbMapData } from '../components/research/RetirementVillageResearch';
@@ -329,6 +330,7 @@ function buildCompetitorsSheet(wb: ExcelJS.Workbook, r: CompetitorsResult, sheet
   const loc = [r.subject?.suburb, r.subject?.state, r.subject?.postcode].filter(Boolean).join(', ');
   if (loc) metaRow(ws, 'Subject location', loc, UNIT_SPAN);
   if (r.proximityKm) metaRow(ws, 'Proximity radius', `${r.proximityKm} km`, UNIT_SPAN);
+  if (r.scope) metaRow(ws, 'Evidence scope', scopeText(r.scope), UNIT_SPAN);
   if (r.timestamp) metaRow(ws, 'Generated', new Date(r.timestamp).toLocaleString('en-AU'), UNIT_SPAN);
   if (r.provider || r.model) metaRow(ws, 'Model', [r.provider, r.model].filter(Boolean).join(' / '), UNIT_SPAN);
   metaRow(ws, 'Live web search', r.groundingUsed ? 'Yes' : 'No — figures may be from training data', UNIT_SPAN);

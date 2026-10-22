@@ -18,6 +18,7 @@ import { geocodeAuSuburbs } from '../_lib/geocode';
 import { buildSuburbMapImage } from '../_lib/staticMap';
 import { normalizeUnitRows, normalizeSuburbRows } from '../_lib/normalizeUnits';
 import { enrichUnitsFromListingPages } from '../_lib/enrichUnits';
+import { scopeCompetitorUnits, soldCutoff } from '../_lib/competitorScope';
 import { directoryTargets, fetchDirectoryPages, suburbSlug, type DirectoryPagesContext } from '../_lib/rvDirectories';
 
 /**
@@ -55,6 +56,10 @@ interface RVRequest {
 
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function twelveMonthsAgoIsoDate(): string {
+  return soldCutoff(new Date());
 }
 
 const SYSTEM_SUBURB_LOCATOR = `You are an Australian geography assistant. Given a retirement village, identify
@@ -198,7 +203,14 @@ You MUST:
      aggregators are often the best source for retirement-unit listing prices.
      SALES: include every sale dated within the past 12 months from today
      (${todayIsoDate()}) that you can substantiate — do not stop at the first few
-     found. LISTINGS: include every current listing you find, with no time bound.
+     found. Do NOT include any sale older than 12 months, nor a sale whose date you
+     cannot find — those are out of scope and will be discarded.
+     LISTINGS: include every CURRENT listing you find (on the market now), with no
+     time bound on when it was listed; do not include withdrawn or expired listings.
+     PROXIMITY: only villages/operators within the stated radius of the subject
+     village. Give every row a distanceKm (straight-line from the subject village)
+     and leave out any village beyond the radius — a directory page for one suburb
+     often lists villages from further afield too.
   2. Be EXHAUSTIVE — this is the most important instruction. List EVERY unit you can
      substantiate across ALL competing villages in the radius — both past-12-months
      SALES and current LISTINGS. Do not truncate to a handful of examples, do not
@@ -303,10 +315,11 @@ function buildCompetitorsPrompt(req: RVRequest): string {
       : `First identify which suburbs fall within ${radius} km, then check villages.com.au's directory page ` +
         `for each of those suburbs individually, not just the subject's own suburb.`,
     ``,
-    `List EVERY unit you can substantiate for EVERY competing village within ${radius} km —`,
-    `SALES from the past 12 months (today is ${todayIsoDate()}) and ALL current LISTINGS`,
-    `(no time bound on listings). Check each village's own "for sale" page as well as the`,
-    `aggregators and portals, and include the full sold-price history from the last 12`,
+    `List EVERY unit you can substantiate for EVERY competing village (and its operator) within`,
+    `${radius} km — SALES dated within the past 12 months only (since ${twelveMonthsAgoIsoDate()};`,
+    `today is ${todayIsoDate()}) and ALL CURRENT LISTINGS. Exclude sales older than that, sales with`,
+    `no published date, and any village beyond ${radius} km. Check each village's own "for sale"`,
+    `page as well as the aggregators and portals, and include every sale from the last 12`,
     `months where published. Do not limit the list to a few examples or to one unit per`,
     `village — if 20 units are substantiated by the live search results, return all 20,`,
     `not a shorter subset. Most recent first.`,
@@ -623,6 +636,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         payload.units = normalizeUnitRows(
           await enrichUnitsFromListingPages(payload.units, groundingConfig?.firecrawl ?? null, p),
         );
+        // After enrichment, which can fill in a missing sale date: keep only
+        // sales from the last 12 months, current listings, and rows within the
+        // radius. See competitorScope.ts.
+        const scoped = scopeCompetitorUnits(payload.units, radiusKm);
+        payload.units = scoped.units;
+        payload.scope = scoped.note;
       }
 
       // Attach real coordinates for the surrounding-suburb map. Geocoding is
