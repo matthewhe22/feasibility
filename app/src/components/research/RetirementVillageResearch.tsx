@@ -3,6 +3,7 @@ import { formatCurrency } from '../../utils';
 import { SuburbMap } from './SuburbMap';
 import { exportRVResearchToExcel } from '../../utils/rvResearchExcel';
 import { summariseByTypology } from '../../utils/typologySummary';
+import { houseGrowth, suburbAverages } from '../../utils/suburbPricing';
 
 /**
  * Retirement Village Property Research.
@@ -39,6 +40,12 @@ export interface SuburbRow {
   medianUnitPrice?: number | null;
   medianDollarPerSqm?: number | null;
   asOf?: string | null;
+  /** Median house price 12 / 6 months before `asOf`, and the growth to now in
+   *  percent (4.2 = +4.2%). Growth is derived from the prices when both exist. */
+  medianHousePrice12mAgo?: number | null;
+  medianHousePrice6mAgo?: number | null;
+  houseGrowth12mPct?: number | null;
+  houseGrowth6mPct?: number | null;
   /** Server-side geocoded (OpenStreetMap Nominatim) — null when unavailable. */
   lat?: number | null;
   lng?: number | null;
@@ -137,10 +144,6 @@ const num = (v?: unknown) => {
   const n = toNum(v);
   return n === null ? '—' : String(n);
 };
-const avg = (xs: Array<number | null | undefined>) => {
-  const v = xs.filter((x): x is number => typeof x === 'number' && isFinite(x));
-  return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null;
-};
 
 /** Area cell: internal m², with land m² beneath it for villas / land-lease. */
 function area(u: UnitRow): React.ReactNode {
@@ -164,34 +167,65 @@ function dollarsPerSqm(u: UnitRow): string {
   return formatCurrency(Math.round(p / a));
 }
 
+/** Most villages one run can research — each costs two AI calls per section. */
+const MAX_VILLAGES = 5;
+
+interface VillageInput {
+  villageName: string;
+  state: string;
+  suburb: string;
+  postcode: string;
+}
+const emptyVillage = (): VillageInput => ({ villageName: '', state: '', suburb: '', postcode: '' });
+
+/** Signed percentage, e.g. "+4.2%" / "−1.3%". */
+const pct = (v?: unknown) => {
+  const n = toNum(v);
+  if (n === null) return '—';
+  return `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(1)}%`;
+};
+const pctClass = (v?: unknown) => {
+  const n = toNum(v);
+  return n === null ? '' : n > 0 ? 'text-emerald-700' : n < 0 ? 'text-red-700' : '';
+};
+
 export function RetirementVillageResearch() {
-  const [villageName, setVillageName] = useState('');
-  const [state, setState] = useState('');
-  const [suburb, setSuburb] = useState('');
-  const [postcode, setPostcode] = useState('');
+  const [villages, setVillages] = useState<VillageInput[]>([emptyVillage()]);
   const [proximityKm, setProximityKm] = useState(5);
 
-  const [subLoading, setSubLoading] = useState(false);
-  const [subError, setSubError] = useState<string | null>(null);
-  const [subResult, setSubResult] = useState<SuburbsResult | null>(null);
+  // Results are indexed by village row.
+  const [subLoading, setSubLoading] = useState<string | null>(null);
+  const [subErrors, setSubErrors] = useState<Array<string | null>>([]);
+  const [subResults, setSubResults] = useState<Array<SuburbsResult | null>>([]);
 
-  const [compLoading, setCompLoading] = useState(false);
-  const [compError, setCompError] = useState<string | null>(null);
-  const [compResult, setCompResult] = useState<CompetitorsResult | null>(null);
+  const [compLoading, setCompLoading] = useState<string | null>(null);
+  const [compErrors, setCompErrors] = useState<Array<string | null>>([]);
+  const [compResults, setCompResults] = useState<Array<CompetitorsResult | null>>([]);
 
-  const body = () => ({
-    villageName: villageName.trim(),
-    state: state || undefined,
-    suburb: suburb.trim() || undefined,
-    postcode: postcode.trim() || undefined,
-    proximityKm,
-  });
+  const setVillageCount = (n: number) => {
+    setVillages(v => (n > v.length ? [...v, ...Array.from({ length: n - v.length }, emptyVillage)] : v.slice(0, n)));
+    setSubResults(r => r.slice(0, n)); setSubErrors(e => e.slice(0, n));
+    setCompResults(r => r.slice(0, n)); setCompErrors(e => e.slice(0, n));
+  };
+  const updateVillage = (i: number, patch: Partial<VillageInput>) =>
+    setVillages(v => v.map((x, j) => (j === i ? { ...x, ...patch } : x)));
 
-  async function research<T>(mode: 'suburbs' | 'competitors', extra?: Record<string, unknown>): Promise<T> {
+  const setAt = <T,>(set: React.Dispatch<React.SetStateAction<Array<T | null>>>, i: number, value: T) =>
+    set(arr => { const next = [...arr]; next[i] = value; return next; });
+
+  async function research<T>(mode: 'suburbs' | 'competitors', v: VillageInput, extra?: Record<string, unknown>): Promise<T> {
     const r = await fetch('/api/research/retirement-village', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode, ...body(), ...extra }),
+      body: JSON.stringify({
+        mode,
+        villageName: v.villageName.trim(),
+        state: v.state || undefined,
+        suburb: v.suburb.trim() || undefined,
+        postcode: v.postcode.trim() || undefined,
+        proximityKm,
+        ...extra,
+      }),
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({ error: r.statusText }));
@@ -200,58 +234,82 @@ export function RetirementVillageResearch() {
     return (await r.json()) as T;
   }
 
+  /** Indices of the rows that have a village name — blank rows are skipped. */
+  const namedRows = () => villages.map((v, i) => (v.villageName.trim() ? i : -1)).filter(i => i >= 0);
+
+  // Villages run one after another rather than in parallel: each request
+  // already fans out to several searches, and free-tier AI keys rate-limit
+  // bursts.
   const runSuburbs = async () => {
-    if (!villageName.trim()) { setSubError('Enter a retirement village name first.'); return; }
-    // A re-run (a result already showing) is an explicit request for fresh data —
-    // bypass the server's 6h response cache so a live figure that moved since the
-    // last pull (e.g. a portal's rolling-median recalculation) actually shows up,
-    // instead of silently re-serving the same cached answer. The first run for a
-    // village still hits the cache normally, so identical lookups within the
-    // window (incl. from other users) don't each spend search credits.
-    const refresh = subResult !== null;
-    setSubLoading(true); setSubError(null); setSubResult(null);
-    try { setSubResult(await research<SuburbsResult>('suburbs', refresh ? { refresh: true } : undefined)); }
-    catch (e) { setSubError(e instanceof Error ? e.message : 'Research failed.'); }
-    finally { setSubLoading(false); }
+    const rows = namedRows();
+    if (!rows.length) { setSubErrors(['Enter a retirement village name first.']); return; }
+    const prior = subResults;
+    setSubErrors([]); setSubResults([]);
+    for (const [n, i] of rows.entries()) {
+      const v = villages[i];
+      if (!v) continue;
+      setSubLoading(rows.length > 1 ? `${n + 1} / ${rows.length}` : '');
+      // A re-run (a result already showing) is an explicit request for fresh data —
+      // bypass the server's 6h response cache so a live figure that moved since the
+      // last pull (e.g. a portal's rolling-median recalculation) actually shows up,
+      // instead of silently re-serving the same cached answer. The first run for a
+      // village still hits the cache normally, so identical lookups within the
+      // window (incl. from other users) don't each spend search credits.
+      const refresh = Boolean(prior[i]);
+      try { setAt(setSubResults, i, await research<SuburbsResult>('suburbs', v, refresh ? { refresh: true } : undefined)); }
+      catch (e) { setAt(setSubErrors, i, e instanceof Error ? e.message : 'Research failed.'); }
+    }
+    setSubLoading(null);
   };
 
   const runCompetitors = async () => {
-    if (!villageName.trim()) { setCompError('Enter a retirement village name first.'); return; }
-    // See runSuburbs — a re-run bypasses the response cache so it actually
-    // re-searches instead of re-serving the same cached answer.
-    const refresh = compResult !== null;
-    setCompLoading(true); setCompError(null); setCompResult(null);
-    // Reuse the confirmed nearby-suburb list from section 1 (if it's been run)
-    // so competitor search actually covers the proximity radius — villages.com.au
-    // serves one directory page per suburb, so knowing the real suburb names
-    // lets the backend query each one directly instead of guessing.
-    const nearbySuburbs = (subResult?.suburbs ?? [])
-      .filter(s => s.distanceKm == null || s.distanceKm <= proximityKm)
-      .map(s => s.suburb)
-      .filter(Boolean);
-    const extra: Record<string, unknown> = {};
-    if (nearbySuburbs.length) extra.nearbySuburbs = nearbySuburbs;
-    if (refresh) extra.refresh = true;
-    try { setCompResult(await research<CompetitorsResult>('competitors', Object.keys(extra).length ? extra : undefined)); }
-    catch (e) { setCompError(e instanceof Error ? e.message : 'Research failed.'); }
-    finally { setCompLoading(false); }
+    const rows = namedRows();
+    if (!rows.length) { setCompErrors(['Enter a retirement village name first.']); return; }
+    const prior = compResults;
+    setCompErrors([]); setCompResults([]);
+    for (const [n, i] of rows.entries()) {
+      const v = villages[i];
+      if (!v) continue;
+      setCompLoading(rows.length > 1 ? `${n + 1} / ${rows.length}` : '');
+      // See runSuburbs — a re-run bypasses the response cache so it actually
+      // re-searches instead of re-serving the same cached answer.
+      const refresh = Boolean(prior[i]);
+      // Reuse this village's confirmed nearby-suburb list from section 1 (if it's
+      // been run) so competitor search covers the proximity radius. Without it
+      // the server resolves the suburb list itself.
+      const nearbySuburbs = (subResults[i]?.suburbs ?? [])
+        .filter(s => s.distanceKm == null || s.distanceKm <= proximityKm)
+        .map(s => s.suburb)
+        .filter(Boolean);
+      const extra: Record<string, unknown> = {};
+      if (nearbySuburbs.length) extra.nearbySuburbs = nearbySuburbs;
+      if (refresh) extra.refresh = true;
+      try { setAt(setCompResults, i, await research<CompetitorsResult>('competitors', v, Object.keys(extra).length ? extra : undefined)); }
+      catch (e) { setAt(setCompErrors, i, e instanceof Error ? e.message : 'Research failed.'); }
+    }
+    setCompLoading(null);
   };
-
-  // Recompute averages client-side as a fallback if the model omitted them.
-  const avgMHP = subResult?.averages?.avgMedianHousePrice ?? avg((subResult?.suburbs ?? []).map(s => s.medianHousePrice));
-  const avgMUP = subResult?.averages?.avgMedianUnitPrice ?? avg((subResult?.suburbs ?? []).map(s => s.medianUnitPrice));
-  const avgPSM = subResult?.averages?.avgDollarPerSqm ?? avg((subResult?.suburbs ?? []).map(s => s.medianDollarPerSqm));
 
   const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  const canExport = Boolean(subResult || compResult);
+  const exportEntries = villages
+    .map((v, i) => ({ villageName: v.villageName.trim(), suburbs: subResults[i] ?? null, competitors: compResults[i] ?? null }))
+    .filter(e => e.suburbs || e.competitors);
+  const canExport = exportEntries.length > 0;
   const runExport = async () => {
     setExportError(null);
     setExporting(true);
-    try { await exportRVResearchToExcel(villageName.trim(), subResult, compResult); }
+    try { await exportRVResearchToExcel(exportEntries); }
     catch (e) { setExportError(e instanceof Error ? e.message : 'Export failed.'); }
     finally { setExporting(false); }
   };
+
+  const multi = villages.length > 1;
+  const heading = (i: number) => multi ? (
+    <h4 className="text-xs font-bold text-purple-800 border-b border-purple-200 pb-1 mb-2 mt-1">
+      Village {i + 1}: {villages[i]?.villageName.trim() || '(unnamed)'}
+    </h4>
+  ) : null;
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -266,7 +324,7 @@ export function RetirementVillageResearch() {
             </p>
           </div>
           <button onClick={runExport} disabled={!canExport || exporting}
-            title={canExport ? 'Export both sections (whichever have run) to one Excel workbook' : 'Run at least one section below first'}
+            title={canExport ? 'Export every village and section that has run to one Excel workbook' : 'Run at least one section below first'}
             className="text-[11px] bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white px-3 py-1.5 rounded font-medium whitespace-nowrap">
             {exporting ? 'Exporting…' : '⬇ Export to Excel'}
           </button>
@@ -274,94 +332,73 @@ export function RetirementVillageResearch() {
         {exportError && <p className="text-[11px] text-red-600 mt-1">{exportError}</p>}
         <p className="text-[11px] text-amber-700 mt-1">
           Tip: live results (current villages.com.au / downsizing.com.au listings) need a <strong>Gemini</strong> model
-          with web search — DeepSeek has no live search and answers from training data only. Set this in Admin → AI Settings.
+          with web search, or a <strong>Firecrawl</strong> key — DeepSeek has no live search of its own. Set these in Admin.
         </p>
       </div>
 
-      {/* Shared inputs */}
+      {/* Shared inputs — one row per village */}
       <div className="border border-gray-200 bg-white rounded p-3 mb-4">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-          <Field className="md:col-span-5" label="Retirement village name *">
-            <input value={villageName} onChange={e => setVillageName(e.target.value)}
-              placeholder="e.g. Aveo Springfield"
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 bg-yellow-50 focus:ring-1 focus:ring-blue-400" />
-          </Field>
-          <Field className="md:col-span-2" label="State">
-            <select value={state} onChange={e => setState(e.target.value)}
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 bg-yellow-50 focus:ring-1 focus:ring-blue-400">
-              <option value="">(auto)</option>
-              {STATES.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </Field>
-          <Field className="md:col-span-3" label="Suburb (optional — improves grounding)">
-            <input value={suburb} onChange={e => setSuburb(e.target.value)}
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 bg-yellow-50 focus:ring-1 focus:ring-blue-400" />
-          </Field>
-          <Field className="md:col-span-2" label="Postcode (optional)">
-            <input value={postcode} onChange={e => setPostcode(e.target.value)} inputMode="numeric"
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 bg-yellow-50 focus:ring-1 focus:ring-blue-400" />
-          </Field>
-        </div>
+        <label className="flex items-center gap-2 text-[11px] text-gray-600 mb-3">
+          Number of villages to research
+          <select value={villages.length} onChange={e => setVillageCount(parseInt(e.target.value, 10))}
+            disabled={subLoading !== null || compLoading !== null}
+            className="text-sm border border-gray-300 rounded px-2 py-1 bg-yellow-50 focus:ring-1 focus:ring-blue-400">
+            {Array.from({ length: MAX_VILLAGES }, (_, k) => k + 1).map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+          {multi && <span className="text-gray-400">Each section researches the villages one after another.</span>}
+        </label>
+        {villages.map((v, i) => (
+          <div key={i} className={`grid grid-cols-1 md:grid-cols-12 gap-3 items-end ${i > 0 ? 'mt-3 pt-3 border-t border-gray-100' : ''}`}>
+            <Field className="md:col-span-5" label={`${multi ? `Village ${i + 1} — r` : 'R'}etirement village name *`}>
+              <input value={v.villageName} onChange={e => updateVillage(i, { villageName: e.target.value })}
+                placeholder="e.g. Aveo Springfield"
+                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 bg-yellow-50 focus:ring-1 focus:ring-blue-400" />
+            </Field>
+            <Field className="md:col-span-2" label="State">
+              <select value={v.state} onChange={e => updateVillage(i, { state: e.target.value })}
+                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 bg-yellow-50 focus:ring-1 focus:ring-blue-400">
+                <option value="">(auto)</option>
+                {STATES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </Field>
+            <Field className="md:col-span-3" label="Suburb (optional — improves grounding)">
+              <input value={v.suburb} onChange={e => updateVillage(i, { suburb: e.target.value })}
+                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 bg-yellow-50 focus:ring-1 focus:ring-blue-400" />
+            </Field>
+            <Field className="md:col-span-2" label="Postcode (optional)">
+              <input value={v.postcode} onChange={e => updateVillage(i, { postcode: e.target.value })} inputMode="numeric"
+                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 bg-yellow-50 focus:ring-1 focus:ring-blue-400" />
+            </Field>
+          </div>
+        ))}
       </div>
 
       {/* Section 1 — Surrounding suburb pricing */}
       <Section
         title="1. Surrounding-suburb pricing"
-        subtitle="Median house price (MHP), median unit price (MUP) and median $/m² for the village's suburb and adjacent suburbs."
+        subtitle="Median house price (MHP) now, 12 and 6 months ago with growth, median unit price (MUP) and median $/m² for each village's suburb and adjacent suburbs."
         onRun={runSuburbs}
-        running={subLoading}
+        running={subLoading !== null}
         runLabel="Research suburb prices"
+        runningLabel={subLoading ? `Researching ${subLoading}…` : undefined}
       >
-        {subError && <ErrorBox error={subError} />}
-        {subResult && (
-          <div>
-            <Meta result={subResult} />
-            <p className="text-[11px] text-gray-700 mb-2">{subResult.summary}</p>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs border-collapse">
-                <thead>
-                  <tr className="bg-gray-100 text-left">
-                    <Th>Suburb</Th><Th>State</Th><Th className="text-right">Median House</Th>
-                    <Th className="text-right">Median Unit</Th><Th className="text-right">Median $/m²</Th>
-                    <Th className="text-right">Dist (km)</Th><Th>As of</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {subResult.suburbs?.map((s, i) => (
-                    <tr key={i} className="border-b border-gray-100">
-                      <Td className="capitalize font-medium">{s.suburb}</Td>
-                      <Td>{s.state ?? '—'}{s.postcode ? ` ${s.postcode}` : ''}</Td>
-                      <Td className="text-right font-mono">{money(s.medianHousePrice)}</Td>
-                      <Td className="text-right font-mono">{money(s.medianUnitPrice)}</Td>
-                      <Td className="text-right font-mono">{money(s.medianDollarPerSqm)}</Td>
-                      <Td className="text-right">{num(s.distanceKm)}</Td>
-                      <Td className="text-gray-500">{s.asOf ?? '—'}</Td>
-                    </tr>
-                  ))}
-                  <tr className="bg-emerald-50 font-bold border-t-2 border-emerald-300">
-                    <Td className="text-emerald-900">Indicative average</Td><Td />
-                    <Td className="text-right font-mono text-emerald-900">{money(avgMHP)}</Td>
-                    <Td className="text-right font-mono text-emerald-900">{money(avgMUP)}</Td>
-                    <Td className="text-right font-mono text-emerald-900">{money(avgPSM)}</Td>
-                    <Td /><Td />
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <Averages avgMHP={avgMHP} avgMUP={avgMUP} avgPSM={avgPSM} />
-            <SuburbMap suburbs={subResult.suburbs ?? []} />
-            <Sources sources={subResult.sources} />
+        {villages.map((_, i) => (subResults[i] || subErrors[i]) && (
+          <div key={i} className={i > 0 ? 'mt-5' : ''}>
+            {heading(i)}
+            {subErrors[i] && <ErrorBox error={subErrors[i]!} />}
+            {subResults[i] && <SuburbsResultView result={subResults[i]!} />}
           </div>
-        )}
+        ))}
       </Section>
 
       {/* Section 2 — Competitor villages */}
       <Section
         title="2. Competitor retirement villages"
-        subtitle={`All substantiable past sales and current listings within the proximity radius — operator, village, unit, beds/baths/study/car, m², price, $/m², date and tenure/DMF terms — sourced from villages.com.au, downsizing.com.au, operator sites & portals.${subResult ? ' Using the suburb list from section 1 to cover the whole radius.' : ' Tip: run section 1 first so this searches every suburb in the radius, not just the subject village’s own.'}`}
+        subtitle={`All substantiable past sales and current listings within the proximity radius — operator, village, unit, beds/baths/study/car, m², price, $/m², date and tenure/DMF terms — sourced from villages.com.au, downsizing.com.au, operator sites & portals.${subResults.some(Boolean) ? ' Using the suburb list from section 1 to cover the whole radius.' : ''}`}
         onRun={runCompetitors}
-        running={compLoading}
+        running={compLoading !== null}
         runLabel="Research competitors"
+        runningLabel={compLoading ? `Researching ${compLoading}…` : undefined}
         extraControl={
           <label className="flex items-center gap-1.5 text-[11px] text-gray-600">
             Proximity
@@ -372,70 +409,141 @@ export function RetirementVillageResearch() {
           </label>
         }
       >
-        {compError && <ErrorBox error={compError} />}
-        {compResult && (
-          <div>
-            <Meta result={compResult} />
-            <p className="text-[11px] text-gray-700 mb-2">{compResult.summary}</p>
-            <TypologySummary units={compResult.units ?? []} />
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs border-collapse">
-                <thead>
-                  <tr className="bg-gray-100 text-left">
-                    <Th>Operator</Th><Th>Village</Th><Th>Unit</Th><Th>Type</Th>
-                    <Th className="text-right">Beds</Th><Th className="text-right">Baths</Th>
-                    <Th className="text-center">Study</Th><Th className="text-right">Car</Th>
-                    <Th className="text-right">m²</Th>
-                    <Th className="text-right">Price</Th><Th className="text-right">$/m²</Th>
-                    <Th>Sold / Listing</Th><Th>Date</Th><Th>Tenure / DMF</Th>
-                    <Th className="text-right">Dist</Th><Th>Source</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {compResult.units?.length ? compResult.units.map((u, i) => (
-                    <tr key={i} className="border-b border-gray-100 align-top">
-                      <Td className="text-gray-700">{u.operator ?? '—'}</Td>
-                      <Td className="font-medium">{u.villageName}
-                        {(u.suburb || u.address) && <span className="block text-[10px] text-gray-500">{u.address || u.suburb}</span>}
-                        {u.note && <span className="block text-[10px] text-gray-400 italic">{u.note}</span>}
-                      </Td>
-                      <Td className="font-mono text-gray-700">{u.unitNumber ?? '—'}</Td>
-                      <Td>{u.unitType ?? '—'}</Td>
-                      <Td className="text-right">{num(u.bedrooms)}</Td>
-                      <Td className="text-right">{num(u.bathrooms)}</Td>
-                      <Td className="text-center">{u.study == null ? '—' : u.study ? 'Yes' : 'No'}</Td>
-                      <Td className="text-right">{num(u.carSpaces)}</Td>
-                      <Td className="text-right">{area(u)}</Td>
-                      <Td className="text-right font-mono">{money(u.price)}</Td>
-                      <Td className="text-right font-mono text-gray-600">{dollarsPerSqm(u)}</Td>
-                      <Td>{u.priceType ? <Badge type={u.priceType} /> : '—'}</Td>
-                      <Td className="text-gray-600">{u.date ?? '—'}</Td>
-                      <Td className="text-gray-600">
-                        {u.tenure ?? '—'}
-                        {u.dmfSummary && <span className="block text-[10px] text-gray-500">{u.dmfSummary}</span>}
-                        {typeof u.recurringFee === 'number' && (
-                          <span className="block text-[10px] text-gray-500">
-                            Levy {money(u.recurringFee)}{u.recurringFeePeriod ? `/${u.recurringFeePeriod}` : ''}
-                          </span>
-                        )}
-                      </Td>
-                      <Td className="text-right">{num(u.distanceKm)}</Td>
-                      <Td>
-                        {u.sourceUrl
-                          ? <a href={u.sourceUrl} target="_blank" rel="noopener" className="text-blue-600 underline">{u.source || 'link'}</a>
-                          : (u.source ?? '—')}
-                      </Td>
-                    </tr>
-                  )) : (
-                    <tr><Td className="text-gray-500 italic">No competitor units returned.</Td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <Sources sources={compResult.sources} />
+        {villages.map((_, i) => (compResults[i] || compErrors[i]) && (
+          <div key={i} className={i > 0 ? 'mt-5' : ''}>
+            {heading(i)}
+            {compErrors[i] && <ErrorBox error={compErrors[i]!} />}
+            {compResults[i] && <CompetitorsResultView result={compResults[i]!} />}
           </div>
-        )}
+        ))}
       </Section>
+    </div>
+  );
+}
+
+function SuburbsResultView({ result }: { result: SuburbsResult }) {
+  const a = suburbAverages(result);
+  return (
+    <div>
+      <Meta result={result} />
+      <p className="text-[11px] text-gray-700 mb-2">{result.summary}</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="bg-gray-100 text-left">
+              <Th>Suburb</Th><Th>State</Th><Th className="text-right">Median House</Th>
+              <Th className="text-right">MHP 12m ago</Th><Th className="text-right">12m growth</Th>
+              <Th className="text-right">MHP 6m ago</Th><Th className="text-right">6m growth</Th>
+              <Th className="text-right">Median Unit</Th><Th className="text-right">Median $/m²</Th>
+              <Th className="text-right">Dist (km)</Th><Th>As of</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {result.suburbs?.map((s, i) => {
+              const g12 = houseGrowth(s, '12m');
+              const g6 = houseGrowth(s, '6m');
+              return (
+                <tr key={i} className="border-b border-gray-100">
+                  <Td className="capitalize font-medium">{s.suburb}</Td>
+                  <Td>{s.state ?? '—'}{s.postcode ? ` ${s.postcode}` : ''}</Td>
+                  <Td className="text-right font-mono">{money(s.medianHousePrice)}</Td>
+                  <Td className="text-right font-mono text-gray-600">{money(s.medianHousePrice12mAgo)}</Td>
+                  <Td className={`text-right font-mono ${pctClass(g12)}`}>{pct(g12)}</Td>
+                  <Td className="text-right font-mono text-gray-600">{money(s.medianHousePrice6mAgo)}</Td>
+                  <Td className={`text-right font-mono ${pctClass(g6)}`}>{pct(g6)}</Td>
+                  <Td className="text-right font-mono">{money(s.medianUnitPrice)}</Td>
+                  <Td className="text-right font-mono">{money(s.medianDollarPerSqm)}</Td>
+                  <Td className="text-right">{num(s.distanceKm)}</Td>
+                  <Td className="text-gray-500">{s.asOf ?? '—'}</Td>
+                </tr>
+              );
+            })}
+            <tr className="bg-emerald-50 font-bold border-t-2 border-emerald-300">
+              <Td className="text-emerald-900">Indicative average</Td><Td />
+              <Td className="text-right font-mono text-emerald-900">{money(a.mhp)}</Td>
+              <Td className="text-right font-mono text-emerald-900">{money(a.mhp12mAgo)}</Td>
+              <Td className={`text-right font-mono ${pctClass(a.growth12m)}`}>{pct(a.growth12m)}</Td>
+              <Td className="text-right font-mono text-emerald-900">{money(a.mhp6mAgo)}</Td>
+              <Td className={`text-right font-mono ${pctClass(a.growth6m)}`}>{pct(a.growth6m)}</Td>
+              <Td className="text-right font-mono text-emerald-900">{money(a.mup)}</Td>
+              <Td className="text-right font-mono text-emerald-900">{money(a.psm)}</Td>
+              <Td /><Td />
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[10px] text-gray-400 mt-1">
+        Growth = current MHP ÷ MHP 12 (or 6) months earlier − 1, from realestate.com.au's price history; the published
+        growth figure is shown where the prior median isn't. The average growth is the mean of the per-suburb figures.
+      </p>
+      <Averages avgMHP={a.mhp} avgMUP={a.mup} avgPSM={a.psm} growth12m={a.growth12m} growth6m={a.growth6m} />
+      <SuburbMap suburbs={result.suburbs ?? []} />
+      <Sources sources={result.sources} />
+    </div>
+  );
+}
+
+function CompetitorsResultView({ result }: { result: CompetitorsResult }) {
+  return (
+    <div>
+      <Meta result={result} />
+      <p className="text-[11px] text-gray-700 mb-2">{result.summary}</p>
+      <TypologySummary units={result.units ?? []} />
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="bg-gray-100 text-left">
+              <Th>Operator</Th><Th>Village</Th><Th>Unit</Th><Th>Type</Th>
+              <Th className="text-right">Beds</Th><Th className="text-right">Baths</Th>
+              <Th className="text-center">Study</Th><Th className="text-right">Car</Th>
+              <Th className="text-right">m²</Th>
+              <Th className="text-right">Price</Th><Th className="text-right">$/m²</Th>
+              <Th>Sold / Listing</Th><Th>Date</Th><Th>Tenure / DMF</Th>
+              <Th className="text-right">Dist</Th><Th>Source</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {result.units?.length ? result.units.map((u, i) => (
+              <tr key={i} className="border-b border-gray-100 align-top">
+                <Td className="text-gray-700">{u.operator ?? '—'}</Td>
+                <Td className="font-medium">{u.villageName}
+                  {(u.suburb || u.address) && <span className="block text-[10px] text-gray-500">{u.address || u.suburb}</span>}
+                  {u.note && <span className="block text-[10px] text-gray-400 italic">{u.note}</span>}
+                </Td>
+                <Td className="font-mono text-gray-700">{u.unitNumber ?? '—'}</Td>
+                <Td>{u.unitType ?? '—'}</Td>
+                <Td className="text-right">{num(u.bedrooms)}</Td>
+                <Td className="text-right">{num(u.bathrooms)}</Td>
+                <Td className="text-center">{u.study == null ? '—' : u.study ? 'Yes' : 'No'}</Td>
+                <Td className="text-right">{num(u.carSpaces)}</Td>
+                <Td className="text-right">{area(u)}</Td>
+                <Td className="text-right font-mono">{money(u.price)}</Td>
+                <Td className="text-right font-mono text-gray-600">{dollarsPerSqm(u)}</Td>
+                <Td>{u.priceType ? <Badge type={u.priceType} /> : '—'}</Td>
+                <Td className="text-gray-600">{u.date ?? '—'}</Td>
+                <Td className="text-gray-600">
+                  {u.tenure ?? '—'}
+                  {u.dmfSummary && <span className="block text-[10px] text-gray-500">{u.dmfSummary}</span>}
+                  {typeof u.recurringFee === 'number' && (
+                    <span className="block text-[10px] text-gray-500">
+                      Levy {money(u.recurringFee)}{u.recurringFeePeriod ? `/${u.recurringFeePeriod}` : ''}
+                    </span>
+                  )}
+                </Td>
+                <Td className="text-right">{num(u.distanceKm)}</Td>
+                <Td>
+                  {u.sourceUrl
+                    ? <a href={u.sourceUrl} target="_blank" rel="noopener" className="text-blue-600 underline">{u.source || 'link'}</a>
+                    : (u.source ?? '—')}
+                </Td>
+              </tr>
+            )) : (
+              <tr><Td className="text-gray-500 italic">No competitor units returned.</Td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <Sources sources={result.sources} />
     </div>
   );
 }
@@ -452,9 +560,11 @@ function Field({ label, children, className = '' }: { label: string; children: R
 }
 
 function Section({
-  title, subtitle, onRun, running, runLabel, extraControl, children,
+  title, subtitle, onRun, running, runLabel, runningLabel, extraControl, children,
 }: {
   title: string; subtitle: string; onRun: () => void; running: boolean; runLabel: string;
+  /** Shown on the button while running — e.g. progress through several villages. */
+  runningLabel?: string | undefined;
   extraControl?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
@@ -467,7 +577,7 @@ function Section({
         {extraControl}
         <button onClick={onRun} disabled={running}
           className="text-[11px] bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white px-3 py-1.5 rounded font-medium">
-          {running ? 'Researching…' : runLabel}
+          {running ? (runningLabel ?? 'Researching…') : runLabel}
         </button>
       </div>
       <div className="p-3">{children}</div>
@@ -546,10 +656,14 @@ function TypologySummary({ units }: { units: UnitRow[] }) {
   );
 }
 
-function Averages({ avgMHP, avgMUP, avgPSM }: { avgMHP: number | null; avgMUP: number | null; avgPSM: number | null }) {
+function Averages({ avgMHP, avgMUP, avgPSM, growth12m, growth6m }: {
+  avgMHP: number | null; avgMUP: number | null; avgPSM: number | null; growth12m: number | null; growth6m: number | null;
+}) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
+    <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-2 mt-3">
       <Stat label="Indicative avg median house price (MHP)" value={money(avgMHP)} />
+      <Stat label="Avg MHP growth — last 12 months" value={pct(growth12m)} />
+      <Stat label="Avg MHP growth — last 6 months" value={pct(growth6m)} />
       <Stat label="Indicative avg median unit price (MUP)" value={money(avgMUP)} />
       <Stat label="Indicative avg $/m²" value={money(avgPSM)} />
     </div>

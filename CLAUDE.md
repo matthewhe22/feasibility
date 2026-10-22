@@ -458,6 +458,23 @@ named retirement village. Two independent tools:
    cannot be substantiated. $/m² is computed client-side only when both price
    and internal area are real numbers.
 
+**Multiple villages:** a "Number of villages" dropdown (1–5) adds input rows;
+each section researches the named villages one after another and shows results
+per village. The Excel export writes one sheet pair per village (`V1 …`, `V2 …`).
+
+**MHP history:** suburb rows carry `medianHousePrice12mAgo` / `6mAgo` and
+`houseGrowth12mPct` / `6mPct`. Growth is derived server-side from the two prices
+when both exist (`normalizeSuburbRows`), else the published % is kept.
+
+**Aggregator listings:** competitor mode scrapes the villages.com.au and
+downsizing.com.au per-suburb directory pages directly by URL
+(`api/_lib/rvDirectories.ts`, up to 6 suburbs × 2 sites), resolving the suburb
+list itself when section 1 hasn't run. Scraped markdown is passed through
+`compactScrapedMarkdown` (firecrawl.ts) before the per-page cut — previously the
+cut landed in dropdown/image-carousel boilerplate, before the first listing, so
+neither site's listings ever reached the model. Tests:
+`npx tsx api/__tests__/rvDirectories.test.ts`.
+
 Backend: `POST /api/research/retirement-village` (`mode: 'suburbs' | 'competitors'`),
 sharing `api/_lib/aiClient.ts` (the reusable Gemini-grounded / DeepSeek JSON caller)
 and the same Cotality grounding + `cotality:{used,url?,reason?}` response field as

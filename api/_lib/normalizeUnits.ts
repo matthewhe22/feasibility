@@ -83,18 +83,41 @@ export function normalizeUnitRows(units: unknown): unknown {
   });
 }
 
-/** The same treatment for suburb-pricing rows. */
+/**
+ * Growth in percent from `prior` to `current`, rounded to one decimal place —
+ * or null unless both are real, positive prices.
+ */
+export function growthPct(current: number | null, prior: number | null): number | null {
+  if (current === null || prior === null || current <= 0 || prior <= 0) return null;
+  return Math.round((current / prior - 1) * 1000) / 10;
+}
+
+/**
+ * The same treatment for suburb-pricing rows, plus the MHP growth fields.
+ *
+ * Growth is derived from the two prices whenever both are present, so the
+ * percentage shown always agrees with the prices beside it. The model's own
+ * percentage is kept only when a prior price is missing — realestate.com.au
+ * sometimes publishes an annual-growth figure without the prior median.
+ */
 export function normalizeSuburbRows(suburbs: unknown): unknown {
   if (!Array.isArray(suburbs)) return suburbs;
   return suburbs.map(s => {
     if (!s || typeof s !== 'object') return s;
     const row = s as Record<string, unknown>;
+    const mhp = toMoney(row.medianHousePrice);
+    const mhp12 = toMoney(row.medianHousePrice12mAgo);
+    const mhp6 = toMoney(row.medianHousePrice6mAgo);
     return {
       ...row,
-      medianHousePrice: toMoney(row.medianHousePrice),
+      medianHousePrice: mhp,
       medianUnitPrice: toMoney(row.medianUnitPrice),
       medianDollarPerSqm: toMoney(row.medianDollarPerSqm),
       distanceKm: toNumber(row.distanceKm),
+      medianHousePrice12mAgo: mhp12,
+      medianHousePrice6mAgo: mhp6,
+      houseGrowth12mPct: growthPct(mhp, mhp12) ?? toNumber(row.houseGrowth12mPct),
+      houseGrowth6mPct: growthPct(mhp, mhp6) ?? toNumber(row.houseGrowth6mPct),
     };
   });
 }
