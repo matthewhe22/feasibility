@@ -461,6 +461,8 @@ named retirement village. Two independent tools:
 **Multiple villages:** a "Number of villages" dropdown (1–5) adds input rows;
 each section researches the named villages one after another and shows results
 per village. The Excel export writes one sheet pair per village (`V1 …`, `V2 …`).
+With 2+ villages, checkboxes in section 2 choose which villages the competitor
+search runs for (all ticked by default); unticked villages keep prior results.
 
 **MHP history:** suburb rows carry `medianHousePrice12mAgo` / `6mAgo` and
 `houseGrowth12mPct` / `6mPct`. Growth is derived server-side from the two prices
@@ -476,8 +478,9 @@ neither site's listings ever reached the model. Tests:
 `npx tsx api/__tests__/rvDirectories.test.ts`.
 
 **Evidence scope:** competitor results are limited to sales dated within the
-last 12 months (undated sales excluded) and current listings, from villages
-within the proximity radius. The prompt asks for this and
+last 12 months and current listings, from villages within the proximity radius.
+Sales with no published date are kept and flagged "sale date not published" in
+their note. The prompt asks for this and
 `api/_lib/competitorScope.ts` enforces it after enrichment; the response's
 `scope` field reports what was dropped (shown under the summary and in the
 export). Tests: `npx tsx api/__tests__/competitorScope.test.ts`.

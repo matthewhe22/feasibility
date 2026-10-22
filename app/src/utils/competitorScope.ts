@@ -4,9 +4,11 @@ import type { CompetitorScope } from '../components/research/RetirementVillageRe
 export function scopeText(sc: CompetitorScope): string {
   const dropped = [
     sc.excludedOldSales && `${sc.excludedOldSales} sale${sc.excludedOldSales > 1 ? 's' : ''} older than 12 months`,
-    sc.excludedUndatedSales && `${sc.excludedUndatedSales} undated sale${sc.excludedUndatedSales > 1 ? 's' : ''}`,
+
     sc.excludedOutsideRadius && `${sc.excludedOutsideRadius} unit${sc.excludedOutsideRadius > 1 ? 's' : ''} beyond ${sc.radiusKm} km`,
   ].filter(Boolean);
+  const undated = sc.undatedSalesKept ?? 0;
   return `Scope: sales since ${sc.soldSince} and current listings, within ${sc.radiusKm} km.` +
-    (dropped.length ? ` Excluded: ${dropped.join(', ')}.` : '');
+    (dropped.length ? ` Excluded: ${dropped.join(', ')}.` : '') +
+    (undated ? ` ${undated} sale${undated > 1 ? 's' : ''} kept with no published date (flagged in the row note).` : '');
 }

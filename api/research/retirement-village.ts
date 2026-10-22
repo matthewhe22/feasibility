@@ -203,8 +203,9 @@ You MUST:
      aggregators are often the best source for retirement-unit listing prices.
      SALES: include every sale dated within the past 12 months from today
      (${todayIsoDate()}) that you can substantiate — do not stop at the first few
-     found. Do NOT include any sale older than 12 months, nor a sale whose date you
-     cannot find — those are out of scope and will be discarded.
+     found. Do NOT include any sale older than 12 months — those are out of scope
+     and will be discarded. A sale whose date is not published may be included
+     with date null (it will be flagged), but never one you know is older.
      LISTINGS: include every CURRENT listing you find (on the market now), with no
      time bound on when it was listed; do not include withdrawn or expired listings.
      PROXIMITY: only villages/operators within the stated radius of the subject
@@ -317,8 +318,8 @@ function buildCompetitorsPrompt(req: RVRequest): string {
     ``,
     `List EVERY unit you can substantiate for EVERY competing village (and its operator) within`,
     `${radius} km — SALES dated within the past 12 months only (since ${twelveMonthsAgoIsoDate()};`,
-    `today is ${todayIsoDate()}) and ALL CURRENT LISTINGS. Exclude sales older than that, sales with`,
-    `no published date, and any village beyond ${radius} km. Check each village's own "for sale"`,
+    `today is ${todayIsoDate()}) and ALL CURRENT LISTINGS. Exclude sales older than that and any`,
+    `village beyond ${radius} km (a sale with no published date may stay, date null). Check each village's own "for sale"`,
     `page as well as the aggregators and portals, and include every sale from the last 12`,
     `months where published. Do not limit the list to a few examples or to one unit per`,
     `village — if 20 units are substantiated by the live search results, return all 20,`,

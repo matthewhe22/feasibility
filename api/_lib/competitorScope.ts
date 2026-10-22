@@ -1,7 +1,8 @@
 /**
  * Keeps RV competitor evidence inside the requested scope:
  *   - SOLD records: only those dated within the last 12 months. A sold record
- *     with no date is dropped too — it can't be shown to fall inside the window.
+ *     with no published date is KEPT (the page simply didn't show one) and
+ *     flagged "date not published" in its note, so a reader can weigh it.
  *   - LISTINGS: every current listing, whatever its listing date.
  *   - Distance: rows the model placed beyond the proximity radius are dropped.
  *     Rows with no distance are kept, since there's nothing to test.
@@ -17,7 +18,8 @@ export interface CompetitorScopeNote {
   /** ISO yyyy-mm-dd — sold records before this date were excluded. */
   soldSince: string;
   excludedOldSales: number;
-  excludedUndatedSales: number;
+  /** Sales kept although no date was published — flagged in their note. */
+  undatedSalesKept: number;
   excludedOutsideRadius: number;
 }
 
@@ -52,24 +54,32 @@ export function scopeCompetitorUnits(
     radiusKm,
     soldSince: soldCutoff(today),
     excludedOldSales: 0,
-    excludedUndatedSales: 0,
+    undatedSalesKept: 0,
     excludedOutsideRadius: 0,
   };
   if (!Array.isArray(units)) return { units, note };
 
-  const kept = units.filter(u => {
-    if (!u || typeof u !== 'object') return true;
+  const kept: unknown[] = [];
+  for (const u of units) {
+    if (!u || typeof u !== 'object') { kept.push(u); continue; }
     const row = u as Record<string, unknown>;
     if (typeof row.distanceKm === 'number' && row.distanceKm > radiusKm) {
       note.excludedOutsideRadius++;
-      return false;
+      continue;
     }
     if (row.priceType === 'sold') {
       const date = comparableDate(row.date);
-      if (!date) { note.excludedUndatedSales++; return false; }
-      if (date < note.soldSince) { note.excludedOldSales++; return false; }
+      if (!date) {
+        note.undatedSalesKept++;
+        const existing = typeof row.note === 'string' ? row.note : '';
+        kept.push(/date not published/i.test(existing)
+          ? row
+          : { ...row, note: existing ? `${existing} — sale date not published` : 'Sale date not published' });
+        continue;
+      }
+      if (date < note.soldSince) { note.excludedOldSales++; continue; }
     }
-    return true;
-  });
+    kept.push(row);
+  }
   return { units: kept, note };
 }

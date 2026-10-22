@@ -102,7 +102,7 @@ export interface CompetitorScope {
   radiusKm: number;
   soldSince: string;
   excludedOldSales: number;
-  excludedUndatedSales: number;
+  undatedSalesKept: number;
   excludedOutsideRadius: number;
 }
 export interface CompetitorsResult {
@@ -186,8 +186,10 @@ interface VillageInput {
   state: string;
   suburb: string;
   postcode: string;
+  /** Ticked → included when "Research competitors" runs (only offered with 2+ villages). */
+  inCompetitorSearch: boolean;
 }
-const emptyVillage = (): VillageInput => ({ villageName: '', state: '', suburb: '', postcode: '' });
+const emptyVillage = (): VillageInput => ({ villageName: '', state: '', suburb: '', postcode: '', inCompetitorSearch: true });
 
 /** Signed percentage, e.g. "+4.2%" / "−1.3%". */
 const pct = (v?: unknown) => {
@@ -274,10 +276,15 @@ export function RetirementVillageResearch() {
   };
 
   const runCompetitors = async () => {
-    const rows = namedRows();
-    if (!rows.length) { setCompErrors(['Enter a retirement village name first.']); return; }
+    const named = namedRows();
+    if (!named.length) { setCompErrors(['Enter a retirement village name first.']); return; }
+    // With several villages only the ticked ones are searched; the others keep
+    // whatever result they already have.
+    const rows = villages.length > 1 ? named.filter(i => villages[i]?.inCompetitorSearch) : named;
+    if (!rows.length) { setCompErrors(['Tick at least one village to include in the competitor search.']); return; }
     const prior = compResults;
-    setCompErrors([]); setCompResults([]);
+    const clear = <T,>(arr: Array<T | null>) => arr.map((x, j) => (rows.includes(j) ? null : x));
+    setCompErrors(clear); setCompResults(clear);
     for (const [n, i] of rows.entries()) {
       const v = villages[i];
       if (!v) continue;
@@ -420,6 +427,22 @@ export function RetirementVillageResearch() {
           </label>
         }
       >
+        {multi && (
+          <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-gray-700">
+            <span className="font-semibold text-gray-600">Include in competitor search:</span>
+            {villages.map((v, i) => {
+              const named = Boolean(v.villageName.trim());
+              return (
+                <label key={i} className={`flex items-center gap-1.5 ${named ? '' : 'text-gray-400'}`}>
+                  <input type="checkbox" checked={named && v.inCompetitorSearch}
+                    disabled={!named || compLoading !== null}
+                    onChange={e => updateVillage(i, { inCompetitorSearch: e.target.checked })} />
+                  Village {i + 1}{named ? `: ${v.villageName.trim()}` : ' (no name entered)'}
+                </label>
+              );
+            })}
+          </div>
+        )}
         {villages.map((_, i) => (compResults[i] || compErrors[i]) && (
           <div key={i} className={i > 0 ? 'mt-5' : ''}>
             {heading(i)}

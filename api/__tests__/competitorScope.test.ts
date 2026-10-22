@@ -37,15 +37,19 @@ const units = [
   { villageName: 'B', priceType: 'sold', date: '2025-10-22', distanceKm: 1 },     // keep (on cutoff)
   { villageName: 'C', priceType: 'sold', date: '2025-10', distanceKm: 1 },        // keep (cutoff month)
   { villageName: 'D', priceType: 'sold', date: '2025-09-30', distanceKm: 1 },     // old
-  { villageName: 'E', priceType: 'sold', date: null, distanceKm: 1 },             // undated
+  { villageName: 'E', priceType: 'sold', date: null, distanceKm: 1 },             // undated: kept, flagged
   { villageName: 'F', priceType: 'listing', date: '2023-01-01', distanceKm: 3 },  // keep: current listing
   { villageName: 'G', priceType: 'listing', date: null, distanceKm: null },       // keep: no distance to test
   { villageName: 'H', priceType: 'listing', date: null, distanceKm: 7.5 },        // beyond radius
   { villageName: 'I', priceType: 'sold', date: '2026-01-01', distanceKm: 9 },     // beyond radius
 ];
 const r = scopeCompetitorUnits(units, 5, today);
-eq('kept rows', (r.units as Array<{ villageName: string }>).map(u => u.villageName), ['A', 'B', 'C', 'F', 'G']);
-eq('note', r.note, { radiusKm: 5, soldSince: '2025-10-22', excludedOldSales: 1, excludedUndatedSales: 1, excludedOutsideRadius: 2 });
+const kept = r.units as Array<{ villageName: string; note?: string }>;
+eq('kept rows', kept.map(u => u.villageName), ['A', 'B', 'C', 'E', 'F', 'G']);
+eq('undated sale flagged', kept.find(u => u.villageName === 'E')?.note, 'Sale date not published');
+eq('note', r.note, { radiusKm: 5, soldSince: '2025-10-22', excludedOldSales: 1, undatedSalesKept: 1, excludedOutsideRadius: 2 });
+const withNote = scopeCompetitorUnits([{ priceType: 'sold', date: null, note: 'Refurbished' }], 5, today).units as Array<{ note: string }>;
+eq('flag appended to an existing note', withNote[0]?.note, 'Refurbished — sale date not published');
 eq('non-array passes through', scopeCompetitorUnits(null, 5, today).units, null);
 
 console.log('\n' + '═'.repeat(60));
