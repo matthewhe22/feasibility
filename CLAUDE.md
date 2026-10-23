@@ -489,6 +489,13 @@ as live data — previously a run whose figures all came from live profile pages
 was labelled "No live web search" because no search query had run. Tests:
 `npx tsx api/__tests__/suburbValidation.test.ts`.
 
+**Days on market:** read from the same profile page's "Property market insights
+for houses / units" blocks — REA's **median** days on market over the past 12
+months (it publishes no average) plus the number sold in that period
+(`houseDaysOnMarket`, `houseSold12m`, `unitDaysOnMarket`, `unitSold12m`). Shown
+as two table columns with the sales count beneath; the averages row is the mean
+of the suburb medians (`avgHouseDaysOnMarket` / `avgUnitDaysOnMarket`).
+
 **MHP history:** suburb rows carry `medianHousePrice12mAgo` / `6mAgo` and
 `houseGrowth12mPct` / `6mPct`. realestate.com.au (primary) publishes "past 12
 month growth" but not the prior median and **no 6-month figure** (its trend is a

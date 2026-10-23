@@ -25,10 +25,12 @@ function eq(name: string, actual: unknown, expected: unknown) {
 const today = new Date(Date.UTC(2026, 9, 23)); // 2026-10-23
 const profile = (over: Partial<ReaProfileFigures>): ReaProfileFigures => ({
   url: 'https://www.realestate.com.au/vic/x-3216/', medianHousePrice: null, housePeriod: 'September 2025 - September 2026',
-  houseGrowth12mPct: null, medianUnitPrice: null, unitPeriod: null, unitGrowth12mPct: null, ...over,
+  houseGrowth12mPct: null, medianUnitPrice: null, unitPeriod: null, unitGrowth12mPct: null,
+  houseDaysOnMarket: null, houseSold12m: null, unitDaysOnMarket: null, unitSold12m: null, ...over,
 });
 const profiles = new Map<string, ReaProfileFigures>([
-  ['grovedale', profile({ url: 'https://www.realestate.com.au/vic/grovedale-3216/', medianHousePrice: 746000, houseGrowth12mPct: 9.7, medianUnitPrice: 545700 })],
+  ['grovedale', profile({ url: 'https://www.realestate.com.au/vic/grovedale-3216/', medianHousePrice: 746000, houseGrowth12mPct: 9.7, medianUnitPrice: 545700,
+    houseDaysOnMarket: 23, houseSold12m: 266, unitDaysOnMarket: 22, unitSold12m: 55 })],
   ['charlemont', profile({ medianHousePrice: 660000, houseGrowth12mPct: 4.8 })], // no unit snapshot
   ['old-town', profile({ medianHousePrice: 500000, housePeriod: 'March 2025 - March 2026' })],
 ]);
@@ -47,6 +49,8 @@ eq('AI MHP that differed is recorded', validation.corrections[0], { suburb: 'Gro
 eq('matching MUP ("$545,700" string) is not a correction', validation.corrections.filter(c => c.suburb === 'Grovedale').length, 1);
 eq('stated prior median cleared so it is re-derived from the page growth', r[0]?.medianHousePrice12mAgo, null);
 eq('period + growth from the page', [r[0]?.asOf, r[0]?.houseGrowth12mPct], ['September 2025 - September 2026', 9.7]);
+eq('days on market + sales count copied from the page',
+  [r[0]?.houseDaysOnMarket, r[0]?.houseSold12m, r[0]?.unitDaysOnMarket, r[0]?.unitSold12m], [23, 266, 22, 55]);
 eq('row marked verified with its page', [r[0]?.verified, r[0]?.profileUrl], [true, 'https://www.realestate.com.au/vic/grovedale-3216/']);
 eq('page publishes no unit median → MUP null, not the AI figure', r[1]?.medianUnitPrice, null);
 eq('…and the dropped AI MUP is reported', validation.corrections.find(c => c.suburb === 'Charlemont'), { suburb: 'Charlemont', field: 'medianUnitPrice', aiValue: 480000, pageValue: null });

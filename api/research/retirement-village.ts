@@ -377,6 +377,7 @@ function buildCompetitorsPrompt(req: RVRequest): string {
 }
 
 function suburbAveragesOf(rows: Array<Record<string, unknown>>) {
+  // Days on market are means of the per-suburb MEDIANS — labelled as such in the UI.
   const mean = (k: string) => {
     const v = rows.map(r => r[k]).filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
     return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null;
@@ -385,6 +386,8 @@ function suburbAveragesOf(rows: Array<Record<string, unknown>>) {
     avgMedianHousePrice: mean('medianHousePrice'),
     avgMedianUnitPrice: mean('medianUnitPrice'),
     avgDollarPerSqm: mean('medianDollarPerSqm'),
+    avgHouseDaysOnMarket: mean('houseDaysOnMarket'),
+    avgUnitDaysOnMarket: mean('unitDaysOnMarket'),
   };
 }
 
@@ -452,8 +455,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     endpoint: 'retirement-village',
     // Bumped when the figures' source changes, so answers built the old way
     // aren't served from cache. v2: MHP/MUP from REA suburb-profile pages.
-    // v3: validation report + strict MUP.
-    v: 3,
+    // v3: validation report + strict MUP. v4: days on market + sales count.
+    v: 4,
     body: keyBody,
     provider: head?.provider,
     model: head?.model,
@@ -531,7 +534,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .filter((x): x is { c: typeof x.c; f: ReaProfileFigures } => Boolean(x.f))
           .map(({ c, f }) =>
             `- ${c.suburb}: house ${f.medianHousePrice ?? 'n/a'} (${f.housePeriod ?? 'period n/a'}, 12-month growth ` +
-            `${f.houseGrowth12mPct ?? 'n/a'}%); unit ${f.medianUnitPrice ?? 'n/a'} (${f.unitPeriod ?? 'period n/a'}) — ${f.url}`)
+            `${f.houseGrowth12mPct ?? 'n/a'}%, median ${f.houseDaysOnMarket ?? 'n/a'} days on market, ` +
+            `${f.houseSold12m ?? 'n/a'} sold in 12 months); unit ${f.medianUnitPrice ?? 'n/a'} (${f.unitPeriod ?? 'period n/a'}, ` +
+            `median ${f.unitDaysOnMarket ?? 'n/a'} days on market) — ${f.url}`)
           .join('\n') +
         `\n=== END SUBURB PROFILE FIGURES ===`;
     }

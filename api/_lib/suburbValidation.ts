@@ -97,6 +97,11 @@ export function validateSuburbRows(
       mhpSource: 'realestate.com.au suburb profile',
       profileUrl: f.url,
       verified: true,
+      // Market activity, from the same page's "Property market insights".
+      houseDaysOnMarket: f.houseDaysOnMarket,
+      houseSold12m: f.houseSold12m,
+      unitDaysOnMarket: f.unitDaysOnMarket,
+      unitSold12m: f.unitSold12m,
     };
   });
   return { rows: out, validation };
