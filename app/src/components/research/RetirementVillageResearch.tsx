@@ -57,10 +57,23 @@ export interface SuburbRow {
   mhpSource?: string | null;
   /** The realestate.com.au suburb-profile page the MHP/MUP were read from. */
   profileUrl?: string | null;
+  /** True when MHP/MUP were checked against (and taken from) the live profile page. */
+  verified?: boolean;
   /** Server-side geocoded (OpenStreetMap Nominatim) — null when unavailable. */
   lat?: number | null;
   lng?: number | null;
 }
+export interface LiveDataNote { source: string; pages: number; of: number }
+/** Mirror of SuburbValidation in api/_lib/suburbValidation.ts. */
+export interface SuburbValidation {
+  checkedAt: string;
+  suburbs: number;
+  verified: number;
+  unverified: string[];
+  corrections: Array<{ suburb: string; field: 'medianHousePrice' | 'medianUnitPrice'; aiValue: number; pageValue: number | null }>;
+  stale: string[];
+}
+
 export interface SuburbsResult {
   village?: { name?: string; suburb?: string; state?: string; postcode?: string };
   suburbs: SuburbRow[];
@@ -77,6 +90,10 @@ export interface SuburbsResult {
    *  real fonts exist — see SuburbMapData in staticMap.ts. Null if the base-map
    *  fetch or geocoding failed. */
   map?: SuburbMapData | null;
+  /** Pages fetched live for this run (mirror of the API's liveData field). */
+  liveData?: LiveDataNote;
+  /** Check of every row against its live suburb-profile page (api/_lib/suburbValidation.ts). */
+  validation?: SuburbValidation;
 }
 
 export interface UnitRow {
@@ -481,6 +498,7 @@ function SuburbsResultView({ result }: { result: SuburbsResult }) {
   return (
     <div>
       <Meta result={result} />
+      {result.validation && <ValidationPanel v={result.validation} />}
       <p className="text-[11px] text-gray-700 mb-2">{result.summary}</p>
       <div className="overflow-x-auto">
         <table className="w-full text-xs border-collapse">
@@ -791,6 +809,7 @@ function Meta({ result }: { result: {
   /** Gemini's own Google-Search tool, tracked separately so the badge can show
    *  "combined" when Firecrawl was ALSO injected into the same request. */
   geminiNativeSearchUsed?: boolean;
+  liveData?: LiveDataNote;
 } }) {
   // groundingUsed is explicitly false when the active model has no live web
   // search (DeepSeek) OR when Gemini's grounding fell back (quota/permission).
@@ -806,7 +825,12 @@ function Meta({ result }: { result: {
             {result.cotality.url && <a href={result.cotality.url} target="_blank" rel="noopener" className="underline ml-1">(source)</a>}
           </span>
         )}
-        {result.groundingUsed
+        {result.liveData && result.liveData.pages > 0
+          ? <span className="text-[10px] bg-purple-50 border border-purple-200 text-purple-700 rounded px-1.5 py-0.5"
+              title="Fetched from the live website for this run — not the model's training data">
+              Live data: {result.liveData.source} ({result.liveData.pages} of {result.liveData.of} suburbs)
+            </span>
+          : result.groundingUsed
           ? <span className="text-[10px] bg-purple-50 border border-purple-200 text-purple-700 rounded px-1.5 py-0.5">Live web search{searchToolSuffix(result)}</span>
           : <span className="text-[10px] bg-amber-50 border border-amber-300 text-amber-800 rounded px-1.5 py-0.5">No live web search</span>}
         {result.model && <span className="text-[10px] text-gray-400">model: {result.model}</span>}
@@ -824,6 +848,38 @@ function Meta({ result }: { result: {
           {result.provider === 'gemini' ? '. Gemini grounding fell back here — likely a quota/permission limit; Firecrawl grounding avoids that quota entirely.' : '.'}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * What was checked against live pages in this run: how many suburbs'
+ * MHP/MUP were read from their realestate.com.au profile, which figures the
+ * model had reported differently (and were replaced), and which suburbs could
+ * not be verified or carry an old period.
+ */
+function ValidationPanel({ v }: { v: SuburbValidation }) {
+  const all = v.suburbs > 0 && v.verified === v.suburbs;
+  const tone = all && !v.stale.length ? 'bg-emerald-50 border-emerald-300 text-emerald-900' : 'bg-amber-50 border-amber-300 text-amber-900';
+  const fmt = (n: number | null) => (n === null ? 'not published' : formatCurrency(n));
+  const label = (f: string) => (f === 'medianHousePrice' ? 'MHP' : 'MUP');
+  return (
+    <div className={`text-[10px] border rounded px-2 py-1.5 mb-2 ${tone}`}>
+      <div className="font-semibold">
+        {all ? '✓' : '⚠'} Validation: {v.verified} of {v.suburbs} suburbs verified against their live realestate.com.au
+        suburb-profile page ({new Date(v.checkedAt).toLocaleString('en-AU')})
+      </div>
+      {v.corrections.length > 0 && (
+        <div className="mt-0.5">
+          AI figures replaced with the page figure:{' '}
+          {v.corrections.map(c => `${c.suburb} ${label(c.field)} ${fmt(c.aiValue)} → ${fmt(c.pageValue)}`).join('; ')}
+        </div>
+      )}
+      {v.corrections.length === 0 && v.verified > 0 && <div className="mt-0.5">The AI's figures matched the pages exactly.</div>}
+      {v.unverified.length > 0 && (
+        <div className="mt-0.5">Not verified (no readable profile page — figures are the AI's own): {v.unverified.join(', ')}</div>
+      )}
+      {v.stale.length > 0 && <div className="mt-0.5">Period ends more than 4 months ago: {v.stale.join(', ')}</div>}
     </div>
   );
 }

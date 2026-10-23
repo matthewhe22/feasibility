@@ -477,6 +477,18 @@ MHP, MUP, period and 12-month growth; averages are recomputed server-side.
 Rows without a profile keep the model's figure and are labelled. The suburb
 name links to its profile page. Tests: `npx tsx api/__tests__/reaSuburbProfile.test.ts`.
 
+**Validation + live-data reporting** (`api/_lib/suburbValidation.ts`): every row
+is checked against its live profile page; the response carries
+`validation: {checkedAt, suburbs, verified, unverified[], corrections[], stale[]}`
+(corrections = AI figures that differed from the page and were replaced; MUP is
+strict — no published unit median means null, never the AI's figure; stale =
+period ending >4 months ago) and `liveData: {source, pages, of}`. The UI shows a
+"Live data: realestate.com.au suburb profiles (n of N)" badge and a validation
+panel. `groundingUsed` counts server-scraped pages (profiles, directory pages)
+as live data — previously a run whose figures all came from live profile pages
+was labelled "No live web search" because no search query had run. Tests:
+`npx tsx api/__tests__/suburbValidation.test.ts`.
+
 **MHP history:** suburb rows carry `medianHousePrice12mAgo` / `6mAgo` and
 `houseGrowth12mPct` / `6mPct`. realestate.com.au (primary) publishes "past 12
 month growth" but not the prior median and **no 6-month figure** (its trend is a
