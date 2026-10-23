@@ -239,7 +239,7 @@ function drawSuburbMapPng(suburbs: SuburbRow[]): { dataUrl: string; width: numbe
 
 /** Suburb, State, Postcode, Median House, MHP 12m ago, 12m growth, MHP 6m ago,
  *  6m growth, Median Unit, $/m², Dist, As of. */
-const SUBURB_SPAN = 13;
+const SUBURB_SPAN = 15;
 const PCT_FMT = '+0.0%;-0.0%;0.0%';
 
 /** "REA 12-month growth; 12m-ago median derived from growth %". */
@@ -268,13 +268,15 @@ async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult, sheetNa
 
   const hdr = ws.addRow([
     'Suburb', 'State', 'Postcode', 'Median House', 'MHP 12m ago', '12m growth', 'MHP 6m ago', '6m growth',
-    'Median Unit', 'Median $/m²', 'Dist (km)', 'As of', 'Sources',
+    'Median Unit', 'Median $/m²', 'Median days on market — houses (12m)', 'Median days on market — units (12m)',
+    'Dist (km)', 'As of', 'Sources',
   ]);
   hdr.eachCell(cell => style(cell, { fill: HEADER_FILL, fontColor: WHITE, bold: true, size: 9 }));
 
   // Column number → format. Growth is stored as a fraction so Excel's % format applies.
   const fmt = (colNum: number): string | undefined =>
-    [4, 5, 7, 9, 10].includes(colNum) ? CURRENCY_FMT : colNum === 6 || colNum === 8 ? PCT_FMT : colNum === 11 ? '0.0' : undefined;
+    [4, 5, 7, 9, 10].includes(colNum) ? CURRENCY_FMT : colNum === 6 || colNum === 8 ? PCT_FMT
+      : colNum === 11 || colNum === 12 ? '0' : colNum === 13 ? '0.0' : undefined;
   const asFraction = (p: number | null) => (p === null ? null : p / 100);
 
   const suburbs = r.suburbs ?? [];
@@ -283,7 +285,9 @@ async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult, sheetNa
       s.suburb, s.state ?? '', s.postcode ?? '', toNum(s.medianHousePrice),
       toNum(s.medianHousePrice12mAgo), asFraction(houseGrowth(s, '12m')),
       toNum(s.medianHousePrice6mAgo), asFraction(houseGrowth(s, '6m')),
-      toNum(s.medianUnitPrice), toNum(s.medianDollarPerSqm), toNum(s.distanceKm), s.asOf ?? '',
+      toNum(s.medianUnitPrice), toNum(s.medianDollarPerSqm),
+      toNum(s.houseDaysOnMarket), toNum(s.unitDaysOnMarket),
+      toNum(s.distanceKm), s.asOf ?? '',
       historyNote(s),
     ]);
     row.eachCell((cell, colNum) => {
@@ -296,7 +300,7 @@ async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult, sheetNa
     const a = suburbAverages(r);
     const row = ws.addRow([
       'Indicative average', '', '', a.mhp, a.mhp12mAgo, asFraction(a.growth12m), a.mhp6mAgo, asFraction(a.growth6m),
-      a.mup, a.psm, '', '', '',
+      a.mup, a.psm, a.domHouse, a.domUnit, '', '', '',
     ]);
     row.eachCell((cell, colNum) => {
       const f = fmt(colNum);

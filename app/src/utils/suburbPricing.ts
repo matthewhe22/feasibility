@@ -34,5 +34,8 @@ export function suburbAverages(r: SuburbsResult) {
     mhp6mAgo: avg(rows.map(s => toNum(s.medianHousePrice6mAgo))),
     growth12m: avg(rows.map(s => houseGrowth(s, '12m'))),
     growth6m: avg(rows.map(s => houseGrowth(s, '6m'))),
+    // Mean of the per-suburb MEDIAN days on market.
+    domHouse: avg(rows.map(s => toNum(s.houseDaysOnMarket))),
+    domUnit: avg(rows.map(s => toNum(s.unitDaysOnMarket))),
   };
 }

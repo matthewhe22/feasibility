@@ -31,6 +31,10 @@ const grovedale = [
   '### Median price snapshot for houses', '', 'Median price', '', '$746,000', 'September 2025 - September 2026', '',
   'Past 12 month growth', '', 'Up 9.7%', '',
   '## 5 year median price trend', '', "OCT '21OCT '22OCT '23OCT '24OCT '25$600k$700k$800k", '',
+  '### Property market insights for houses', '', 'Supply, demand and performance data for houses in Grovedale.', '',
+  '39 houses available in the past month', '', '266 sold in the past 12 months', '', '23 days median days on market', '',
+  '2034 buyers interested', '', '4.1% rental yield', '',
+  '[Houses for sale in Grovedale\\\n\\\n**Search houses**](https://www.realestate.com.au/buy/property-house-in-grovedale,+vic+3216/list-1)', '',
   '### Median price snapshot for 2 bed houses', '', 'Median price', '', '$610,000', 'September 2025 - September 2026', '',
   'Past 12 month growth', '', 'Down -3.2%', '',
   '### Median price snapshot for 3 bed houses', '', 'Median price', '', '$730,000', '',
@@ -38,6 +42,9 @@ const grovedale = [
   '### Median price snapshot for units', '', 'Median price', '', '$545,700', 'September 2025 - September 2026', '',
   'Past 12 month growth', '', 'Up 7.0%', '',
   '## 5 year median price trend', '',
+  '### Property market insights for units', '', '15 units available in the past month', '',
+  '55 sold in the past 12 months', '', '22 days median days on market', '',
+  '### Property market insights for 1 bed units', '', '0 sold sold in the past 12 months', '', '– median days on market', '',
   '### Median price snapshot for 1 bed units', '', 'Median price', '', '–', '', 'Past 12 month growth', '', '–',
 ].join('\n');
 
@@ -49,6 +56,16 @@ eq('house 12-month growth', g?.houseGrowth12mPct, 9.7);
 eq('unit median', g?.medianUnitPrice, 545700);
 eq('unit growth', g?.unitGrowth12mPct, 7);
 eq('bedroom-specific snapshots are not mistaken for the suburb median', g?.medianHousePrice !== 610000, true);
+
+console.log('\nMARKET INSIGHTS (days on market)');
+eq('house median days on market', g?.houseDaysOnMarket, 23);
+eq('houses sold in the past 12 months', g?.houseSold12m, 266);
+eq('unit median days on market', g?.unitDaysOnMarket, 22);
+eq('units sold — not the "1 bed units" block\'s 0', g?.unitSold12m, 55);
+const noInsights = parseReaProfile('### Median price snapshot for houses\nMedian price\n$500,000\nPast 12 month growth\nUp 1%', 'u');
+eq('no insights block → null days on market', [noInsights?.houseDaysOnMarket, noInsights?.houseSold12m], [null, null]);
+eq('"– median days on market" → null', parseReaProfile(
+  '### Median price snapshot for houses\nMedian price\n$500,000\n### Property market insights for houses\n0 sold in the past 12 months\n– median days on market', 'u')?.houseDaysOnMarket, null);
 
 const falling = parseReaProfile(
   '### Median price snapshot for houses\n\nMedian price\n\n$1,210,000\nSeptember 2025 - September 2026\n\nPast 12 month growth\n\nDown -8.7%\n\n## next',

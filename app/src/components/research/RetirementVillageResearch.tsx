@@ -59,6 +59,12 @@ export interface SuburbRow {
   profileUrl?: string | null;
   /** True when MHP/MUP were checked against (and taken from) the live profile page. */
   verified?: boolean;
+  /** MEDIAN days on market over the past 12 months and number sold, from the
+   *  profile page's "Property market insights" (REA publishes no average). */
+  houseDaysOnMarket?: number | null;
+  houseSold12m?: number | null;
+  unitDaysOnMarket?: number | null;
+  unitSold12m?: number | null;
   /** Server-side geocoded (OpenStreetMap Nominatim) — null when unavailable. */
   lat?: number | null;
   lng?: number | null;
@@ -432,7 +438,7 @@ export function RetirementVillageResearch() {
       {/* Section 1 — Surrounding suburb pricing */}
       <Section
         title="1. Surrounding-suburb pricing"
-        subtitle="Median house price (MHP) now, 12 and 6 months ago with growth, median unit price (MUP) and median $/m² for each village's suburb and adjacent suburbs."
+        subtitle="Median house price (MHP) now, 12 and 6 months ago with growth, median unit price (MUP), median $/m² and median days on market (past 12 months) for each village's suburb and adjacent suburbs."
         onRun={runSuburbs}
         running={subLoading !== null}
         runLabel="Research suburb prices"
@@ -508,6 +514,8 @@ function SuburbsResultView({ result }: { result: SuburbsResult }) {
               <Th className="text-right">MHP 12m ago</Th><Th className="text-right">12m growth</Th>
               <Th className="text-right">MHP 6m ago</Th><Th className="text-right">6m growth</Th>
               <Th className="text-right">Median Unit</Th><Th className="text-right">Median $/m²</Th>
+              <Th className="text-right"><span title="Median days on market, past 12 months (realestate.com.au)">Days on mkt — houses</span></Th>
+              <Th className="text-right"><span title="Median days on market, past 12 months (realestate.com.au)">Days on mkt — units</span></Th>
               <Th className="text-right">Dist (km)</Th><Th>As of</Th>
             </tr>
           </thead>
@@ -534,6 +542,8 @@ function SuburbsResultView({ result }: { result: SuburbsResult }) {
                   <Td className={`text-right font-mono ${pctClass(g6)}`}>{pct(g6)}</Td>
                   <Td className="text-right font-mono">{money(s.medianUnitPrice)}</Td>
                   <Td className="text-right font-mono">{money(s.medianDollarPerSqm)}</Td>
+                  <Td className="text-right">{dom(s.houseDaysOnMarket, s.houseSold12m)}</Td>
+                  <Td className="text-right">{dom(s.unitDaysOnMarket, s.unitSold12m)}</Td>
                   <Td className="text-right">{num(s.distanceKm)}</Td>
                   <Td className="text-gray-500">{s.asOf ?? '—'}</Td>
                 </tr>
@@ -548,6 +558,8 @@ function SuburbsResultView({ result }: { result: SuburbsResult }) {
               <Td className={`text-right font-mono ${pctClass(a.growth6m)}`}>{pct(a.growth6m)}</Td>
               <Td className="text-right font-mono text-emerald-900">{money(a.mup)}</Td>
               <Td className="text-right font-mono text-emerald-900">{money(a.psm)}</Td>
+              <Td className="text-right text-emerald-900">{a.domHouse === null ? '—' : `${Math.round(a.domHouse)} days`}</Td>
+              <Td className="text-right text-emerald-900">{a.domUnit === null ? '—' : `${Math.round(a.domUnit)} days`}</Td>
               <Td /><Td />
             </tr>
           </tbody>
@@ -556,6 +568,8 @@ function SuburbsResultView({ result }: { result: SuburbsResult }) {
       <p className="text-[10px] text-gray-400 mt-1">
         Median house / unit prices are read from each suburb's realestate.com.au suburb profile ("Median price
         snapshot" — linked from the suburb name), not the "market insights" figure on its for-sale pages.
+        Days on market is realestate.com.au's MEDIAN days on market over the past 12 months (it publishes no average),
+        with the number sold in that period beneath; the averages row is the mean of the suburb medians.
         12-month growth is the profile's "past 12 month growth"; the 12-months-ago median (≈) is derived
         from it, since REA doesn't print it. realestate.com.au publishes no 6-month figure, so 6-month values come from
         Cotality (Admin → Cotality Data) when its data includes them. Average growth is the mean of the per-suburb figures.
@@ -567,6 +581,19 @@ function SuburbsResultView({ result }: { result: SuburbsResult }) {
       <SuburbMap suburbs={result.suburbs ?? []} />
       <Sources sources={result.sources} />
     </div>
+  );
+}
+
+/** "23 days" with "266 sold" beneath — the sales count says how much weight the median carries. */
+function dom(days: unknown, sold: unknown): React.ReactNode {
+  const d = toNum(days);
+  if (d === null) return '—';
+  const n = toNum(sold);
+  return (
+    <>
+      {d} days
+      {n !== null && <span className="block text-[10px] text-gray-500">{n} sold</span>}
+    </>
   );
 }
 

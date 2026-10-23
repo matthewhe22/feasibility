@@ -26,6 +26,12 @@ export interface ReaProfileFigures {
   medianUnitPrice: number | null;
   unitPeriod: string | null;
   unitGrowth12mPct: number | null;
+  /** "Property market insights": MEDIAN days on market over the past 12
+   *  months (REA publishes a median, not an average) and the number sold. */
+  houseDaysOnMarket: number | null;
+  houseSold12m: number | null;
+  unitDaysOnMarket: number | null;
+  unitSold12m: number | null;
 }
 
 /** https://www.realestate.com.au/vic/grovedale-3216/ */
@@ -64,11 +70,34 @@ function readBlock(block: string | null): { price: number | null; period: string
   };
 }
 
+/** The "Property market insights for {kind}" block, up to the next heading. */
+function insightsBlock(markdown: string, kind: 'houses' | 'units'): string | null {
+  const re = new RegExp(`^#+\\s*Property market insights for ${kind}\\s*$`, 'mi');
+  const m = re.exec(markdown);
+  if (!m) return null;
+  const rest = markdown.slice(m.index + m[0].length);
+  const next = rest.search(/^#+\s/m);
+  return next >= 0 ? rest.slice(0, next) : rest;
+}
+
+/** "23 days median days on market" / "266 sold in the past 12 months"; "–" means none. */
+function readInsights(block: string | null): { dom: number | null; sold: number | null } {
+  if (!block) return { dom: null, sold: null };
+  const dom = /(\d[\d,]*)\s*days?\s+median days on market/i.exec(block);
+  const sold = /(\d[\d,]*)\s+sold(?:\s+sold)?\s+in the past 12 months/i.exec(block);
+  return {
+    dom: dom ? Number(dom[1]!.replace(/,/g, '')) : null,
+    sold: sold ? Number(sold[1]!.replace(/,/g, '')) : null,
+  };
+}
+
 /** Read the house and unit snapshots off a scraped suburb-profile page. */
 export function parseReaProfile(markdown: string, url: string): ReaProfileFigures | null {
   const house = readBlock(snapshotBlock(markdown, 'houses'));
   const unit = readBlock(snapshotBlock(markdown, 'units'));
   if (house.price === null && unit.price === null) return null;
+  const houseIns = readInsights(insightsBlock(markdown, 'houses'));
+  const unitIns = readInsights(insightsBlock(markdown, 'units'));
   return {
     url,
     medianHousePrice: house.price,
@@ -77,6 +106,10 @@ export function parseReaProfile(markdown: string, url: string): ReaProfileFigure
     medianUnitPrice: unit.price,
     unitPeriod: unit.period,
     unitGrowth12mPct: unit.growth,
+    houseDaysOnMarket: houseIns.dom,
+    houseSold12m: houseIns.sold,
+    unitDaysOnMarket: unitIns.dom,
+    unitSold12m: unitIns.sold,
   };
 }
 
