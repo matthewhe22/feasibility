@@ -53,6 +53,10 @@ export interface SuburbRow {
   medianHousePrice6mAgoDerived?: boolean;
   /** Where the 12/6-month figures came from, e.g. "REA 12-month growth; Cotality 6-month". */
   historySource?: string | null;
+  /** Where the current MHP/MUP came from — normally "realestate.com.au suburb profile". */
+  mhpSource?: string | null;
+  /** The realestate.com.au suburb-profile page the MHP/MUP were read from. */
+  profileUrl?: string | null;
   /** Server-side geocoded (OpenStreetMap Nominatim) — null when unavailable. */
   lat?: number | null;
   lng?: number | null;
@@ -495,7 +499,15 @@ function SuburbsResultView({ result }: { result: SuburbsResult }) {
               const g6 = houseGrowth(s, '6m');
               return (
                 <tr key={i} className="border-b border-gray-100">
-                  <Td className="capitalize font-medium">{s.suburb}</Td>
+                  <Td className="capitalize font-medium">
+                    {s.profileUrl
+                      ? <a href={s.profileUrl} target="_blank" rel="noopener" className="text-blue-700 underline decoration-dotted"
+                          title="MHP / MUP read from this realestate.com.au suburb profile">{s.suburb}</a>
+                      : s.suburb}
+                    {s.mhpSource && !s.profileUrl && (
+                      <span className="block text-[10px] font-normal normal-case text-amber-700">{s.mhpSource}</span>
+                    )}
+                  </Td>
                   <Td>{s.state ?? '—'}{s.postcode ? ` ${s.postcode}` : ''}</Td>
                   <Td className="text-right font-mono">{money(s.medianHousePrice)}</Td>
                   <Td className="text-right font-mono text-gray-600">{priorMoney(s.medianHousePrice12mAgo, s.medianHousePrice12mAgoDerived)}</Td>
@@ -524,7 +536,9 @@ function SuburbsResultView({ result }: { result: SuburbsResult }) {
         </table>
       </div>
       <p className="text-[10px] text-gray-400 mt-1">
-        12-month growth is realestate.com.au's published "past 12 month growth"; the 12-months-ago median (≈) is derived
+        Median house / unit prices are read from each suburb's realestate.com.au suburb profile ("Median price
+        snapshot" — linked from the suburb name), not the "market insights" figure on its for-sale pages.
+        12-month growth is the profile's "past 12 month growth"; the 12-months-ago median (≈) is derived
         from it, since REA doesn't print it. realestate.com.au publishes no 6-month figure, so 6-month values come from
         Cotality (Admin → Cotality Data) when its data includes them. Average growth is the mean of the per-suburb figures.
         {result.suburbs?.some(s => s.historySource) && (

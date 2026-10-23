@@ -464,6 +464,19 @@ per village. The Excel export writes one sheet pair per village (`V1 …`, `V2 �
 With 2+ villages, checkboxes in section 2 choose which villages the competitor
 search runs for (all ticked by default); unticked villages keep prior results.
 
+**MHP / MUP source = realestate.com.au SUBURB PROFILE** (`api/_lib/reaSuburbProfile.ts`).
+REA publishes two different medians per suburb: the suburb profile's "Median
+price snapshot" (e.g. Grovedale $746,000, Sep 2025–Sep 2026) and a "market
+insights" median on its for-sale search pages (Grovedale $747,250, "260 sales
+in the past 12 months"). Searches return mostly the latter, so the model used
+to report it. Each confirmed suburb's profile page is now fetched by URL
+(`/{state}/{suburb}-{postcode}/`, falling back to one search for the profile
+URL), parsed with fixed patterns (`parseReaProfile`), given to the model as
+authoritative, and enforced on the answer (`applyProfileFigures`): current
+MHP, MUP, period and 12-month growth; averages are recomputed server-side.
+Rows without a profile keep the model's figure and are labelled. The suburb
+name links to its profile page. Tests: `npx tsx api/__tests__/reaSuburbProfile.test.ts`.
+
 **MHP history:** suburb rows carry `medianHousePrice12mAgo` / `6mAgo` and
 `houseGrowth12mPct` / `6mPct`. realestate.com.au (primary) publishes "past 12
 month growth" but not the prior median and **no 6-month figure** (its trend is a
