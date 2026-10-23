@@ -20,6 +20,7 @@ import { normalizeUnitRows, normalizeSuburbRows } from '../_lib/normalizeUnits';
 import { enrichUnitsFromListingPages } from '../_lib/enrichUnits';
 import { scopeCompetitorUnits, soldCutoff } from '../_lib/competitorScope';
 import { verifyCompetitorDistances } from '../_lib/competitorDistance';
+import { fetchReaProfile, type ReaProfileFigures } from '../_lib/reaSuburbProfile';
 import { directoryTargets, fetchDirectoryPages, suburbSlug, type DirectoryPagesContext } from '../_lib/rvDirectories';
 
 /**
@@ -134,8 +135,10 @@ You MUST:
   1. Use realestate.com.au (REA) suburb profile pages as the PRIMARY price source,
      and a supplied Cotality data block as the SECOND source — do not search or
      cite Domain, ABS, or any other portal. Every supplied live-search result
-     below is already scoped to realestate.com.au; use whichever of those carries
-     the most recent "as of" date.
+     below is already scoped to realestate.com.au. When a REALESTATE.COM.AU SUBURB
+     PROFILE FIGURES block is supplied, its figures are THE answer for those
+     suburbs — use them exactly. Never use the "market insights" median shown on
+     realestate.com.au for-sale search pages; it is a different calculation.
   2. Where REA has no figure for a suburb (or for a field), use the Cotality
      block's figure if it has one and say so in that row's "historySource" /
      "summary"; otherwise return null rather than substituting another source.
@@ -372,6 +375,44 @@ function buildCompetitorsPrompt(req: RVRequest): string {
   ].join('\n');
 }
 
+/**
+ * Replace each suburb row's current MHP / MUP, period and 12-month house growth
+ * with the figures read off its realestate.com.au suburb-profile page. A prior
+ * median the model supplied is cleared so it is re-derived from the profile's
+ * growth (normalizeSuburbRows). 6-month figures (Cotality) are left alone.
+ * Rows with no profile keep the model's figures, marked as such.
+ */
+function applyProfileFigures(rows: unknown[], profiles: Map<string, ReaProfileFigures>): unknown[] {
+  return rows.map(r => {
+    if (!r || typeof r !== 'object') return r;
+    const row = r as Record<string, unknown>;
+    const f = profiles.get(suburbSlug(String(row.suburb ?? '')));
+    if (!f) return { ...row, mhpSource: 'web search (no suburb profile found)' };
+    return {
+      ...row,
+      medianHousePrice: f.medianHousePrice,
+      medianUnitPrice: f.medianUnitPrice ?? row.medianUnitPrice ?? null,
+      asOf: f.housePeriod ?? row.asOf ?? null,
+      houseGrowth12mPct: f.houseGrowth12mPct,
+      medianHousePrice12mAgo: null,
+      mhpSource: 'realestate.com.au suburb profile',
+      profileUrl: f.url,
+    };
+  });
+}
+
+function suburbAveragesOf(rows: Array<Record<string, unknown>>) {
+  const mean = (k: string) => {
+    const v = rows.map(r => r[k]).filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
+    return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null;
+  };
+  return {
+    avgMedianHousePrice: mean('medianHousePrice'),
+    avgMedianUnitPrice: mean('medianUnitPrice'),
+    avgDollarPerSqm: mean('medianDollarPerSqm'),
+  };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   setCors(res);
   if (req.method === 'OPTIONS') return res.status(204).end();
@@ -434,6 +475,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { refresh: _refresh, ...keyBody } = body as RVRequest & { refresh?: boolean };
   const cacheKey = researchCacheKey({
     endpoint: 'retirement-village',
+    // Bumped when the figures' source changes, so answers built the old way
+    // aren't served from cache. v2: MHP/MUP from REA suburb-profile pages.
+    v: 2,
     body: keyBody,
     provider: head?.provider,
     model: head?.model,
@@ -486,6 +530,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let userPrompt = body.mode === 'suburbs'
     ? buildSuburbsPrompt(body, confirmedSuburbs)
     : buildCompetitorsPrompt({ ...body, state: competitorState, nearbySuburbs: competitorSuburbs });
+
+  // Suburbs mode: current MHP / MUP come ONLY from each suburb's
+  // realestate.com.au suburb-profile page, fetched by URL and read with fixed
+  // patterns (see reaSuburbProfile.ts) — not from whichever REA page a search
+  // ranks. The figures are given to the model as authoritative and then
+  // enforced on its answer below.
+  const profiles = new Map<string, ReaProfileFigures>();
+  if (body.mode === 'suburbs' && webSearch?.firecrawl) {
+    const firecrawl = webSearch.firecrawl;
+    const found = await Promise.all(confirmedSuburbs.slice(0, 8).map(async c => {
+      const state = c.state ?? body.state;
+      return state ? { c, fig: await fetchReaProfile(firecrawl, { suburb: c.suburb, state, postcode: c.postcode }) } : null;
+    }));
+    for (const f of found) if (f?.fig) profiles.set(suburbSlug(f.c.suburb), f.fig);
+    if (profiles.size) {
+      userPrompt +=
+        `\n\n=== REALESTATE.COM.AU SUBURB PROFILE FIGURES (authoritative — use exactly) ===\n` +
+        `Read from each suburb's realestate.com.au suburb-profile page ("Median price snapshot"). Report these ` +
+        `exact medians, periods and 12-month growth. IGNORE the "market insights" median on realestate.com.au ` +
+        `for-sale search pages — it is a different calculation.\n` +
+        confirmedSuburbs
+          .map(c => ({ c, f: profiles.get(suburbSlug(c.suburb)) }))
+          .filter((x): x is { c: typeof x.c; f: ReaProfileFigures } => Boolean(x.f))
+          .map(({ c, f }) =>
+            `- ${c.suburb}: house ${f.medianHousePrice ?? 'n/a'} (${f.housePeriod ?? 'period n/a'}, 12-month growth ` +
+            `${f.houseGrowth12mPct ?? 'n/a'}%); unit ${f.medianUnitPrice ?? 'n/a'} (${f.unitPeriod ?? 'period n/a'}) — ${f.url}`)
+          .join('\n') +
+        `\n=== END SUBURB PROFILE FIGURES ===`;
+    }
+  }
 
   // Cache miss: perform the (paid) grounding lookups, once.
   let cotalityNote: { used: boolean; url?: string; reason?: string } = { used: false };
@@ -560,7 +634,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // shared query can only return a handful of URLs total for the whole set, so
   // most suburbs never got a source page before — only the ones that query
   // happened to surface did. Capped at 6 suburbs (each is 2 Firecrawl queries).
-  const suburbsForQueries = confirmedSuburbs.slice(0, 6);
+  // Suburbs whose profile was read need no search; only the rest fall back to it.
+  const suburbsForQueries = confirmedSuburbs.filter(c => !profiles.has(suburbSlug(c.suburb))).slice(0, 6);
   const searchQueries = body.mode === 'suburbs'
     ? suburbsForQueries.flatMap(s => {
         const sw = [s.suburb, s.state ?? body.state].filter(Boolean).join(' ');
@@ -669,7 +744,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           `(The model's reply hit its output limit, so the list may be incomplete — rows after the cut were lost.)`;
       }
       if (Array.isArray(payload.units)) payload.units = normalizeUnitRows(payload.units);
-      if (Array.isArray(payload.suburbs)) payload.suburbs = normalizeSuburbRows(payload.suburbs);
+      if (Array.isArray(payload.suburbs) && profiles.size) {
+        payload.suburbs = applyProfileFigures(payload.suburbs, profiles);
+        payload.sources = mergeSources(
+          [...profiles.values()].map(f => ({ title: 'realestate.com.au suburb profile', url: f.url })),
+          payload.sources as AIResearchSource[],
+        );
+      }
+      if (Array.isArray(payload.suburbs)) {
+        payload.suburbs = normalizeSuburbRows(payload.suburbs);
+        // Averages are recomputed from the final rows: the model's own averages
+        // were taken over its figures, which the profile override may change.
+        payload.averages = suburbAveragesOf(payload.suburbs as Array<Record<string, unknown>>);
+      }
 
       // Internal area (and often the listing date) lives on a unit's OWN
       // listing page, not on the per-suburb directory page our searches rank

@@ -248,7 +248,8 @@ function historyNote(s: SuburbRow): string {
     s.medianHousePrice12mAgoDerived && '12m-ago median derived from growth %',
     s.medianHousePrice6mAgoDerived && '6m-ago median derived from growth %',
   ].filter(Boolean);
-  return [s.historySource, ...derived].filter(Boolean).join('; ');
+  const mhp = s.profileUrl ? `MHP/MUP: realestate.com.au suburb profile ${s.profileUrl}` : s.mhpSource;
+  return [mhp, s.historySource, ...derived].filter(Boolean).join('; ');
 }
 
 async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult, sheetName: string) {
@@ -267,7 +268,7 @@ async function buildSuburbsSheet(wb: ExcelJS.Workbook, r: SuburbsResult, sheetNa
 
   const hdr = ws.addRow([
     'Suburb', 'State', 'Postcode', 'Median House', 'MHP 12m ago', '12m growth', 'MHP 6m ago', '6m growth',
-    'Median Unit', 'Median $/m²', 'Dist (km)', 'As of', 'History source',
+    'Median Unit', 'Median $/m²', 'Dist (km)', 'As of', 'Sources',
   ]);
   hdr.eachCell(cell => style(cell, { fill: HEADER_FILL, fontColor: WHITE, bold: true, size: 9 }));
 
