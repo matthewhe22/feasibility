@@ -21,6 +21,7 @@ import { enrichUnitsFromListingPages } from '../_lib/enrichUnits';
 import { scopeCompetitorUnits, soldCutoff } from '../_lib/competitorScope';
 import { verifyCompetitorDistances } from '../_lib/competitorDistance';
 import { fetchReaProfile, type ReaProfileFigures } from '../_lib/reaSuburbProfile';
+import { validateSuburbRows } from '../_lib/suburbValidation';
 import { directoryTargets, fetchDirectoryPages, suburbSlug, type DirectoryPagesContext } from '../_lib/rvDirectories';
 
 /**
@@ -375,32 +376,6 @@ function buildCompetitorsPrompt(req: RVRequest): string {
   ].join('\n');
 }
 
-/**
- * Replace each suburb row's current MHP / MUP, period and 12-month house growth
- * with the figures read off its realestate.com.au suburb-profile page. A prior
- * median the model supplied is cleared so it is re-derived from the profile's
- * growth (normalizeSuburbRows). 6-month figures (Cotality) are left alone.
- * Rows with no profile keep the model's figures, marked as such.
- */
-function applyProfileFigures(rows: unknown[], profiles: Map<string, ReaProfileFigures>): unknown[] {
-  return rows.map(r => {
-    if (!r || typeof r !== 'object') return r;
-    const row = r as Record<string, unknown>;
-    const f = profiles.get(suburbSlug(String(row.suburb ?? '')));
-    if (!f) return { ...row, mhpSource: 'web search (no suburb profile found)' };
-    return {
-      ...row,
-      medianHousePrice: f.medianHousePrice,
-      medianUnitPrice: f.medianUnitPrice ?? row.medianUnitPrice ?? null,
-      asOf: f.housePeriod ?? row.asOf ?? null,
-      houseGrowth12mPct: f.houseGrowth12mPct,
-      medianHousePrice12mAgo: null,
-      mhpSource: 'realestate.com.au suburb profile',
-      profileUrl: f.url,
-    };
-  });
-}
-
 function suburbAveragesOf(rows: Array<Record<string, unknown>>) {
   const mean = (k: string) => {
     const v = rows.map(r => r[k]).filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
@@ -477,7 +452,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     endpoint: 'retirement-village',
     // Bumped when the figures' source changes, so answers built the old way
     // aren't served from cache. v2: MHP/MUP from REA suburb-profile pages.
-    v: 2,
+    // v3: validation report + strict MUP.
+    v: 3,
     body: keyBody,
     provider: head?.provider,
     model: head?.model,
@@ -716,7 +692,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sources: mergeSources([...result.groundingSources, ...searchSources], declared),
         model: p.model,
         provider: result.provider,
-        groundingUsed: result.groundingUsed || searchNote.used || Boolean(directoryCtx),
+        // Live data = anything fetched from the web for THIS request: the
+        // model's own search, injected search results, or pages the server
+        // scraped directly (directory pages, suburb-profile pages). The last
+        // two used to be ignored, so a run whose figures all came from live
+        // profile pages was labelled "No live web search".
+        groundingUsed: result.groundingUsed || searchNote.used || Boolean(directoryCtx) || profiles.size > 0,
+        ...(body.mode === 'suburbs'
+          ? { liveData: { source: 'realestate.com.au suburb profiles', pages: profiles.size, of: confirmedSuburbs.length } }
+          : {}),
         // Raw Gemini-native flag, kept separate from the merged `groundingUsed`
         // above so the UI can tell "Gemini searched live AND Firecrawl was
         // injected" apart from either one alone.
@@ -745,7 +729,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (Array.isArray(payload.units)) payload.units = normalizeUnitRows(payload.units);
       if (Array.isArray(payload.suburbs) && profiles.size) {
-        payload.suburbs = applyProfileFigures(payload.suburbs, profiles);
+        const checked = validateSuburbRows(payload.suburbs, profiles);
+        payload.suburbs = checked.rows;
+        payload.validation = checked.validation;
         payload.sources = mergeSources(
           [...profiles.values()].map(f => ({ title: 'realestate.com.au suburb profile', url: f.url })),
           payload.sources as AIResearchSource[],
